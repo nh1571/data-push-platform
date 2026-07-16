@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.router import api_router
 from app.config import settings
+from app.plugins.channel import register_builtin_channels
+from app.plugins.datasource import register_builtin_datasources
+from app.plugins.registry import plugin_registry
 
 app = FastAPI(title="Data Push Platform", version="0.1.0")
 
@@ -12,6 +16,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Built-in plugins (idempotent re-register is fine for the process-wide registry)
+register_builtin_datasources(plugin_registry)
+register_builtin_channels(plugin_registry)
+
+app.include_router(api_router)
 
 
 @app.get("/health")
