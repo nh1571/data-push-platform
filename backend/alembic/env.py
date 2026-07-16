@@ -17,8 +17,9 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import models here once they exist so autogenerate can detect them.
-# from app.models import ...  # noqa: F401
+# Import all models so autogenerate can detect table metadata.
+import app.db.models  # noqa: F401
+
 target_metadata = Base.metadata
 
 
