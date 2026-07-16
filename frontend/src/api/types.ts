@@ -321,6 +321,19 @@ export interface StudioTemplate {
   id: string
   name: string
   artboard: ArtboardDoc
+  description?: string | null
+  scene_id?: string | null
+  is_system?: boolean
+  enabled?: boolean
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface StudioTemplateCreate {
+  name: string
+  description?: string | null
+  scene_id?: string | null
+  artboard: ArtboardDoc
 }
 
 export interface StudioCompileRequest {

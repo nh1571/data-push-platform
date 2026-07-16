@@ -274,6 +274,89 @@ export function appendChild(root: StudioNode, parentId: string, node: StudioNode
   }
 }
 
+/** Deep-clone a node tree with new ids (for duplicate). */
+export function cloneNode(node: StudioNode): StudioNode {
+  return {
+    ...node,
+    id: nid(),
+    props: { ...node.props },
+    binding: { ...node.binding },
+    children: (node.children || []).map(cloneNode),
+  }
+}
+
+export function detachNode(
+  root: StudioNode,
+  id: string,
+): { root: StudioNode; node: StudioNode | null } {
+  if (root.id === id) return { root, node: null }
+  const children = root.children || []
+  const idx = children.findIndex((c) => c.id === id)
+  if (idx >= 0) {
+    const node = children[idx]!
+    return {
+      root: { ...root, children: [...children.slice(0, idx), ...children.slice(idx + 1)] },
+      node,
+    }
+  }
+  let found: StudioNode | null = null
+  const nextChildren = children.map((ch) => {
+    if (found) return ch
+    const res = detachNode(ch, id)
+    if (res.node) {
+      found = res.node
+      return res.root
+    }
+    return ch
+  })
+  return { root: { ...root, children: nextChildren }, node: found }
+}
+
+/**
+ * Move node to a new parent at index.
+ * parentId = 'root' for top-level. Refuses moving a node into its own descendant.
+ */
+export function moveNodeTo(
+  root: StudioNode,
+  nodeId: string,
+  parentId: string,
+  index: number,
+): StudioNode {
+  if (nodeId === 'root' || nodeId === parentId) return root
+  // prevent drop into self/descendant
+  const moving = findNode(root, nodeId)
+  if (!moving) return root
+  if (parentId !== 'root' && findNode(moving, parentId)) return root
+
+  const { root: without, node } = detachNode(root, nodeId)
+  if (!node) return root
+
+  const insert = (r: StudioNode): StudioNode => {
+    if (r.id === parentId) {
+      const kids = [...(r.children || [])]
+      const i = Math.max(0, Math.min(index, kids.length))
+      kids.splice(i, 0, node)
+      return { ...r, children: kids }
+    }
+    return { ...r, children: (r.children || []).map(insert) }
+  }
+  return insert(without)
+}
+
+export function parentAndIndex(
+  root: StudioNode,
+  id: string,
+): { parentId: string; index: number } | null {
+  const kids = root.children || []
+  const idx = kids.findIndex((c) => c.id === id)
+  if (idx >= 0) return { parentId: root.id, index: idx }
+  for (const ch of kids) {
+    const found = parentAndIndex(ch, id)
+    if (found) return found
+  }
+  return null
+}
+
 export function flattenOutline(
   node: StudioNode,
   depth = 0,

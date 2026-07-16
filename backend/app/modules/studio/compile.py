@@ -195,8 +195,62 @@ def _get_dataset(
     return None
 
 
-def _visible(node: dict[str, Any]) -> bool:
-    return node.get("visible", True) is not False
+def _eval_visible_when(expr: str, data_ctx: dict[str, QueryResult], binding: dict[str, Any]) -> bool:
+    """Safe subset of visibility conditions.
+
+    Supported::
+        always / true / ""
+        never / false
+        row_count>0  row_count==0  row_count>=N  row_count<=N  row_count!=N
+        empty / not_empty  (alias of row_count)
+    Evaluated against the node's bound dataset (default main).
+    """
+    raw = (expr or "").strip().lower().replace(" ", "")
+    if raw in ("", "always", "true", "1"):
+        return True
+    if raw in ("never", "false", "0", "hidden"):
+        return False
+
+    result = _get_dataset(data_ctx, binding)
+    row_count = len(result.rows) if result and result.rows is not None else 0
+
+    if raw in ("empty", "row_count==0", "row_count=0"):
+        return row_count == 0
+    if raw in ("not_empty", "row_count>0", "has_rows"):
+        return row_count > 0
+
+    m = re.match(r"row_count(>=|<=|==|=|!=|>|<)(\d+)", raw)
+    if m:
+        op, num_s = m.group(1), m.group(2)
+        n = int(num_s)
+        if op in ("==", "="):
+            return row_count == n
+        if op == "!=":
+            return row_count != n
+        if op == ">":
+            return row_count > n
+        if op == "<":
+            return row_count < n
+        if op == ">=":
+            return row_count >= n
+        if op == "<=":
+            return row_count <= n
+    # Unknown expression → show (fail open for designers)
+    return True
+
+
+def _visible(node: dict[str, Any], data_ctx: dict[str, QueryResult] | None = None) -> bool:
+    if node.get("visible", True) is False:
+        return False
+    props = dict(node.get("props") or {})
+    binding = dict(node.get("binding") or {})
+    # Prefer props.visible_when, then top-level visible_when
+    expr = props.get("visible_when")
+    if expr is None:
+        expr = node.get("visible_when")
+    if expr is None or expr == "":
+        return True
+    return _eval_visible_when(str(expr), data_ctx or {}, binding)
 
 
 def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
@@ -592,7 +646,7 @@ def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
 
 
 def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    if not _visible(node):
+    if not _visible(node, data_ctx):
         return ""
     ntype = str(node.get("type") or "")
     if ntype == "Container":
@@ -623,7 +677,7 @@ def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
 
 
 def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str]:
-    if not _visible(node):
+    if not _visible(node, data_ctx):
         return []
     ntype = str(node.get("type") or "")
     if ntype == "Container":

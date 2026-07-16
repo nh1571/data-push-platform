@@ -4,7 +4,9 @@
  */
 import {
   ArrowLeftOutlined,
+  CopyOutlined,
   DeleteOutlined,
+  HolderOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   SaveOutlined,
@@ -15,8 +17,10 @@ import {
   Button,
   Card,
   ColorPicker,
+  Drawer,
   Input,
   List,
+  Modal,
   Radio,
   Select,
   Space,
@@ -31,20 +35,24 @@ import type { Color } from 'antd/es/color-picker'
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
+  createStudioTemplate,
+  deleteStudioTemplate,
   getPushJob,
   listChannels,
   listDataSources,
+  listStudioTemplates,
   queryPreview,
   studioCompile,
   studioSaveJob,
   studioTestPush,
 } from '../../api'
 import { getErrorMessage } from '../../api/client'
-import type { ArtboardDoc, Channel, DataSource, StudioNode } from '../../api/types'
+import type { ArtboardDoc, Channel, DataSource, StudioNode, StudioTemplate } from '../../api/types'
 import {
   appendChild,
   applyColumnToNode,
   bindingHint,
+  cloneNode,
   defaultAlertArtboard,
   defaultDailyArtboard,
   emptyArtboard,
@@ -52,8 +60,10 @@ import {
   extractArtboardFromJob,
   findNode,
   flattenOutline,
+  moveNodeTo,
   moveSibling,
   newComponent,
+  parentAndIndex,
   removeNode,
   syncMainDataset,
   TABLE_STYLES,
@@ -108,6 +118,11 @@ export function EditorPage() {
   const [compiling, setCompiling] = useState(false)
   const [saving, setSaving] = useState(false)
   const [pushing, setPushing] = useState(false)
+  const [tplOpen, setTplOpen] = useState(false)
+  const [templates, setTemplates] = useState<StudioTemplate[]>([])
+  const [tplLoading, setTplLoading] = useState(false)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<string | null>(null)
 
   const tree = artboard.tree
   const outline = useMemo(() => (tree ? flattenOutline(tree) : []), [tree])
@@ -400,6 +415,116 @@ export function EditorPage() {
     }))
   }
 
+  const loadTemplates = async () => {
+    setTplLoading(true)
+    try {
+      setTemplates(await listStudioTemplates())
+    } catch (err) {
+      message.error(getErrorMessage(err))
+    } finally {
+      setTplLoading(false)
+    }
+  }
+
+  const openTemplateLibrary = () => {
+    setTplOpen(true)
+    void loadTemplates()
+  }
+
+  const applyLibraryTemplate = (tpl: StudioTemplate) => {
+    const board = tpl.artboard || emptyArtboard()
+    const next = dataSourceId
+      ? syncMainDataset(board, dataSourceId, board.datasets?.[0]?.sql || sql)
+      : board
+    if (board.datasets?.[0]?.sql) setSql(String(board.datasets[0].sql))
+    setArtboard(next)
+    setSelectedId(null)
+    setTplOpen(false)
+    message.success(`已应用模板：${tpl.name}`)
+  }
+
+  const saveAsTemplate = () => {
+    Modal.confirm({
+      title: '保存当前画板为模板',
+      content: (
+        <Input
+          id="tpl-name-input"
+          placeholder="模板名称"
+          defaultValue={name || '我的模板'}
+        />
+      ),
+      onOk: async () => {
+        const el = document.getElementById('tpl-name-input') as HTMLInputElement | null
+        const tplName = (el?.value || name || '我的模板').trim()
+        try {
+          await createStudioTemplate({
+            name: tplName,
+            description: '用户保存的画板模板',
+            artboard: buildDoc(),
+          })
+          message.success('模板已入库')
+          void loadTemplates()
+        } catch (err) {
+          message.error(getErrorMessage(err))
+          throw err
+        }
+      },
+    })
+  }
+
+  const onDragStartNode = (id: string) => {
+    setDragId(id)
+  }
+
+  const onDropOnNode = (targetId: string, asChild: boolean) => {
+    if (!tree || !dragId || dragId === targetId) {
+      setDragId(null)
+      setDropHint(null)
+      return
+    }
+    if (asChild) {
+      // drop into container (or treat non-container as insert after under same parent)
+      const target = findNode(tree, targetId)
+      if (target?.type === 'Container' || targetId === 'root') {
+        const kids = target?.children?.length ?? tree.children?.length ?? 0
+        setTree(moveNodeTo(tree, dragId, targetId === 'root' ? 'root' : targetId, kids))
+        message.success('已移入容器')
+      } else {
+        const pos = parentAndIndex(tree, targetId)
+        if (pos) {
+          setTree(moveNodeTo(tree, dragId, pos.parentId, pos.index + 1))
+          message.success('已调整顺序')
+        }
+      }
+    } else {
+      const pos = parentAndIndex(tree, targetId)
+      if (pos) {
+        setTree(moveNodeTo(tree, dragId, pos.parentId, pos.index))
+        message.success('已调整顺序')
+      }
+    }
+    setDragId(null)
+    setDropHint(null)
+  }
+
+  const duplicateSelected = () => {
+    if (!tree || !selectedId || !selected) return
+    const copy = cloneNode(selected)
+    const insertAfter = (r: StudioNode): StudioNode => {
+      const kids = r.children || []
+      const idx = kids.findIndex((c) => c.id === selectedId)
+      if (idx >= 0) {
+        const nk = [...kids]
+        nk.splice(idx + 1, 0, copy)
+        return { ...r, children: nk }
+      }
+      return { ...r, children: kids.map(insertAfter) }
+    }
+    setTree(insertAfter(tree))
+    setSelectedId(copy.id)
+    message.success('已复制组件')
+  }
+
   const tableData = useMemo(
     () =>
       previewRows.map((row, rowIdx) => {
@@ -441,6 +566,7 @@ export function EditorPage() {
             <Tag color="blue">Flow 画板</Tag>
           </Space>
           <Space wrap>
+            <Button onClick={openTemplateLibrary}>模板库</Button>
             <Button onClick={() => applyTemplate('daily')}>日报</Button>
             <Button onClick={() => applyTemplate('alert')}>告警</Button>
             <Button onClick={() => applyTemplate('blank')}>空白</Button>
@@ -506,8 +632,13 @@ export function EditorPage() {
             ))}
           </div>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            画板结构
+            画板结构（拖动手柄排序 / 拖到容器上移入）
           </Typography.Text>
+          {dropHint ? (
+            <Typography.Text type="warning" style={{ fontSize: 11, display: 'block' }}>
+              {dropHint}
+            </Typography.Text>
+          ) : null}
           <List
             size="small"
             style={{ marginTop: 8 }}
@@ -515,22 +646,77 @@ export function EditorPage() {
             locale={{ emptyText: '暂无组件，请从上方添加或套用模板' }}
             renderItem={(item) => (
               <List.Item
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  onDragStartNode(item.id)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDropHint(
+                    item.type === 'Container'
+                      ? `放到「${item.label}」内`
+                      : `插到「${item.label}」前`,
+                  )
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  onDropOnNode(item.id, item.type === 'Container')
+                }}
+                onDragEnd={() => {
+                  setDragId(null)
+                  setDropHint(null)
+                }}
                 style={{
                   padding: '6px 8px',
-                  cursor: 'pointer',
-                  background: selectedId === item.id ? '#e6f4ff' : undefined,
+                  cursor: 'grab',
+                  background:
+                    selectedId === item.id
+                      ? '#e6f4ff'
+                      : dragId === item.id
+                        ? '#fff7e6'
+                        : undefined,
                   borderRadius: 4,
                   paddingLeft: 8 + item.depth * 12,
+                  opacity: dragId === item.id ? 0.6 : 1,
+                  border:
+                    dropHint && dragId
+                      ? '1px dashed transparent'
+                      : undefined,
                 }}
                 onClick={() => setSelectedId(item.id)}
               >
                 <Space size={4}>
+                  <HolderOutlined style={{ color: '#999' }} />
                   <Tag style={{ margin: 0 }}>{item.type}</Tag>
                   <span style={{ fontSize: 12 }}>{item.label}</span>
                 </Space>
               </List.Item>
             )}
           />
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (tree && dragId) {
+                setTree(moveNodeTo(tree, dragId, 'root', tree.children?.length || 0))
+                setDragId(null)
+                setDropHint(null)
+                message.success('已移到画板末尾')
+              }
+            }}
+            style={{
+              marginTop: 8,
+              padding: 8,
+              border: '1px dashed #d9d9d9',
+              borderRadius: 4,
+              fontSize: 11,
+              color: '#999',
+              textAlign: 'center',
+            }}
+          >
+            拖到此处 → 画板顶层末尾
+          </div>
         </div>
 
         {/* Center: artboard canvas representation */}
@@ -868,6 +1054,7 @@ export function EditorPage() {
                     datasetOptions={datasetOptions}
                     onChange={(patch) => setTree(updateNode(tree, selectedId, patch))}
                     onMove={(dir) => setTree(moveSibling(tree, selectedId, dir))}
+                    onDuplicate={duplicateSelected}
                     onDelete={() => {
                       setTree(removeNode(tree, selectedId))
                       setSelectedId(null)
@@ -921,6 +1108,71 @@ export function EditorPage() {
           />
         </div>
       </div>
+
+      <Drawer
+        title="模板库"
+        open={tplOpen}
+        onClose={() => setTplOpen(false)}
+        width={400}
+        extra={
+          <Button type="primary" size="small" onClick={saveAsTemplate}>
+            保存当前为模板
+          </Button>
+        }
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          系统模板 + 你保存的自定义模板。应用后会替换当前画板结构（数据源保持）。
+        </Typography.Paragraph>
+        <List
+          loading={tplLoading}
+          dataSource={templates}
+          locale={{ emptyText: '暂无模板（迁移/启动后会种子系统模板）' }}
+          renderItem={(tpl) => (
+            <List.Item
+              actions={[
+                <Button
+                  key="use"
+                  type="link"
+                  size="small"
+                  onClick={() => applyLibraryTemplate(tpl)}
+                >
+                  应用
+                </Button>,
+                !tpl.is_system ? (
+                  <Button
+                    key="del"
+                    type="link"
+                    danger
+                    size="small"
+                    onClick={() => {
+                      Modal.confirm({
+                        title: `删除模板「${tpl.name}」？`,
+                        onOk: async () => {
+                          await deleteStudioTemplate(tpl.id)
+                          message.success('已删除')
+                          void loadTemplates()
+                        },
+                      })
+                    }}
+                  >
+                    删除
+                  </Button>
+                ) : null,
+              ].filter(Boolean)}
+            >
+              <List.Item.Meta
+                title={
+                  <Space>
+                    {tpl.name}
+                    {tpl.is_system ? <Tag>系统</Tag> : <Tag color="blue">自定义</Tag>}
+                  </Space>
+                }
+                description={tpl.description || tpl.scene_id || tpl.id.slice(0, 8)}
+              />
+            </List.Item>
+          )}
+        />
+      </Drawer>
     </div>
   )
 }
@@ -1086,6 +1338,7 @@ function ComponentProps({
   datasetOptions,
   onChange,
   onMove,
+  onDuplicate,
   onDelete,
 }: {
   node: StudioNode
@@ -1093,11 +1346,13 @@ function ComponentProps({
   datasetOptions: { value: string; label: string }[]
   onChange: (patch: Partial<StudioNode>) => void
   onMove: (dir: -1 | 1) => void
+  onDuplicate: () => void
   onDelete: () => void
 }) {
+  const visibleWhen = String(node.props?.visible_when || 'always')
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      <Space>
+      <Space wrap>
         <Tag>{node.type}</Tag>
         <Button size="small" onClick={() => onMove(-1)}>
           上移
@@ -1105,18 +1360,39 @@ function ComponentProps({
         <Button size="small" onClick={() => onMove(1)}>
           下移
         </Button>
+        <Button size="small" icon={<CopyOutlined />} onClick={onDuplicate}>
+          复制
+        </Button>
         <Button size="small" danger icon={<DeleteOutlined />} onClick={onDelete}>
           删除
         </Button>
       </Space>
       <div>
-        <Typography.Text type="secondary">显示</Typography.Text>
+        <Typography.Text type="secondary">显示开关</Typography.Text>
         <div>
           <Switch
             checked={node.visible !== false}
             onChange={(v) => onChange({ visible: v })}
           />
         </div>
+      </div>
+      <div>
+        <Typography.Text type="secondary">条件显隐（编译时按绑定数据集行数）</Typography.Text>
+        <Select
+          style={{ width: '100%', marginTop: 4 }}
+          value={visibleWhen || 'always'}
+          onChange={(v) =>
+            onChange({
+              props: { ...node.props, visible_when: v === 'always' ? '' : v },
+            })
+          }
+          options={[
+            { value: 'always', label: '始终显示' },
+            { value: 'row_count>0', label: '有数据时显示' },
+            { value: 'row_count==0', label: '无数据时显示' },
+            { value: 'never', label: '始终隐藏' },
+          ]}
+        />
       </div>
       <Alert
         type="success"

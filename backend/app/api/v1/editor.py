@@ -23,17 +23,15 @@ from app.modules.editor.schemas import (
     StudioCompileRequest,
     StudioCompileResponse,
     StudioSaveJobRequest,
+    StudioTemplateCreateRequest,
     StudioTemplateResponse,
+    StudioTemplateUpdateRequest,
     StudioTestPushRequest,
     TestPushRequest,
     TestPushResponse,
 )
 from app.modules.studio import service as studio_service
-from app.modules.studio.defaults import (
-    default_alert_artboard,
-    default_daily_artboard,
-    empty_artboard,
-)
+from app.modules.studio import templates_repo
 from app.modules.studio.themes import list_table_styles, list_theme_packs
 
 router = APIRouter()
@@ -128,24 +126,50 @@ def save_job(
 
 
 @router.get("/studio/templates", response_model=list[StudioTemplateResponse])
-def studio_templates() -> list[StudioTemplateResponse]:
-    return [
-        StudioTemplateResponse(
-            id="daily_report",
-            name="院区/业务日报",
-            artboard=default_daily_artboard(),
-        ),
-        StudioTemplateResponse(
-            id="alert",
-            name="指标告警",
-            artboard=default_alert_artboard(),
-        ),
-        StudioTemplateResponse(
-            id="blank",
-            name="空白画板",
-            artboard=empty_artboard(),
-        ),
-    ]
+def studio_templates(db: Session = Depends(get_db)) -> list[StudioTemplateResponse]:
+    rows = templates_repo.list_templates(db)
+    return [StudioTemplateResponse(**templates_repo.to_out(r)) for r in rows]
+
+
+@router.post("/studio/templates", response_model=StudioTemplateResponse)
+def studio_template_create(
+    body: StudioTemplateCreateRequest,
+    db: Session = Depends(get_db),
+) -> StudioTemplateResponse:
+    row = templates_repo.create_template(
+        db,
+        name=body.name,
+        artboard=body.artboard,
+        description=body.description,
+        scene_id=body.scene_id,
+        is_system=False,
+    )
+    return StudioTemplateResponse(**templates_repo.to_out(row))
+
+
+@router.put("/studio/templates/{template_id}", response_model=StudioTemplateResponse)
+def studio_template_update(
+    template_id: UUID,
+    body: StudioTemplateUpdateRequest,
+    db: Session = Depends(get_db),
+) -> StudioTemplateResponse:
+    row = templates_repo.update_template(
+        db,
+        template_id,
+        name=body.name,
+        description=body.description,
+        artboard=body.artboard,
+        enabled=body.enabled,
+    )
+    return StudioTemplateResponse(**templates_repo.to_out(row))
+
+
+@router.delete("/studio/templates/{template_id}", status_code=204)
+def studio_template_delete(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+) -> None:
+    templates_repo.delete_template(db, template_id)
 
 
 @router.get("/studio/meta")
@@ -158,6 +182,12 @@ def studio_meta() -> dict:
             {"id": "bar", "label": "柱状图"},
             {"id": "line", "label": "折线图"},
             {"id": "pie", "label": "饼图"},
+        ],
+        "visible_when_presets": [
+            {"id": "always", "label": "始终显示"},
+            {"id": "row_count>0", "label": "有数据时"},
+            {"id": "row_count==0", "label": "无数据时"},
+            {"id": "never", "label": "始终隐藏"},
         ],
         "components": [
             {"type": "Text", "label": "文本"},

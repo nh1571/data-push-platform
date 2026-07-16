@@ -27,6 +27,7 @@ import type {
   StudioMeta,
   StudioSaveJobRequest,
   StudioTemplate,
+  StudioTemplateCreate,
   StudioTestPushRequest,
   TestConnectionResult,
   TestPushRequest,
@@ -225,6 +226,15 @@ export async function saveJob(body: SaveJobRequest): Promise<PushJob> {
 export async function listStudioTemplates(): Promise<StudioTemplate[]> {
   const { data } = await api.get<StudioTemplate[]>('/v1/editor/studio/templates')
   return data
+}
+
+export async function createStudioTemplate(body: StudioTemplateCreate): Promise<StudioTemplate> {
+  const { data } = await api.post<StudioTemplate>('/v1/editor/studio/templates', body)
+  return data
+}
+
+export async function deleteStudioTemplate(id: string): Promise<void> {
+  await api.delete(`/v1/editor/studio/templates/${id}`)
 }
 
 export async function getStudioMeta(): Promise<StudioMeta> {

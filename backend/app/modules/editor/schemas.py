@@ -171,3 +171,23 @@ class StudioTemplateResponse(BaseModel):
     id: str
     name: str
     artboard: dict[str, Any]
+    description: str | None = None
+    scene_id: str | None = None
+    is_system: bool = False
+    enabled: bool = True
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class StudioTemplateCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
+    scene_id: str | None = Field(default=None, max_length=64)
+    artboard: dict[str, Any] = Field(default_factory=dict)
+
+
+class StudioTemplateUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
+    artboard: dict[str, Any] | None = None
+    enabled: bool | None = None
