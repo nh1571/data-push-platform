@@ -420,10 +420,11 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：无（本轮内容管线增强已提交）
+进行中：无（里程碑 M-Content-v1 可验收）
 阻塞：无
-上次完成：百分比着色成图、SQL Server 插件、编辑器字段插入与取数后自动预览
-建议下一动作：HTML+CSS 成图管线；OpenAPI 真机联调；任务列表最近运行状态
+上次完成：HTML+CSS 成图引擎（playwright/wkhtml/pillow 回退）；任务列表最近运行；百分比着色；SQL Server；单发 OTO
+建议下一动作：用户验收内容工作台；可选 playwright install chromium 提升成图；真机钉钉联调
+
 参考：Obsidian 12–14；技能 continue-data-push-dev
 ```
 

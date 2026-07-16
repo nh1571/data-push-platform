@@ -32,10 +32,12 @@ DEFAULT_DRAFT_RENDER_SPEC: dict[str, Any] = {
         "template_id": "report_v1",
         "include_markdown_table": True,
         "show_table": True,
+        "color_ratios": True,
         "header_text": "",
         "footer_text": "",
         "title": "",
         "theme_color": "#1677ff",
+        "render_engine": "auto",
     }
 }
 
@@ -44,7 +46,11 @@ def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
     return [str(i) for i in ids]
 
 
-def _to_out(row: PushJob) -> PushJobOut:
+def _to_out(
+    row: PushJob,
+    *,
+    last_run: JobRun | None = None,
+) -> PushJobOut:
     raw_ids = row.channel_ids or []
     return PushJobOut(
         id=row.id,
@@ -59,6 +65,9 @@ def _to_out(row: PushJob) -> PushJobOut:
         schedule_enabled=row.schedule_enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        last_run_id=last_run.id if last_run else None,
+        last_run_status=last_run.status if last_run else None,
+        last_run_at=last_run.started_at if last_run else None,
     )
 
 
@@ -94,8 +103,22 @@ def _ensure_channels(db: Session, channel_ids: list[UUID]) -> None:
 
 @router.get("", response_model=list[PushJobOut])
 def list_push_jobs(db: Session = Depends(get_db)) -> list[PushJobOut]:
-    rows = db.scalars(select(PushJob).order_by(PushJob.created_at.desc())).all()
-    return [_to_out(r) for r in rows]
+    rows = list(db.scalars(select(PushJob).order_by(PushJob.created_at.desc())).all())
+    if not rows:
+        return []
+    job_ids = [r.id for r in rows]
+    runs = list(
+        db.scalars(
+            select(JobRun)
+            .where(JobRun.push_job_id.in_(job_ids))
+            .order_by(JobRun.started_at.desc())
+        ).all()
+    )
+    latest: dict[UUID, JobRun] = {}
+    for run in runs:
+        if run.push_job_id not in latest:
+            latest[run.push_job_id] = run
+    return [_to_out(r, last_run=latest.get(r.id)) for r in rows]
 
 
 @router.post("/draft", response_model=PushJobOut, status_code=status.HTTP_201_CREATED)

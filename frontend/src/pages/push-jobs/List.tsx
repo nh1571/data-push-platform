@@ -128,6 +128,34 @@ export function PushJobListPage() {
       render: (ids: string[]) => ids?.length ?? 0,
     },
     {
+      title: '最近运行',
+      key: 'last_run',
+      width: 160,
+      render: (_, row) => {
+        if (!row.last_run_status) return <Tag>未运行</Tag>
+        const color =
+          row.last_run_status === 'succeeded'
+            ? 'success'
+            : row.last_run_status === 'failed'
+              ? 'error'
+              : row.last_run_status === 'partial'
+                ? 'warning'
+                : row.last_run_status === 'running'
+                  ? 'processing'
+                  : 'default'
+        return (
+          <Space size={4} direction="vertical">
+            <Tag color={color}>{row.last_run_status}</Tag>
+            {row.last_run_id ? (
+              <Link to={`/job-runs/${row.last_run_id}`} style={{ fontSize: 12 }}>
+                查看
+              </Link>
+            ) : null}
+          </Space>
+        )
+      },
+    },
+    {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 180,

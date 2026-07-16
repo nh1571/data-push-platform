@@ -66,6 +66,9 @@ export interface PushJob {
   schedule_enabled: boolean
   created_at: string
   updated_at: string
+  last_run_id?: string | null
+  last_run_status?: string | null
+  last_run_at?: string | null
 }
 
 export interface PushJobCreate {

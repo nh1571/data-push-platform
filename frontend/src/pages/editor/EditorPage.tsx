@@ -634,6 +634,10 @@ export function EditorPage() {
                   <Typography.Text>百分比着色</Typography.Text>
                   <Switch checked={colorRatios} onChange={setColorRatios} disabled={loading} />
                 </Space>
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+                  成图优先 HTML+CSS 截图（安装 playwright 更清晰）；失败时自动回退 Pillow 模板。
+                  百分比列（如 12%）会按旧系统规则红绿着色。
+                </Typography.Paragraph>
               </>
             ) : (
               <>

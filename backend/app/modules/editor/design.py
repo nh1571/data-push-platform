@@ -175,7 +175,13 @@ def _build_image_message(
 ) -> Message:
     title = design.get("title") or design.get("header_text") or "数据推送"
     title_resolved = substitute_first_row(str(title), result) if title else "数据推送"
-    png, path = render_and_save_template(result, design, filename="push_template.png")
+    # Prefer HTML+CSS screenshot (legacy-style tables); falls back to Pillow.
+    try:
+        from app.modules.editor.html_table import render_and_save_html
+
+        png, path = render_and_save_html(result, design, filename="push_template.png")
+    except Exception:
+        png, path = render_and_save_template(result, design, filename="push_template.png")
     del png  # saved to path; channel plugins read from filesystem
     parts: list[MessagePart] = [
         MessagePart(

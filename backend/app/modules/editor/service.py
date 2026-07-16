@@ -201,7 +201,14 @@ def image_preview(
     design_dict = {**design_dict, "output_mode": "image"}
     if not design_dict.get("template_id"):
         design_dict["template_id"] = "report_v1"
-    png, path = render_and_save_template(result, design_dict, filename="preview.png")
+    try:
+        from app.modules.editor.html_table import render_and_save_html
+
+        png, path = render_and_save_html(result, design_dict, filename="preview.png")
+    except Exception:
+        from app.modules.editor.templates import render_and_save_template
+
+        png, path = render_and_save_template(result, design_dict, filename="preview.png")
     b64 = base64.b64encode(png).decode("ascii")
     data_url = f"data:image/png;base64,{b64}"
     return ImagePreviewResponse(image_base64=data_url, path=path, content_type="image/png")

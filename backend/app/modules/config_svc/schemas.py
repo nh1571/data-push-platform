@@ -130,3 +130,7 @@ class PushJobOut(BaseModel):
     schedule_enabled: bool
     created_at: datetime
     updated_at: datetime
+    # Optional enrichment on list endpoint
+    last_run_id: UUID | None = None
+    last_run_status: str | None = None
+    last_run_at: datetime | None = None
