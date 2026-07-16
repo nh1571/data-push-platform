@@ -20,9 +20,16 @@ from app.modules.editor.schemas import (
     QueryPreviewResponse,
     SaveJobRequest,
     SaveJobResponse,
+    StudioCompileRequest,
+    StudioCompileResponse,
+    StudioSaveJobRequest,
+    StudioTemplateResponse,
+    StudioTestPushRequest,
     TestPushRequest,
     TestPushResponse,
 )
+from app.modules.studio import service as studio_service
+from app.modules.studio.defaults import default_daily_artboard, empty_artboard
 
 router = APIRouter()
 
@@ -113,3 +120,74 @@ def save_job(
 ) -> PushJobOut:
     row = editor_service.save_job(db, body)
     return _job_to_out(row)
+
+
+@router.get("/studio/templates", response_model=list[StudioTemplateResponse])
+def studio_templates() -> list[StudioTemplateResponse]:
+    return [
+        StudioTemplateResponse(
+            id="daily_report",
+            name="院区/业务日报",
+            artboard=default_daily_artboard(),
+        ),
+        StudioTemplateResponse(
+            id="blank",
+            name="空白画板",
+            artboard=empty_artboard(),
+        ),
+    ]
+
+
+@router.post("/studio/compile", response_model=StudioCompileResponse)
+def studio_compile(
+    body: StudioCompileRequest,
+    db: Session = Depends(get_db),
+) -> StudioCompileResponse:
+    data = studio_service.studio_compile(
+        db,
+        artboard=body.artboard,
+        data_source_id=body.data_source_id,
+        sql=body.sql,
+        params=body.params,
+        max_rows=body.max_rows,
+        want_image=body.want_image,
+    )
+    return StudioCompileResponse(**data)
+
+
+@router.post("/studio/save-job", response_model=SaveJobResponse)
+def studio_save_job(
+    body: StudioSaveJobRequest,
+    db: Session = Depends(get_db),
+) -> PushJobOut:
+    row = studio_service.save_job_with_artboard(
+        db,
+        job_id=body.id,
+        name=body.name,
+        data_source_id=body.data_source_id,
+        sql=body.query_sql,
+        artboard=body.artboard,
+        channel_ids=body.channel_ids,
+        skip_if_empty=body.skip_if_empty,
+        enabled=body.enabled,
+        schedule_cron=body.schedule_cron,
+        schedule_enabled=body.schedule_enabled,
+    )
+    return _job_to_out(row)
+
+
+@router.post("/studio/test-push")
+def studio_test_push(
+    body: StudioTestPushRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    return studio_service.studio_test_push(
+        db,
+        artboard=body.artboard,
+        data_source_id=body.data_source_id,
+        sql=body.sql,
+        channel_ids=body.channel_ids,
+        params=body.params,
+        max_rows=body.max_rows,
+        push_job_id=body.push_job_id,
+    )

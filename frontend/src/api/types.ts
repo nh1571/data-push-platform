@@ -263,3 +263,86 @@ export interface SaveJobRequest {
   schedule_enabled?: boolean
   enabled?: boolean
 }
+
+// ---------------------------------------------------------------------------
+// Studio artboard
+// ---------------------------------------------------------------------------
+
+export type StudioComponentType = 'Container' | 'Text' | 'Kpi' | 'Table' | 'Divider'
+
+export interface StudioNode {
+  id: string
+  type: StudioComponentType | string
+  props?: Record<string, unknown>
+  binding?: Record<string, unknown>
+  visible?: boolean
+  children?: StudioNode[]
+}
+
+export interface StudioDataset {
+  id: string
+  name?: string
+  data_source_id?: string | null
+  sql?: string
+}
+
+export interface ArtboardDoc {
+  version?: number
+  kind?: string
+  scene_id?: string
+  artboard?: {
+    width?: number
+    height?: number | null
+    theme?: { color?: string; table_style?: string }
+    layout_default?: string
+  }
+  datasets?: StudioDataset[]
+  tree?: StudioNode
+  compose?: { mode?: string; markdown_caption?: boolean }
+}
+
+export interface StudioTemplate {
+  id: string
+  name: string
+  artboard: ArtboardDoc
+}
+
+export interface StudioCompileRequest {
+  artboard: ArtboardDoc
+  data_source_id?: string | null
+  sql?: string | null
+  max_rows?: number
+  want_image?: boolean
+}
+
+export interface StudioCompileResponse {
+  html: string
+  markdown_text: string
+  image_base64?: string | null
+  image_path?: string | null
+  row_count: number
+  parts: MessagePartPreview[]
+  artboard: ArtboardDoc
+}
+
+export interface StudioSaveJobRequest {
+  id?: string | null
+  name: string
+  data_source_id: string
+  query_sql: string
+  artboard: ArtboardDoc
+  channel_ids: string[]
+  skip_if_empty?: boolean
+  enabled?: boolean
+  schedule_cron?: string | null
+  schedule_enabled?: boolean
+}
+
+export interface StudioTestPushRequest {
+  artboard: ArtboardDoc
+  data_source_id: string
+  sql: string
+  channel_ids: string[]
+  push_job_id?: string | null
+  max_rows?: number
+}

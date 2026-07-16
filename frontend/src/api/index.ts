@@ -22,6 +22,11 @@ import type {
   QueryPreviewRequest,
   QueryPreviewResponse,
   SaveJobRequest,
+  StudioCompileRequest,
+  StudioCompileResponse,
+  StudioSaveJobRequest,
+  StudioTemplate,
+  StudioTestPushRequest,
   TestConnectionResult,
   TestPushRequest,
   TestPushResponse,
@@ -209,5 +214,29 @@ export async function testPush(body: TestPushRequest): Promise<TestPushResponse>
 
 export async function saveJob(body: SaveJobRequest): Promise<PushJob> {
   const { data } = await api.post<PushJob>('/v1/editor/save-job', body)
+  return data
+}
+
+// ---------------------------------------------------------------------------
+// Studio
+// ---------------------------------------------------------------------------
+
+export async function listStudioTemplates(): Promise<StudioTemplate[]> {
+  const { data } = await api.get<StudioTemplate[]>('/v1/editor/studio/templates')
+  return data
+}
+
+export async function studioCompile(body: StudioCompileRequest): Promise<StudioCompileResponse> {
+  const { data } = await api.post<StudioCompileResponse>('/v1/editor/studio/compile', body)
+  return data
+}
+
+export async function studioSaveJob(body: StudioSaveJobRequest): Promise<PushJob> {
+  const { data } = await api.post<PushJob>('/v1/editor/studio/save-job', body)
+  return data
+}
+
+export async function studioTestPush(body: StudioTestPushRequest): Promise<TestPushResponse> {
+  const { data } = await api.post<TestPushResponse>('/v1/editor/studio/test-push', body)
   return data
 }

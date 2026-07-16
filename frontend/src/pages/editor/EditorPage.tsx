@@ -1,99 +1,71 @@
+/**
+ * Content workbench — component artboard designer (Phase S1).
+ * Layout: component palette | artboard outline + canvas | data/props + preview
+ */
 import {
   ArrowLeftOutlined,
+  DeleteOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   SaveOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import {
   Alert,
   Button,
-  Col,
+  Card,
   ColorPicker,
   Input,
-  message,
+  List,
   Radio,
-  Row,
   Select,
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
+  message,
 } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
 import type { Color } from 'antd/es/color-picker'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   getPushJob,
-  imagePreview,
   listChannels,
   listDataSources,
-  messagePreview,
   queryPreview,
-  saveJob,
-  testPush,
+  studioCompile,
+  studioSaveJob,
+  studioTestPush,
 } from '../../api'
 import { getErrorMessage } from '../../api/client'
-import type { Channel, DataSource, DesignSpec, PushJob } from '../../api/types'
-
-const DEFAULT_DESIGN: DesignSpec = {
-  output_mode: 'image',
-  template_id: 'report_v1',
-  theme_color: '#1677ff',
-  header_text: '',
-  footer_text: '',
-  title: '',
-  include_markdown_table: true,
-  show_table: true,
-  extra_parts: [],
-  kpi_columns: [],
-}
-
-const TEMPLATE_OPTIONS = [
-  { value: 'report_v1', label: '报告模板 (report_v1)' },
-  { value: 'alert_v1', label: '告警模板 (alert_v1)' },
-  { value: 'kpi_v1', label: 'KPI 模板 (kpi_v1)' },
-]
-
-function extractDesign(renderSpec: PushJob['render_spec']): DesignSpec {
-  if (renderSpec && typeof renderSpec === 'object' && !Array.isArray(renderSpec)) {
-    const design = (renderSpec as Record<string, unknown>).design
-    if (design && typeof design === 'object' && !Array.isArray(design)) {
-      const d = design as Record<string, unknown>
-      const mode =
-        typeof d.output_mode === 'string'
-          ? d.output_mode
-          : d.template_id
-            ? 'image'
-            : 'markdown'
-      return {
-        header_text: typeof d.header_text === 'string' ? d.header_text : '',
-        footer_text: typeof d.footer_text === 'string' ? d.footer_text : '',
-        include_markdown_table:
-          typeof d.include_markdown_table === 'boolean' ? d.include_markdown_table : true,
-        show_table: typeof d.show_table === 'boolean' ? d.show_table : true,
-        color_ratios: typeof d.color_ratios === 'boolean' ? d.color_ratios : true,
-        extra_parts: Array.isArray(d.extra_parts)
-          ? d.extra_parts.filter((x): x is string => typeof x === 'string')
-          : [],
-        title: typeof d.title === 'string' ? d.title : '',
-        output_mode: mode,
-        template_id: typeof d.template_id === 'string' ? d.template_id : 'report_v1',
-        theme_color: typeof d.theme_color === 'string' ? d.theme_color : '#1677ff',
-        kpi_columns: Array.isArray(d.kpi_columns)
-          ? d.kpi_columns.filter((x): x is string => typeof x === 'string')
-          : [],
-      }
-    }
-  }
-  return { ...DEFAULT_DESIGN }
-}
+import type { ArtboardDoc, Channel, DataSource, StudioNode } from '../../api/types'
+import {
+  appendChild,
+  defaultDailyArtboard,
+  emptyArtboard,
+  extractArtboardFromJob,
+  findNode,
+  flattenOutline,
+  moveSibling,
+  newComponent,
+  removeNode,
+  updateNode,
+} from './studioUtils'
 
 function colorToHex(color: Color | string): string {
   if (typeof color === 'string') return color
   return color.toHexString()
 }
+
+const PALETTE = [
+  { type: 'Text', label: '文本' },
+  { type: 'Kpi', label: 'KPI 指标' },
+  { type: 'Table', label: '数据表' },
+  { type: 'Container', label: '横向分栏' },
+  { type: 'Divider', label: '分隔线' },
+]
 
 export function EditorPage() {
   const { jobId } = useParams<{ jobId?: string }>()
@@ -105,63 +77,35 @@ export function EditorPage() {
 
   const [name, setName] = useState('')
   const [dataSourceId, setDataSourceId] = useState<string | undefined>()
-  const [sql, setSql] = useState('-- 在编辑器中编写 SQL\nSELECT 1 AS demo')
-  const [headerText, setHeaderText] = useState('')
-  const [footerText, setFooterText] = useState('')
-  const [title, setTitle] = useState('')
-  const [outputMode, setOutputMode] = useState<'image' | 'markdown'>('image')
-  const [templateId, setTemplateId] = useState('report_v1')
-  const [themeColor, setThemeColor] = useState('#1677ff')
-  const [includeMarkdownTable, setIncludeMarkdownTable] = useState(true)
-  const [showTable, setShowTable] = useState(true)
-  const [colorRatios, setColorRatios] = useState(true)
+  const [sql, setSql] = useState('SELECT 1 AS demo')
   const [channelIds, setChannelIds] = useState<string[]>([])
-  const [skipIfEmpty, setSkipIfEmpty] = useState(false)
   const [enabled, setEnabled] = useState(true)
   const [currentJobId, setCurrentJobId] = useState<string | null>(jobId ?? null)
 
+  const [artboard, setArtboard] = useState<ArtboardDoc>(() => defaultDailyArtboard())
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<unknown[][]>([])
-  const [previewRowCount, setPreviewRowCount] = useState(0)
   const [markdownText, setMarkdownText] = useState('')
   const [imageBase64, setImageBase64] = useState('')
+  const [previewHtml, setPreviewHtml] = useState('')
 
   const [querying, setQuerying] = useState(false)
-  const [previewing, setPreviewing] = useState(false)
+  const [compiling, setCompiling] = useState(false)
   const [saving, setSaving] = useState(false)
   const [pushing, setPushing] = useState(false)
 
-  const design = useMemo<DesignSpec>(
-    () => ({
-      output_mode: outputMode,
-      template_id: templateId,
-      theme_color: themeColor,
-      title: title || null,
-      header_text: headerText || null,
-      footer_text: footerText || null,
-      include_markdown_table: includeMarkdownTable,
-      show_table: showTable,
-      color_ratios: colorRatios,
-      extra_parts: [],
-      kpi_columns: [],
-    }),
-    [
-      outputMode,
-      templateId,
-      themeColor,
-      title,
-      headerText,
-      footerText,
-      includeMarkdownTable,
-      showTable,
-      colorRatios,
-    ],
+  const tree = artboard.tree
+  const outline = useMemo(() => (tree ? flattenOutline(tree) : []), [tree])
+  const selected = useMemo(
+    () => (selectedId && tree ? findNode(tree, selectedId) : null),
+    [selectedId, tree],
   )
+  const themeColor = artboard.artboard?.theme?.color || '#1677ff'
 
-  const insertColumnToken = (col: string) => {
-    const token = `{{${col}}}`
-    setHeaderText((prev) => (prev ? `${prev} ${token}` : token))
-    message.success(`已插入 ${token} 到副标题`)
+  const setTree = (next: StudioNode) => {
+    setArtboard((prev) => ({ ...prev, tree: next }))
   }
 
   const loadMeta = useCallback(async () => {
@@ -175,29 +119,20 @@ export function EditorPage() {
     loadMeta()
       .then(async () => {
         if (!jobId) {
-          // Editor-first: blank workspace; save will create a task
+          const board = defaultDailyArtboard()
+          setArtboard(board)
           setCurrentJobId(null)
           setName('')
           setDataSourceId(undefined)
-          setSql('-- 编写 SQL 后点「运行取数」\nSELECT 1 AS demo')
+          setSql(board.datasets?.[0]?.sql || 'SELECT 1 AS demo')
           setChannelIds([])
-          setSkipIfEmpty(false)
           setEnabled(true)
-          const d = { ...DEFAULT_DESIGN }
-          setHeaderText(d.header_text ?? '')
-          setFooterText(d.footer_text ?? '')
-          setTitle(d.title ?? '')
-          setIncludeMarkdownTable(true)
-          setShowTable(true)
-          setColorRatios(true)
-          setOutputMode('image')
-          setTemplateId('report_v1')
-          setThemeColor('#1677ff')
+          setSelectedId(null)
           setMarkdownText('')
           setImageBase64('')
+          setPreviewHtml('')
           setPreviewColumns([])
           setPreviewRows([])
-          setPreviewRowCount(0)
           return
         }
         const job = await getPushJob(jobId)
@@ -206,78 +141,44 @@ export function EditorPage() {
         setDataSourceId(job.data_source_id)
         setSql(job.query_sql)
         setChannelIds(job.channel_ids ?? [])
-        setSkipIfEmpty(job.skip_if_empty)
         setEnabled(job.enabled)
-        const d = extractDesign(job.render_spec)
-        setHeaderText(d.header_text ?? '')
-        setFooterText(d.footer_text ?? '')
-        setTitle(d.title ?? '')
-        setIncludeMarkdownTable(d.include_markdown_table ?? true)
-        setShowTable(d.show_table ?? true)
-        setColorRatios(d.color_ratios !== false)
-        setOutputMode(d.output_mode === 'markdown' ? 'markdown' : 'image')
-        setTemplateId(d.template_id || 'report_v1')
-        setThemeColor(d.theme_color || '#1677ff')
+        const extracted = extractArtboardFromJob(job.render_spec)
+        if (extracted) {
+          setArtboard(extracted)
+        } else {
+          const board = defaultDailyArtboard()
+          board.datasets = [
+            {
+              id: 'main',
+              name: '主查询',
+              data_source_id: job.data_source_id,
+              sql: job.query_sql,
+            },
+          ]
+          setArtboard(board)
+        }
+        setSelectedId(null)
         setMarkdownText('')
         setImageBase64('')
+        setPreviewHtml('')
         setPreviewColumns([])
         setPreviewRows([])
-        setPreviewRowCount(0)
       })
       .catch((err) => message.error(getErrorMessage(err)))
       .finally(() => setLoading(false))
   }, [jobId, loadMeta])
 
-
-  const requireBasics = (): boolean => {
+  const onQuery = async () => {
     if (!dataSourceId) {
       message.error('请选择数据源')
-      return false
+      return
     }
-    if (!sql.trim()) {
-      message.error('请输入 SQL')
-      return false
-    }
-    return true
-  }
-
-  const onQueryPreview = async () => {
-    if (!requireBasics()) return
     setQuerying(true)
     try {
-      const res = await queryPreview({
-        data_source_id: dataSourceId!,
-        sql,
-        max_rows: 200,
-      })
+      const res = await queryPreview({ data_source_id: dataSourceId, sql, max_rows: 50 })
       setPreviewColumns(res.columns)
       setPreviewRows(res.rows)
-      setPreviewRowCount(res.row_count)
-      message.success(`取数成功：${res.row_count} 行（预览最多 200）`)
-      // Content pipeline: auto-refresh carrier preview after data load
-      try {
-        if (outputMode === 'image') {
-          const img = await imagePreview({
-            data_source_id: dataSourceId!,
-            sql,
-            design: {
-              ...design,
-              // design state may lag; build inline from latest fields via design memo on next tick
-            },
-            max_rows: 200,
-          })
-          setImageBase64(img.image_base64)
-        }
-        const mdRes = await messagePreview({
-          data_source_id: dataSourceId!,
-          sql,
-          design: { ...design, output_mode: outputMode === 'image' ? 'markdown' : outputMode },
-          max_rows: 200,
-        })
-        setMarkdownText(mdRes.markdown_text)
-      } catch {
-        // preview optional after query
-      }
+      message.success(`取数 ${res.row_count} 行`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -285,67 +186,69 @@ export function EditorPage() {
     }
   }
 
-  const onPreview = async () => {
-    if (!requireBasics()) return
-    setPreviewing(true)
+  const onCompile = async () => {
+    if (!dataSourceId) {
+      message.error('请选择数据源')
+      return
+    }
+    setCompiling(true)
     try {
-      if (outputMode === 'image') {
-        const res = await imagePreview({
-          data_source_id: dataSourceId!,
-          sql,
-          design,
-          max_rows: 200,
-        })
-        setImageBase64(res.image_base64)
-        // Also fetch markdown caption for fallback display
-        const mdRes = await messagePreview({
-          data_source_id: dataSourceId!,
-          sql,
-          design: { ...design, output_mode: 'markdown' },
-          max_rows: 200,
-        })
-        setMarkdownText(mdRes.markdown_text)
-        message.success('图片预览已生成')
-      } else {
-        const res = await messagePreview({
-          data_source_id: dataSourceId!,
-          sql,
-          design,
-          max_rows: 200,
-        })
-        setMarkdownText(res.markdown_text)
-        setImageBase64('')
-        message.success('消息预览已生成')
+      const doc: ArtboardDoc = {
+        ...artboard,
+        datasets: [
+          {
+            id: 'main',
+            name: '主查询',
+            data_source_id: dataSourceId,
+            sql,
+          },
+        ],
       }
+      const res = await studioCompile({
+        artboard: doc,
+        data_source_id: dataSourceId,
+        sql,
+        want_image: true,
+        max_rows: 50,
+      })
+      setMarkdownText(res.markdown_text || '')
+      setImageBase64(res.image_base64 || '')
+      setPreviewHtml(res.html || '')
+      setArtboard(res.artboard || doc)
+      message.success(`编译完成（${res.row_count} 行）`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
-      setPreviewing(false)
+      setCompiling(false)
     }
   }
 
   const onSave = async () => {
     if (!name.trim()) {
-      message.error('请输入任务名称')
+      message.error('请输入推送名称')
       return
     }
-    if (!requireBasics()) return
+    if (!dataSourceId) {
+      message.error('请选择数据源')
+      return
+    }
     setSaving(true)
     try {
-      const saved = await saveJob({
+      const doc: ArtboardDoc = {
+        ...artboard,
+        datasets: [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }],
+      }
+      const saved = await studioSaveJob({
         id: currentJobId,
         name: name.trim(),
-        data_source_id: dataSourceId!,
+        data_source_id: dataSourceId,
         query_sql: sql,
-        design,
+        artboard: doc,
         channel_ids: channelIds,
-        skip_if_empty: skipIfEmpty,
         enabled,
-        schedule_cron: null,
-        schedule_enabled: false,
       })
       setCurrentJobId(saved.id)
-      message.success('保存成功')
+      message.success('已保存为任务')
       if (jobId !== saved.id) {
         navigate(`/editor/${saved.id}`, { replace: true })
       }
@@ -357,33 +260,30 @@ export function EditorPage() {
   }
 
   const onTestPush = async () => {
-    if (!requireBasics()) return
+    if (!dataSourceId) {
+      message.error('请选择数据源')
+      return
+    }
     if (!channelIds.length) {
-      message.error('请至少选择一个通道')
+      message.error('请选择至少一个通道')
       return
     }
     setPushing(true)
     try {
-      const res = await testPush({
-        data_source_id: dataSourceId!,
+      const doc: ArtboardDoc = {
+        ...artboard,
+        datasets: [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }],
+      }
+      const res = await studioTestPush({
+        artboard: doc,
+        data_source_id: dataSourceId,
         sql,
-        design,
         channel_ids: channelIds,
         push_job_id: currentJobId,
-        max_rows: 200,
       })
       if (res.markdown_text) setMarkdownText(res.markdown_text)
-      const okCount = res.deliveries.filter((d) => d.success).length
-      const failCount = res.deliveries.length - okCount
-      if (res.success) {
-        message.success(`试推成功（${okCount} 通道，${res.row_count} 行）`)
-      } else {
-        const errors = res.deliveries
-          .filter((d) => !d.success)
-          .map((d) => d.error || '失败')
-          .join('; ')
-        message.error(`试推部分失败（成功 ${okCount} / 失败 ${failCount}）：${errors}`)
-      }
+      if (res.success) message.success('试推成功')
+      else message.error('试推部分失败，请查看通道配置')
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -391,22 +291,29 @@ export function EditorPage() {
     }
   }
 
-  const tableColumns: ColumnsType<Record<string, unknown>> = useMemo(
-    () =>
-      previewColumns.map((col, colIdx) => ({
-        title: col,
-        dataIndex: col,
-        key: `${col}-${colIdx}`,
-        ellipsis: true,
-        render: (v: unknown) => {
-          if (v === null || v === undefined)
-            return <Typography.Text type="secondary">null</Typography.Text>
-          if (typeof v === 'object') return JSON.stringify(v)
-          return String(v)
-        },
-      })),
-    [previewColumns],
-  )
+  const addComponent = (type: string) => {
+    if (!tree) return
+    const node = newComponent(type)
+    // If selected is Container, add into it; else append to root
+    if (selected && selected.type === 'Container') {
+      setTree(appendChild(tree, selected.id, node))
+    } else {
+      setTree(appendChild(tree, 'root', node))
+    }
+    setSelectedId(node.id)
+  }
+
+  const applyTemplate = (kind: 'daily' | 'blank') => {
+    const board = kind === 'daily' ? defaultDailyArtboard() : emptyArtboard()
+    if (dataSourceId) {
+      board.datasets = [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }]
+    } else {
+      setSql(board.datasets?.[0]?.sql || sql)
+    }
+    setArtboard(board)
+    setSelectedId(null)
+    message.info(kind === 'daily' ? '已应用日报模板' : '已清空为空白画板')
+  }
 
   const tableData = useMemo(
     () =>
@@ -421,15 +328,14 @@ export function EditorPage() {
   )
 
   return (
-    <div style={{ margin: -24 }}>
+    <div style={{ margin: -24, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
+      {/* Top bar */}
       <div
         style={{
-          padding: '12px 16px',
+          padding: '10px 16px',
           borderBottom: '1px solid #f0f0f0',
           background: '#fff',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
+          flexShrink: 0,
         }}
       >
         <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
@@ -438,22 +344,30 @@ export function EditorPage() {
               任务管理
             </Button>
             <Typography.Title level={5} style={{ margin: 0 }}>
-              {currentJobId ? `编辑 · ${name || '…'}` : '内容工作台'}
+              组件画板
             </Typography.Title>
             <Input
-              style={{ width: 240 }}
-              placeholder="推送名称（首次保存时创建任务）"
+              style={{ width: 220 }}
+              placeholder="推送名称"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={loading}
             />
+            <Tag color="blue">Flow 画板</Tag>
           </Space>
-          <Space>
+          <Space wrap>
+            <Button onClick={() => applyTemplate('daily')}>日报模板</Button>
+            <Button onClick={() => applyTemplate('blank')}>空白</Button>
+            <Button icon={<SearchOutlined />} loading={querying} onClick={() => void onQuery()}>
+              取数
+            </Button>
+            <Button loading={compiling} onClick={() => void onCompile()}>
+              编译预览
+            </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
-              disabled={loading}
               onClick={() => void onSave()}
             >
               {currentJobId ? '保存' : '保存为任务'}
@@ -461,7 +375,6 @@ export function EditorPage() {
             <Button
               icon={<PlayCircleOutlined />}
               loading={pushing}
-              disabled={loading}
               onClick={() => void onTestPush()}
             >
               试推
@@ -470,354 +383,572 @@ export function EditorPage() {
         </Space>
       </div>
 
-      <div style={{ padding: 16 }}>
-        {!currentJobId ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="内容优先：可直接取数、设计、预览"
-            description="保存时会创建「推送任务」。任务列表用于调度、启用和查看最近运行；日常改稿请以本页为主。"
-          />
-        ) : null}
-        <Row gutter={16}>
-          <Col xs={24} lg={12}>
-            <Typography.Title level={5} style={{ marginTop: 0 }}>
-              数据
-            </Typography.Title>
-            <Space style={{ marginBottom: 12, width: '100%' }} wrap>
-              <Select
-                style={{ minWidth: 260 }}
-                showSearch
-                optionFilterProp="label"
-                placeholder="选择数据源"
-                value={dataSourceId}
-                disabled={loading}
-                onChange={setDataSourceId}
-                options={sources.map((s) => ({
-                  value: s.id,
-                  label: `${s.name} (${s.type})`,
-                }))}
-              />
-              <Button
-                type="default"
-                icon={<SearchOutlined />}
-                loading={querying}
-                disabled={loading}
-                onClick={() => void onQueryPreview()}
-              >
-                运行取数
-              </Button>
-              <Space>
-                <Typography.Text type="secondary">启用</Typography.Text>
-                <Switch checked={enabled} onChange={setEnabled} disabled={loading} />
-              </Space>
-            </Space>
+      {!currentJobId ? (
+        <Alert
+          type="info"
+          showIcon
+          banner
+          message="组件画板：从左侧添加组件，绑定数据，编译成图/文案，再保存或试推"
+        />
+      ) : null}
 
-            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-              SQL
-            </Typography.Text>
-            <Input.TextArea
-              rows={8}
-              value={sql}
-              onChange={(e) => setSql(e.target.value)}
-              disabled={loading}
-              placeholder="SELECT ..."
+      {/* Three columns */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+        {/* Left: palette + outline */}
+        <div
+          style={{
+            width: 240,
+            borderRight: '1px solid #f0f0f0',
+            background: '#fafafa',
+            overflow: 'auto',
+            padding: 12,
+            flexShrink: 0,
+          }}
+        >
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            组件库
+          </Typography.Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 16px' }}>
+            {PALETTE.map((p) => (
+              <Button
+                key={p.type}
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => addComponent(p.type)}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            画板结构
+          </Typography.Text>
+          <List
+            size="small"
+            style={{ marginTop: 8 }}
+            dataSource={outline}
+            locale={{ emptyText: '暂无组件，请从上方添加或套用模板' }}
+            renderItem={(item) => (
+              <List.Item
+                style={{
+                  padding: '6px 8px',
+                  cursor: 'pointer',
+                  background: selectedId === item.id ? '#e6f4ff' : undefined,
+                  borderRadius: 4,
+                  paddingLeft: 8 + item.depth * 12,
+                }}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <Space size={4}>
+                  <Tag style={{ margin: 0 }}>{item.type}</Tag>
+                  <span style={{ fontSize: 12 }}>{item.label}</span>
+                </Space>
+              </List.Item>
+            )}
+          />
+        </div>
+
+        {/* Center: artboard canvas representation */}
+        <div
+          style={{
+            flex: 1,
+            overflow: 'auto',
+            padding: 16,
+            background: '#e8eaed',
+          }}
+        >
+          <div
+            style={{
+              width: artboard.artboard?.width || 750,
+              maxWidth: '100%',
+              margin: '0 auto',
+              background: '#fff',
+              borderRadius: 8,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              padding: 16,
+              minHeight: 320,
+            }}
+          >
+            <div
               style={{
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                marginBottom: 16,
+                height: 4,
+                background: themeColor,
+                borderRadius: 2,
+                marginBottom: 12,
               }}
             />
-
-            {previewColumns.length > 0 ? (
-              <div style={{ marginBottom: 8 }}>
-                <Typography.Text type="secondary" style={{ marginRight: 8 }}>
-                  插入字段到副标题：
-                </Typography.Text>
-                <Space size={[4, 4]} wrap>
-                  {previewColumns.map((col) => (
-                    <Tag
-                      key={col}
-                      color="blue"
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => insertColumnToken(col)}
-                    >
-                      {`{{${col}}}`}
-                    </Tag>
-                  ))}
-                </Space>
-              </div>
-            ) : null}
-
-            <Typography.Title level={5}>
-              数据表格
-              {previewRowCount > 0 ? (
-                <Typography.Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>
-                  {previewRowCount} 行
-                </Typography.Text>
-              ) : null}
-            </Typography.Title>
-            <Table
-              size="small"
-              rowKey="__key"
-              columns={tableColumns}
-              dataSource={tableData}
-              scroll={{ x: true, y: 320 }}
-              pagination={{ pageSize: 50, size: 'small', showSizeChanger: false }}
-              locale={{ emptyText: '点击「运行取数」预览结果' }}
-            />
-          </Col>
-
-          <Col xs={24} lg={12}>
-            <Typography.Title level={5} style={{ marginTop: 0 }}>
-              输出设计
-            </Typography.Title>
-
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 6 }}>
-                输出方式
+            {(tree?.children || []).length === 0 ? (
+              <Typography.Text type="secondary">
+                空画板 — 点左侧组件添加，或使用「日报模板」
               </Typography.Text>
-              <Radio.Group
-                value={outputMode}
-                disabled={loading}
-                onChange={(e) => setOutputMode(e.target.value)}
-                options={[
-                  { value: 'image', label: '图片模板' },
-                  { value: 'markdown', label: '纯 Markdown' },
-                ]}
-                optionType="button"
-                buttonStyle="solid"
-              />
-            </div>
-
-            {outputMode === 'image' ? (
-              <>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    模板
-                  </Typography.Text>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={templateId}
-                    disabled={loading}
-                    onChange={setTemplateId}
-                    options={TEMPLATE_OPTIONS}
-                  />
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    主题色
-                  </Typography.Text>
-                  <ColorPicker
-                    value={themeColor}
-                    disabled={loading}
-                    onChange={(c) => setThemeColor(colorToHex(c))}
-                    showText
-                  />
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    标题（可用 {'{{列名}}'}）
-                  </Typography.Text>
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    disabled={loading}
-                    placeholder="数据报告 {{name}}"
-                  />
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    副标题 / header_text
-                  </Typography.Text>
-                  <Input.TextArea
-                    rows={2}
-                    value={headerText}
-                    onChange={(e) => setHeaderText(e.target.value)}
-                    disabled={loading}
-                    placeholder="说明文字"
-                  />
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    页脚 footer_text
-                  </Typography.Text>
-                  <Input
-                    value={footerText}
-                    onChange={(e) => setFooterText(e.target.value)}
-                    disabled={loading}
-                    placeholder="数据来源 · 推送平台"
-                  />
-                </div>
-                <Space style={{ marginBottom: 12 }} wrap>
-                  <Typography.Text>显示表格</Typography.Text>
-                  <Switch checked={showTable} onChange={setShowTable} disabled={loading} />
-                  <Typography.Text>百分比着色</Typography.Text>
-                  <Switch checked={colorRatios} onChange={setColorRatios} disabled={loading} />
-                </Space>
-                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
-                  成图优先 HTML+CSS 截图（安装 playwright 更清晰）；失败时自动回退 Pillow 模板。
-                  百分比列（如 12%）会按旧系统规则红绿着色。
-                </Typography.Paragraph>
-              </>
             ) : (
-              <>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    header_text（可用 {'{{列名}}'}）
-                  </Typography.Text>
-                  <Input.TextArea
-                    rows={3}
-                    value={headerText}
-                    onChange={(e) => setHeaderText(e.target.value)}
-                    disabled={loading}
-                    placeholder="说明 {{col_name}}"
-                  />
-                </div>
-                <Space style={{ marginBottom: 12 }}>
-                  <Typography.Text style={{ marginRight: 8 }}>Markdown 表格</Typography.Text>
-                  <Switch
-                    checked={includeMarkdownTable}
-                    onChange={setIncludeMarkdownTable}
-                    disabled={loading}
-                  />
-                </Space>
-                <div style={{ marginBottom: 12 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                    footer_text
-                  </Typography.Text>
-                  <Input.TextArea
-                    rows={2}
-                    value={footerText}
-                    onChange={(e) => setFooterText(e.target.value)}
-                    disabled={loading}
-                    placeholder="结尾"
-                  />
-                </div>
-              </>
+              (tree?.children || []).map((node) => (
+                <ArtboardBlock
+                  key={node.id}
+                  node={node}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                />
+              ))
             )}
+          </div>
+        </div>
 
-            <Button
-              style={{ marginBottom: 12 }}
-              loading={previewing}
-              disabled={loading}
-              onClick={() => void onPreview()}
-            >
-              预览
-            </Button>
-
-            {outputMode === 'image' ? (
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-                  图片预览
-                </Typography.Text>
-                {imageBase64 ? (
-                  <img
-                    src={imageBase64}
-                    alt="preview"
-                    style={{
-                      maxWidth: '100%',
-                      border: '1px solid #f0f0f0',
-                      borderRadius: 6,
-                      background: '#fff',
+        {/* Right: data + props + preview */}
+        <div
+          style={{
+            width: 380,
+            borderLeft: '1px solid #f0f0f0',
+            background: '#fff',
+            overflow: 'auto',
+            padding: 12,
+            flexShrink: 0,
+          }}
+        >
+          <Tabs
+            size="small"
+            items={[
+              {
+                key: 'data',
+                label: '数据',
+                children: (
+                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                    <div>
+                      <Typography.Text type="secondary">数据源</Typography.Text>
+                      <Select
+                        style={{ width: '100%', marginTop: 4 }}
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="选择数据源"
+                        value={dataSourceId}
+                        onChange={setDataSourceId}
+                        options={sources.map((s) => ({
+                          value: s.id,
+                          label: `${s.name} (${s.type})`,
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">SQL</Typography.Text>
+                      <Input.TextArea
+                        style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
+                        rows={6}
+                        value={sql}
+                        onChange={(e) => setSql(e.target.value)}
+                      />
+                    </div>
+                    <Button block loading={querying} onClick={() => void onQuery()}>
+                      运行取数
+                    </Button>
+                    {previewColumns.length > 0 ? (
+                      <>
+                        <div>
+                          <Typography.Text type="secondary">列（点击填入 KPI）</Typography.Text>
+                          <div style={{ marginTop: 6 }}>
+                            {previewColumns.map((c) => (
+                              <Tag
+                                key={c}
+                                style={{ cursor: 'pointer', marginBottom: 4 }}
+                                onClick={() => {
+                                  if (selected?.type === 'Kpi' && tree && selectedId) {
+                                    setTree(
+                                      updateNode(tree, selectedId, {
+                                        binding: {
+                                          ...selected.binding,
+                                          value_column: c,
+                                          label: c,
+                                        },
+                                        props: { ...selected.props, label: c },
+                                      }),
+                                    )
+                                    message.success(`已绑定 ${c}`)
+                                  } else {
+                                    message.info('请先选中 KPI 组件再点列名')
+                                  }
+                                }}
+                              >
+                                {c}
+                              </Tag>
+                            ))}
+                          </div>
+                        </div>
+                        <Table
+                          size="small"
+                          pagination={false}
+                          scroll={{ x: true, y: 160 }}
+                          rowKey="__key"
+                          dataSource={tableData}
+                          columns={previewColumns.map((c) => ({
+                            title: c,
+                            dataIndex: c,
+                            ellipsis: true,
+                            width: 100,
+                            render: (v: unknown) =>
+                              v === null || v === undefined ? '—' : String(v),
+                          }))}
+                        />
+                      </>
+                    ) : null}
+                    <div>
+                      <Typography.Text type="secondary">通道（试推）</Typography.Text>
+                      <Select
+                        mode="multiple"
+                        style={{ width: '100%', marginTop: 4 }}
+                        placeholder="选择通道"
+                        value={channelIds}
+                        onChange={setChannelIds}
+                        options={channels.map((c) => ({
+                          value: c.id,
+                          label: `${c.name} (${c.type})`,
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <Space>
+                        <Typography.Text type="secondary">主题色</Typography.Text>
+                        <ColorPicker
+                          value={themeColor}
+                          onChange={(c) =>
+                            setArtboard((prev) => ({
+                              ...prev,
+                              artboard: {
+                                ...prev.artboard,
+                                theme: {
+                                  ...prev.artboard?.theme,
+                                  color: colorToHex(c),
+                                },
+                              },
+                            }))
+                          }
+                        />
+                        <Switch
+                          checkedChildren="启用"
+                          unCheckedChildren="停用"
+                          checked={enabled}
+                          onChange={setEnabled}
+                        />
+                      </Space>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">导出模式</Typography.Text>
+                      <Radio.Group
+                        style={{ marginTop: 4, display: 'block' }}
+                        value={artboard.compose?.mode || 'image_primary'}
+                        onChange={(e) =>
+                          setArtboard((prev) => ({
+                            ...prev,
+                            compose: { ...prev.compose, mode: e.target.value },
+                          }))
+                        }
+                      >
+                        <Radio.Button value="image_primary">图为主</Radio.Button>
+                        <Radio.Button value="markdown_primary">文为主</Radio.Button>
+                        <Radio.Button value="mixed">混合</Radio.Button>
+                      </Radio.Group>
+                    </div>
+                  </Space>
+                ),
+              },
+              {
+                key: 'props',
+                label: '属性',
+                children: selected && tree && selectedId ? (
+                  <ComponentProps
+                    node={selected}
+                    columns={previewColumns}
+                    onChange={(patch) => setTree(updateNode(tree, selectedId, patch))}
+                    onMove={(dir) => setTree(moveSibling(tree, selectedId, dir))}
+                    onDelete={() => {
+                      setTree(removeNode(tree, selectedId))
+                      setSelectedId(null)
                     }}
                   />
                 ) : (
-                  <div
-                    style={{
-                      padding: 24,
-                      background: '#fafafa',
-                      border: '1px dashed #d9d9d9',
-                      borderRadius: 6,
-                      color: '#999',
-                      textAlign: 'center',
-                    }}
-                  >
-                    点击「预览」生成图片
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-              Markdown {outputMode === 'image' ? '（说明 / 备用）' : ''}
-            </Typography.Text>
-            <pre
-              style={{
-                margin: 0,
-                padding: 12,
-                background: '#fafafa',
-                border: '1px solid #f0f0f0',
-                borderRadius: 6,
-                minHeight: 120,
-                maxHeight: 240,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                fontSize: 13,
-              }}
-            >
-              {markdownText || '点击「预览」生成'}
-            </pre>
-          </Col>
-        </Row>
-
-        <div
-          style={{
-            marginTop: 16,
-            paddingTop: 16,
-            borderTop: '1px solid #f0f0f0',
-          }}
-        >
-          {outputMode === 'image' ? (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginBottom: 12 }}
-              message="图片推送通道提示"
-              description="当前为「图片模板」输出。请选择支持发图的通道：应用机器人·发群 / 单发 (OpenAPI)。Webhook 群机器人通常无法发送真图。"
-            />
-          ) : null}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 16,
-            alignItems: 'center',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
-              投递通道
-              <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                发图请选 OpenAPI 机器人或工作通知
-              </Typography.Text>
-            </Typography.Text>
-            <Select
-              mode="multiple"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择一个或多个通道（可稍后配置）"
-              value={channelIds}
-              disabled={loading}
-              onChange={setChannelIds}
-              options={channels.map((c) => ({
-                value: c.id,
-                label: `${c.name} (${c.type})`,
-              }))}
-            />
-          </div>
-          <Space>
-            <Typography.Text>结果为空时跳过</Typography.Text>
-            <Switch checked={skipIfEmpty} onChange={setSkipIfEmpty} disabled={loading} />
-          </Space>
-        </div>
+                  <Typography.Text type="secondary">选中画板上的组件以编辑属性</Typography.Text>
+                ),
+              },
+              {
+                key: 'preview',
+                label: '预览',
+                children: (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Button block type="primary" loading={compiling} onClick={() => void onCompile()}>
+                      重新编译
+                    </Button>
+                    {imageBase64 ? (
+                      <div>
+                        <Typography.Text type="secondary">成图</Typography.Text>
+                        <img
+                          src={imageBase64}
+                          alt="preview"
+                          style={{ width: '100%', marginTop: 8, border: '1px solid #eee' }}
+                        />
+                      </div>
+                    ) : previewHtml ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="未生成 PNG（可装 playwright chromium），下方为 HTML 结构"
+                      />
+                    ) : (
+                      <Typography.Text type="secondary">点击「编译预览」生成图/文</Typography.Text>
+                    )}
+                    {markdownText ? (
+                      <div>
+                        <Typography.Text type="secondary">文案 (Markdown)</Typography.Text>
+                        <Input.TextArea
+                          value={markdownText}
+                          readOnly
+                          rows={10}
+                          style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
+                        />
+                      </div>
+                    ) : null}
+                  </Space>
+                ),
+              },
+            ]}
+          />
         </div>
       </div>
     </div>
+  )
+}
+
+function ArtboardBlock({
+  node,
+  selectedId,
+  onSelect,
+}: {
+  node: StudioNode
+  selectedId: string | null
+  onSelect: (id: string) => void
+}) {
+  const selected = selectedId === node.id
+  const border = selected ? '2px solid #1677ff' : '1px dashed #d9d9d9'
+  const style: CSSProperties = {
+    border,
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 8,
+    cursor: 'pointer',
+    background: selected ? '#f0f7ff' : '#fff',
+  }
+
+  if (node.type === 'Container') {
+    const row = String(node.props?.direction) === 'row'
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+          {row ? '横向容器' : '容器'}
+        </Typography.Text>
+        <div style={{ display: 'flex', flexDirection: row ? 'row' : 'column', gap: 8, marginTop: 4 }}>
+          {(node.children || []).map((ch) => (
+            <div key={ch.id} style={{ flex: row ? 1 : undefined }}>
+              <ArtboardBlock node={ch} selectedId={selectedId} onSelect={onSelect} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (node.type === 'Text') {
+    const variant = String(node.props?.variant || 'body')
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <Typography.Text
+          strong={variant === 'h1'}
+          type={variant === 'caption' ? 'secondary' : undefined}
+          style={{ fontSize: variant === 'h1' ? 16 : 13 }}
+        >
+          {String(node.props?.text || '文本')}
+        </Typography.Text>
+      </div>
+    )
+  }
+
+  if (node.type === 'Kpi') {
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <Card size="small" styles={{ body: { padding: 8 } }}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            {String(node.binding?.label || node.props?.label || 'KPI')}
+          </Typography.Text>
+          <div style={{ fontWeight: 700, fontSize: 18, color: '#1677ff' }}>
+            {String(node.binding?.value_column || '—')}
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
+  if (node.type === 'Table') {
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <Typography.Text type="secondary">📊 数据表组件</Typography.Text>
+        <div
+          style={{
+            marginTop: 6,
+            height: 48,
+            background: 'linear-gradient(#fafafa 50%, #fff 50%)',
+            backgroundSize: '100% 24px',
+            border: '1px solid #eee',
+            borderRadius: 4,
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (node.type === 'Divider') {
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <hr style={{ border: 'none', borderTop: '1px solid #ddd', margin: 4 }} />
+      </div>
+    )
+  }
+
+  return (
+    <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+      {String(node.type)}
+    </div>
+  )
+}
+
+function ComponentProps({
+  node,
+  columns,
+  onChange,
+  onMove,
+  onDelete,
+}: {
+  node: StudioNode
+  columns: string[]
+  onChange: (patch: Partial<StudioNode>) => void
+  onMove: (dir: -1 | 1) => void
+  onDelete: () => void
+}) {
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space>
+        <Tag>{node.type}</Tag>
+        <Button size="small" onClick={() => onMove(-1)}>
+          上移
+        </Button>
+        <Button size="small" onClick={() => onMove(1)}>
+          下移
+        </Button>
+        <Button size="small" danger icon={<DeleteOutlined />} onClick={onDelete}>
+          删除
+        </Button>
+      </Space>
+      <div>
+        <Typography.Text type="secondary">显示</Typography.Text>
+        <div>
+          <Switch
+            checked={node.visible !== false}
+            onChange={(v) => onChange({ visible: v })}
+          />
+        </div>
+      </div>
+      {node.type === 'Text' ? (
+        <>
+          <div>
+            <Typography.Text type="secondary">样式</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              value={String(node.props?.variant || 'body')}
+              onChange={(v) => onChange({ props: { ...node.props, variant: v } })}
+              options={[
+                { value: 'h1', label: '标题' },
+                { value: 'body', label: '正文' },
+                { value: 'caption', label: '脚注' },
+              ]}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">文案（支持 {'{{列名}}'}）</Typography.Text>
+            <Input.TextArea
+              style={{ marginTop: 4 }}
+              rows={3}
+              value={String(node.props?.text || '')}
+              onChange={(e) => onChange({ props: { ...node.props, text: e.target.value } })}
+            />
+          </div>
+        </>
+      ) : null}
+      {node.type === 'Kpi' ? (
+        <>
+          <div>
+            <Typography.Text type="secondary">标签</Typography.Text>
+            <Input
+              style={{ marginTop: 4 }}
+              value={String(node.binding?.label || node.props?.label || '')}
+              onChange={(e) =>
+                onChange({
+                  props: { ...node.props, label: e.target.value },
+                  binding: { ...node.binding, label: e.target.value },
+                })
+              }
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">数值列</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              allowClear
+              showSearch
+              placeholder="选择列"
+              value={(node.binding?.value_column as string) || undefined}
+              onChange={(v) =>
+                onChange({
+                  binding: { ...node.binding, value_column: v || '', label: v || node.binding?.label },
+                  props: { ...node.props, label: v || node.props?.label },
+                })
+              }
+              options={columns.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+        </>
+      ) : null}
+      {node.type === 'Table' ? (
+        <>
+          <div>
+            <Typography.Text type="secondary">百分比着色</Typography.Text>
+            <div>
+              <Switch
+                checked={node.props?.color_ratios !== false}
+                onChange={(v) => onChange({ props: { ...node.props, color_ratios: v } })}
+              />
+            </div>
+          </div>
+          <div>
+            <Typography.Text type="secondary">最大行数</Typography.Text>
+            <Input
+              style={{ marginTop: 4 }}
+              type="number"
+              value={Number(node.props?.max_rows || 50)}
+              onChange={(e) =>
+                onChange({ props: { ...node.props, max_rows: Number(e.target.value) || 50 } })
+              }
+            />
+          </div>
+        </>
+      ) : null}
+      {node.type === 'Container' ? (
+        <div>
+          <Typography.Text type="secondary">方向</Typography.Text>
+          <Radio.Group
+            style={{ marginTop: 4, display: 'block' }}
+            value={String(node.props?.direction || 'column')}
+            onChange={(e) => onChange({ props: { ...node.props, direction: e.target.value } })}
+          >
+            <Radio.Button value="column">纵向</Radio.Button>
+            <Radio.Button value="row">横向</Radio.Button>
+          </Radio.Group>
+        </div>
+      ) : null}
+    </Space>
   )
 }

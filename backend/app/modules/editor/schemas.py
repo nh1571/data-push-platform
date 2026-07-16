@@ -116,3 +116,58 @@ class SaveJobRequest(BaseModel):
 
 class SaveJobResponse(PushJobOut):
     """Same shape as PushJobOut (render_spec embeds design + parts)."""
+
+
+# ---------------------------------------------------------------------------
+# Studio (component artboard)
+# ---------------------------------------------------------------------------
+
+
+class StudioCompileRequest(BaseModel):
+    """Compile artboard with live data for preview."""
+
+    artboard: dict[str, Any] = Field(default_factory=dict)
+    data_source_id: UUID | None = None
+    sql: str | None = None
+    params: dict[str, Any] | None = None
+    max_rows: int = Field(default=200, ge=1, le=10_000)
+    want_image: bool = True
+
+
+class StudioCompileResponse(BaseModel):
+    html: str = ""
+    markdown_text: str = ""
+    image_base64: str | None = None
+    image_path: str | None = None
+    row_count: int = 0
+    parts: list[MessagePartPreview] = Field(default_factory=list)
+    artboard: dict[str, Any] = Field(default_factory=dict)
+
+
+class StudioSaveJobRequest(BaseModel):
+    id: UUID | None = None
+    name: str = Field(..., min_length=1, max_length=128)
+    data_source_id: UUID
+    query_sql: str = Field(..., min_length=1)
+    artboard: dict[str, Any] = Field(default_factory=dict)
+    channel_ids: list[UUID] = Field(default_factory=list)
+    skip_if_empty: bool = False
+    schedule_cron: str | None = Field(default=None, max_length=128)
+    schedule_enabled: bool = False
+    enabled: bool = True
+
+
+class StudioTestPushRequest(BaseModel):
+    artboard: dict[str, Any] = Field(default_factory=dict)
+    data_source_id: UUID
+    sql: str = Field(..., min_length=1)
+    channel_ids: list[UUID] = Field(..., min_length=1)
+    params: dict[str, Any] | None = None
+    max_rows: int = Field(default=200, ge=1, le=10_000)
+    push_job_id: UUID | None = None
+
+
+class StudioTemplateResponse(BaseModel):
+    id: str
+    name: str
+    artboard: dict[str, Any]

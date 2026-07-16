@@ -149,21 +149,39 @@ def render_message(
     When *render_spec* contains an editor ``design`` key, build the message via
     :func:`~app.modules.editor.design.build_message_from_design` so header/footer
     placeholders and table flags are applied against live query data.
-    """
-    if isinstance(render_spec, dict) and render_spec.get("design") is not None:
-        from app.modules.editor.design import build_message_from_design
 
-        return build_message_from_design(
-            result,
-            render_spec["design"] or {},
-            params=params,
-        )
+    When *render_spec* is a studio artboard (v3), compile the component tree.
+    """
+    if isinstance(render_spec, dict):
+        from app.modules.studio.migrate import extract_artboard, is_artboard_spec
+
+        doc = extract_artboard(render_spec)
+        if doc is None and is_artboard_spec(render_spec) and isinstance(render_spec.get("tree"), dict):
+            doc = render_spec
+        if doc is not None:
+            from app.modules.studio.compile import artboard_to_message
+
+            return artboard_to_message(doc, {"main": result}, with_image=True)
+
+        if render_spec.get("design") is not None:
+            from app.modules.editor.design import build_message_from_design
+
+            return build_message_from_design(
+                result,
+                render_spec["design"] or {},
+                params=params,
+            )
 
     parts_out: list[MessagePart] = []
     for part_spec in normalize_render_parts(render_spec):
+        # studio_artboard is not a plugin renderer — already handled above
+        if part_spec.get("type") == "studio_artboard":
+            continue
         renderer = plugin_registry.get("renderer", part_spec["type"])
         rendered = renderer.render(result, part_spec.get("config") or {}, params)
         parts_out.extend(rendered)
+    if not parts_out:
+        return Message(parts=[MessagePart(kind="text", content="（空消息）")])
     return Message(parts=parts_out)
 
 
