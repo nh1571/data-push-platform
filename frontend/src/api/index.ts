@@ -11,10 +11,13 @@ import type {
   JobRun,
   JobRunDetail,
   JobRunListParams,
+  ImagePreviewRequest,
+  ImagePreviewResponse,
   MessagePreviewRequest,
   MessagePreviewResponse,
   PushJob,
   PushJobCreate,
+  PushJobDraftCreate,
   PushJobUpdate,
   QueryPreviewRequest,
   QueryPreviewResponse,
@@ -119,6 +122,11 @@ export async function createPushJob(body: PushJobCreate): Promise<PushJob> {
   return data
 }
 
+export async function createDraftPushJob(body: PushJobDraftCreate): Promise<PushJob> {
+  const { data } = await api.post<PushJob>('/v1/push-jobs/draft', body)
+  return data
+}
+
 export async function updatePushJob(id: string, body: PushJobUpdate): Promise<PushJob> {
   const { data } = await api.put<PushJob>(`/v1/push-jobs/${id}`, body)
   return data
@@ -186,6 +194,11 @@ export async function messagePreview(
   body: MessagePreviewRequest,
 ): Promise<MessagePreviewResponse> {
   const { data } = await api.post<MessagePreviewResponse>('/v1/editor/message-preview', body)
+  return data
+}
+
+export async function imagePreview(body: ImagePreviewRequest): Promise<ImagePreviewResponse> {
+  const { data } = await api.post<ImagePreviewResponse>('/v1/editor/image-preview', body)
   return data
 }
 

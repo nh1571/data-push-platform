@@ -137,3 +137,36 @@ def test_create_push_job_links_source_and_channels(client: TestClient) -> None:
     body = resp.json()
     assert set(body["channel_ids"]) == {ch1, ch2}
     assert body["render_spec"] == [{"type": "markdown_table"}]
+
+
+def test_create_draft_push_job(client: TestClient) -> None:
+    ds_id = _create_source(client)
+    resp = client.post(
+        "/api/v1/push-jobs/draft",
+        json={"name": "draft-1", "data_source_id": ds_id},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["name"] == "draft-1"
+    assert body["data_source_id"] == ds_id
+    assert body["channel_ids"] == []
+    assert body["enabled"] is True
+    assert "SELECT 1 AS demo" in body["query_sql"]
+    assert body["render_spec"]["design"]["output_mode"] == "image"
+    assert body["render_spec"]["design"]["template_id"] == "report_v1"
+
+
+def test_create_push_job_empty_channel_ids(client: TestClient) -> None:
+    ds_id = _create_source(client)
+    resp = client.post(
+        "/api/v1/push-jobs",
+        json={
+            "name": "no-channels-yet",
+            "data_source_id": ds_id,
+            "query_sql": "SELECT 1",
+            "render_spec": {"design": {"output_mode": "markdown"}},
+            "channel_ids": [],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["channel_ids"] == []

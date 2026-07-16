@@ -90,9 +90,17 @@ class PushJobCreate(BaseModel):
     data_source_id: UUID
     query_sql: str = Field(..., min_length=1)
     render_spec: dict[str, Any] | list[Any]
-    channel_ids: list[UUID]
+    channel_ids: list[UUID] = Field(default_factory=list)
     schedule_cron: str | None = Field(default=None, max_length=128)
     schedule_enabled: bool = False
+
+
+class PushJobDraftCreate(BaseModel):
+    """Minimal payload for creating a draft job (then open in content editor)."""
+
+    name: str = Field(..., min_length=1, max_length=128)
+    data_source_id: UUID
+    enabled: bool = True
 
 
 class PushJobUpdate(BaseModel):

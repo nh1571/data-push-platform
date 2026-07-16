@@ -1,0 +1,303 @@
+"""DingTalk OpenAPI group robot channel plugin.
+
+Type: ``dingtalk.openapi_group_robot``
+
+Sends messages to an enterprise group via the robot OpenAPI
+(``/v1.0/robot/groupMessages/send``), with support for markdown text and
+images (upload media via oapi, then sampleImageMsg).
+
+Config:
+
+- ``app_key`` (required)
+- ``app_secret`` (required)
+- ``robot_code`` (required)
+- ``open_conversation_id`` (required) — group conversation id
+- ``title`` (optional): markdown title (default ``数据推送``)
+- ``webhook_url`` (optional): fallback webhook for text when OpenAPI fails
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from app.plugins.base import DeliveryResult, Message, MessagePart
+
+_DEFAULT_TIMEOUT = 30.0
+_OAUTH_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+_GROUP_MSG_URL = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+_MEDIA_UPLOAD_URL = "https://oapi.dingtalk.com/media/upload"
+_OAPI_TOKEN_URL = "https://oapi.dingtalk.com/gettoken"
+
+
+class DingTalkOpenAPIGroupRobotPlugin:
+    """ChannelPlugin for DingTalk application robot → group (OpenAPI)."""
+
+    @property
+    def type(self) -> str:
+        return "dingtalk.openapi_group_robot"
+
+    def validate_config(self, config: dict[str, Any]) -> None:
+        missing = [
+            k
+            for k in ("app_key", "app_secret", "robot_code", "open_conversation_id")
+            if not config.get(k)
+        ]
+        if missing:
+            raise ValueError(f"missing required config: {', '.join(missing)}")
+
+    @staticmethod
+    def _part_path(part: MessagePart) -> str | None:
+        content = part.content
+        if isinstance(content, dict):
+            for key in ("path", "url", "download_url"):
+                if content.get(key):
+                    return str(content[key])
+            return None
+        if content is None:
+            return None
+        return str(content)
+
+    @classmethod
+    def _part_to_text(cls, part: MessagePart) -> str:
+        if part.kind == "text":
+            return str(part.content) if part.content is not None else ""
+        if part.kind == "card":
+            content = part.content
+            if isinstance(content, dict):
+                title = content.get("title") or "卡片"
+                text = content.get("text") or ""
+                lines = [f"### {title}", ""]
+                if text:
+                    lines.append(str(text))
+                return "\n".join(lines).rstrip()
+            return str(content) if content is not None else ""
+        if part.kind == "file":
+            path = cls._part_path(part)
+            name = ""
+            if isinstance(part.content, dict) and part.content.get("filename"):
+                name = str(part.content["filename"])
+            label = f"文件: {name}".rstrip() if name else "文件"
+            return f"{label}\n下载路径: {path}" if path else f"{label}: (no path)"
+        if part.kind == "image":
+            # Image is sent separately via sampleImageMsg
+            return ""
+        return f"[{part.kind}]"
+
+    @classmethod
+    def _message_to_text(cls, message: Message) -> str:
+        parts = [cls._part_to_text(p) for p in message.parts]
+        text = "\n\n".join(p for p in parts if p)
+        return text if text else "(empty message)"
+
+    @classmethod
+    def _image_parts(cls, message: Message) -> list[MessagePart]:
+        return [p for p in message.parts if p.kind == "image"]
+
+    def _fetch_new_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
+        """App access token via new DingTalk API (for robot group messages)."""
+        resp = client.post(
+            _OAUTH_URL,
+            json={
+                "appKey": str(config["app_key"]),
+                "appSecret": str(config["app_secret"]),
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"unexpected accessToken response: {data!r}")
+        token = data.get("accessToken") or data.get("access_token")
+        if not token:
+            raise RuntimeError(f"accessToken response missing token: {data!r}")
+        return str(token)
+
+    def _fetch_oapi_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
+        """Legacy oapi token (for media/upload)."""
+        resp = client.get(
+            _OAPI_TOKEN_URL,
+            params={
+                "appkey": str(config["app_key"]),
+                "appsecret": str(config["app_secret"]),
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"unexpected gettoken response: {data!r}")
+        errcode = data.get("errcode", 0)
+        if errcode not in (0, "0", None):
+            errmsg = data.get("errmsg") or str(data)
+            raise RuntimeError(f"gettoken errcode={errcode}: {errmsg}")
+        token = data.get("access_token")
+        if not token:
+            raise RuntimeError("gettoken response missing access_token")
+        return str(token)
+
+    def _upload_image(
+        self,
+        client: httpx.Client,
+        oapi_token: str,
+        path: str,
+    ) -> str:
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise RuntimeError(f"image file not found: {path}")
+        with file_path.open("rb") as fh:
+            resp = client.post(
+                _MEDIA_UPLOAD_URL,
+                params={"access_token": oapi_token, "type": "image"},
+                files={"media": (file_path.name, fh, "image/png")},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"unexpected media/upload response: {data!r}")
+        errcode = data.get("errcode", 0)
+        if errcode not in (0, "0", None):
+            errmsg = data.get("errmsg") or str(data)
+            raise RuntimeError(f"media/upload errcode={errcode}: {errmsg}")
+        media_id = data.get("media_id")
+        if not media_id:
+            raise RuntimeError("media/upload response missing media_id")
+        return str(media_id)
+
+    def _send_group_msg(
+        self,
+        client: httpx.Client,
+        access_token: str,
+        config: dict[str, Any],
+        msg_key: str,
+        msg_param: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = {
+            "robotCode": str(config["robot_code"]),
+            "openConversationId": str(config["open_conversation_id"]),
+            "msgKey": msg_key,
+            "msgParam": json.dumps(msg_param, ensure_ascii=False),
+        }
+        resp = client.post(
+            _GROUP_MSG_URL,
+            headers={"x-acs-dingtalk-access-token": access_token},
+            json=payload,
+        )
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {"raw": resp.text[:500]}
+        if resp.status_code >= 400:
+            raise RuntimeError(f"groupMessages HTTP {resp.status_code}: {data}")
+        if isinstance(data, dict) and data.get("code") and str(data.get("code")) not in ("0", ""):
+            # New API may return code/message on business error
+            if data.get("message") or data.get("msg"):
+                raise RuntimeError(
+                    f"groupMessages error: {data.get('code')} {data.get('message') or data.get('msg')}"
+                )
+        return data if isinstance(data, dict) else {"result": data}
+
+    def _send_webhook_fallback(
+        self,
+        client: httpx.Client,
+        config: dict[str, Any],
+        text: str,
+    ) -> DeliveryResult | None:
+        webhook = config.get("webhook_url")
+        if not webhook:
+            return None
+        title = str(config.get("title") or "数据推送")
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {"title": title, "text": text},
+        }
+        resp = client.post(str(webhook), json=payload)
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        if resp.status_code >= 400:
+            return DeliveryResult(
+                success=False,
+                error=f"webhook HTTP {resp.status_code}: {data or resp.text[:300]}",
+            )
+        if isinstance(data, dict):
+            errcode = data.get("errcode", 0)
+            if errcode not in (0, "0", None):
+                return DeliveryResult(
+                    success=False,
+                    error=f"webhook errcode={errcode}: {data.get('errmsg') or data}",
+                )
+        return DeliveryResult(success=True, provider_msg_id=None)
+
+    def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
+        try:
+            self.validate_config(config)
+        except ValueError as exc:
+            return DeliveryResult(success=False, error=str(exc))
+
+        title = str(config.get("title") or "数据推送")
+        text = self._message_to_text(message)
+        images = self._image_parts(message)
+        provider_ids: list[str] = []
+
+        try:
+            with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
+                access_token = self._fetch_new_access_token(client, config)
+
+                # Text / markdown first
+                if text and text != "(empty message)":
+                    try:
+                        data = self._send_group_msg(
+                            client,
+                            access_token,
+                            config,
+                            msg_key="sampleMarkdown",
+                            msg_param={"title": title, "text": text},
+                        )
+                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
+                        if pid is not None:
+                            provider_ids.append(str(pid))
+                    except RuntimeError as exc:
+                        # Optional webhook fallback for text
+                        fallback = self._send_webhook_fallback(client, config, text)
+                        if fallback is not None:
+                            if not fallback.success:
+                                return fallback
+                        else:
+                            return DeliveryResult(success=False, error=str(exc))
+
+                # Images: upload media then sampleImageMsg (photoURL = media_id / URL)
+                if images:
+                    oapi_token = self._fetch_oapi_access_token(client, config)
+                    for part in images:
+                        path = self._part_path(part)
+                        if not path:
+                            continue
+                        media_id = self._upload_image(client, oapi_token, path)
+                        data = self._send_group_msg(
+                            client,
+                            access_token,
+                            config,
+                            msg_key="sampleImageMsg",
+                            msg_param={"photoURL": media_id},
+                        )
+                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
+                        if pid is not None:
+                            provider_ids.append(str(pid))
+
+                if (not text or text == "(empty message)") and not images:
+                    return DeliveryResult(success=False, error="empty message")
+
+        except httpx.HTTPError as exc:
+            return DeliveryResult(success=False, error=f"http error: {exc}")
+        except RuntimeError as exc:
+            return DeliveryResult(success=False, error=str(exc))
+        except OSError as exc:
+            return DeliveryResult(success=False, error=f"file error: {exc}")
+
+        return DeliveryResult(
+            success=True,
+            provider_msg_id=",".join(provider_ids) if provider_ids else None,
+        )

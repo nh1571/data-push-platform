@@ -13,11 +13,31 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.models import Channel, DataSource, JobRun, JobRunStatus, PushJob
 from app.db.session import get_db
-from app.modules.config_svc.schemas import PushJobCreate, PushJobOut, PushJobUpdate
+from app.modules.config_svc.schemas import (
+    PushJobCreate,
+    PushJobDraftCreate,
+    PushJobOut,
+    PushJobUpdate,
+)
 from app.modules.execution.pipeline import run_job_run
 from app.modules.execution.schemas import JobRunOut, PushJobRunRequest
 
 router = APIRouter()
+
+DEFAULT_DRAFT_SQL = "-- 在编辑器中编写 SQL\nSELECT 1 AS demo"
+
+DEFAULT_DRAFT_RENDER_SPEC: dict[str, Any] = {
+    "design": {
+        "output_mode": "image",
+        "template_id": "report_v1",
+        "include_markdown_table": True,
+        "show_table": True,
+        "header_text": "",
+        "footer_text": "",
+        "title": "",
+        "theme_color": "#1677ff",
+    }
+}
 
 
 def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
@@ -58,11 +78,9 @@ def _ensure_data_source(db: Session, data_source_id: UUID) -> None:
 
 
 def _ensure_channels(db: Session, channel_ids: list[UUID]) -> None:
+    """Validate channel IDs when provided. Empty list is allowed (draft jobs)."""
     if not channel_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="channel_ids must not be empty",
-        )
+        return
     found = set(
         db.scalars(select(Channel.id).where(Channel.id.in_(channel_ids))).all()
     )
@@ -78,6 +96,31 @@ def _ensure_channels(db: Session, channel_ids: list[UUID]) -> None:
 def list_push_jobs(db: Session = Depends(get_db)) -> list[PushJobOut]:
     rows = db.scalars(select(PushJob).order_by(PushJob.created_at.desc())).all()
     return [_to_out(r) for r in rows]
+
+
+@router.post("/draft", response_model=PushJobOut, status_code=status.HTTP_201_CREATED)
+def create_draft_push_job(
+    body: PushJobDraftCreate,
+    db: Session = Depends(get_db),
+) -> PushJobOut:
+    """Create a draft job with defaults; content is edited in the push editor."""
+    _ensure_data_source(db, body.data_source_id)
+
+    row = PushJob(
+        name=body.name,
+        enabled=body.enabled,
+        skip_if_empty=False,
+        data_source_id=body.data_source_id,
+        query_sql=DEFAULT_DRAFT_SQL,
+        render_spec=dict(DEFAULT_DRAFT_RENDER_SPEC),
+        channel_ids=[],
+        schedule_cron=None,
+        schedule_enabled=False,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _to_out(row)
 
 
 @router.post("", response_model=PushJobOut, status_code=status.HTTP_201_CREATED)

@@ -269,3 +269,32 @@ def test_editor_requires_auth(unauth_client: TestClient) -> None:
         json={"data_source_id": str(uuid4()), "sql": "SELECT 1"},
     )
     assert resp.status_code in (401, 403)
+
+
+def test_image_preview(client: TestClient, monkeypatch: Any, tmp_path: Any) -> None:
+    from pathlib import Path
+
+    from app import config as config_mod
+
+    monkeypatch.setattr(config_mod.settings, "storage_root", str(tmp_path))
+    _install_fakes(monkeypatch)
+    ds_id = _create_source(client)
+
+    resp = client.post(
+        "/api/v1/editor/image-preview",
+        json={
+            "data_source_id": ds_id,
+            "sql": "SELECT name, amount FROM t",
+            "design": {
+                "output_mode": "image",
+                "template_id": "report_v1",
+                "title": "Preview {{name}}",
+                "show_table": True,
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["image_base64"].startswith("data:image/png;base64,")
+    assert body["path"]
+    assert Path(body["path"]).is_file()

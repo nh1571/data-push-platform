@@ -75,9 +75,15 @@ export interface PushJobCreate {
   data_source_id: string
   query_sql: string
   render_spec: Record<string, unknown> | unknown[]
-  channel_ids: string[]
+  channel_ids?: string[]
   schedule_cron?: string | null
   schedule_enabled?: boolean
+}
+
+export interface PushJobDraftCreate {
+  name: string
+  data_source_id: string
+  enabled?: boolean
 }
 
 export interface PushJobUpdate {
@@ -163,6 +169,11 @@ export interface DesignSpec {
   include_markdown_table?: boolean
   extra_parts?: string[]
   title?: string | null
+  output_mode?: 'markdown' | 'image' | string | null
+  template_id?: 'report_v1' | 'alert_v1' | 'kpi_v1' | string | null
+  theme_color?: string | null
+  show_table?: boolean
+  kpi_columns?: string[]
 }
 
 export interface QueryPreviewRequest {
@@ -194,6 +205,20 @@ export interface MessagePartPreview {
 export interface MessagePreviewResponse {
   parts: MessagePartPreview[]
   markdown_text: string
+}
+
+export interface ImagePreviewRequest {
+  data_source_id: string
+  sql: string
+  params?: Record<string, unknown> | null
+  design?: DesignSpec | Record<string, unknown>
+  max_rows?: number
+}
+
+export interface ImagePreviewResponse {
+  image_base64: string
+  path?: string | null
+  content_type?: string
 }
 
 export interface TestPushRequest {

@@ -12,6 +12,8 @@ from app.db.session import get_db
 from app.modules.config_svc.schemas import PushJobOut
 from app.modules.editor import service as editor_service
 from app.modules.editor.schemas import (
+    ImagePreviewRequest,
+    ImagePreviewResponse,
     MessagePreviewRequest,
     MessagePreviewResponse,
     QueryPreviewRequest,
@@ -63,6 +65,21 @@ def message_preview(
     db: Session = Depends(get_db),
 ) -> MessagePreviewResponse:
     return editor_service.message_preview(
+        db,
+        body.data_source_id,
+        body.sql,
+        body.design,
+        body.params,
+        max_rows=body.max_rows,
+    )
+
+
+@router.post("/image-preview", response_model=ImagePreviewResponse)
+def image_preview(
+    body: ImagePreviewRequest,
+    db: Session = Depends(get_db),
+) -> ImagePreviewResponse:
+    return editor_service.image_preview(
         db,
         body.data_source_id,
         body.sql,

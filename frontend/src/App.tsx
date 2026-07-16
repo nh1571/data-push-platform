@@ -49,7 +49,7 @@ export default function App() {
               <Route path="/channels/new" element={<ChannelFormPage />} />
               <Route path="/channels/:id" element={<ChannelFormPage />} />
               <Route path="/push-jobs" element={<PushJobListPage />} />
-              <Route path="/push-jobs/new" element={<Navigate to="/editor" replace />} />
+              <Route path="/push-jobs/new" element={<Navigate to="/push-jobs" replace />} />
               <Route path="/push-jobs/:id" element={<PushJobFormPage />} />
               <Route path="/job-runs" element={<JobRunListPage />} />
               <Route path="/job-runs/:id" element={<JobRunDetailPage />} />

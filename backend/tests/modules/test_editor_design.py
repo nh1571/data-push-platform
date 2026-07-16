@@ -69,6 +69,7 @@ def test_build_message_header_table_footer() -> None:
             "header_text": "日报 — {{name}}",
             "footer_text": "— end —",
             "include_markdown_table": True,
+            "output_mode": "markdown",
         },
     )
     assert len(message.parts) >= 1
@@ -85,9 +86,22 @@ def test_build_message_without_table() -> None:
         {
             "header_text": "Only header {{name}}",
             "include_markdown_table": False,
+            "output_mode": "markdown",
         },
     )
     text = str(message.parts[0].content)
     assert "Only header Alice" in text
     # Table separator should not appear when table disabled
     assert "---" not in text
+
+
+def test_design_to_parts_image_mode() -> None:
+    parts = design_to_parts(
+        {
+            "output_mode": "image",
+            "template_id": "alert_v1",
+            "title": "A",
+        }
+    )
+    assert parts[0]["type"] == "template_image"
+    assert parts[0]["config"]["template_id"] == "alert_v1"

@@ -18,6 +18,12 @@ class DesignSpec(BaseModel):
     include_markdown_table: bool = True
     extra_parts: list[str] = Field(default_factory=list)
     title: str | None = None
+    # Image template mode (draft jobs set output_mode=image explicitly)
+    output_mode: str | None = None  # "markdown" | "image"
+    template_id: str | None = None  # report_v1 | alert_v1 | kpi_v1
+    theme_color: str | None = None
+    show_table: bool = True
+    kpi_columns: list[str] = Field(default_factory=list)
 
 
 class QueryPreviewRequest(BaseModel):
@@ -49,6 +55,22 @@ class MessagePartPreview(BaseModel):
 class MessagePreviewResponse(BaseModel):
     parts: list[MessagePartPreview]
     markdown_text: str
+
+
+class ImagePreviewRequest(BaseModel):
+    data_source_id: UUID
+    sql: str = Field(..., min_length=1)
+    params: dict[str, Any] | None = None
+    design: DesignSpec | dict[str, Any] = Field(default_factory=dict)
+    max_rows: int = Field(default=200, ge=1, le=10_000)
+
+
+class ImagePreviewResponse(BaseModel):
+    """PNG preview for template image mode (base64 data URL for easy <img>)."""
+
+    image_base64: str
+    path: str | None = None
+    content_type: str = "image/png"
 
 
 class TestPushRequest(BaseModel):
@@ -85,7 +107,7 @@ class SaveJobRequest(BaseModel):
     data_source_id: UUID
     query_sql: str = Field(..., min_length=1)
     design: DesignSpec | dict[str, Any] = Field(default_factory=dict)
-    channel_ids: list[UUID] = Field(..., min_length=1)
+    channel_ids: list[UUID] = Field(default_factory=list)
     skip_if_empty: bool = False
     schedule_cron: str | None = Field(default=None, max_length=128)
     schedule_enabled: bool = False

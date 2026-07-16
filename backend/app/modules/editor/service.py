@@ -23,12 +23,14 @@ from app.db.models import (
 from app.modules.editor.design import build_message_from_design, design_to_parts
 from app.modules.editor.schemas import (
     ChannelSendResult,
+    ImagePreviewResponse,
     MessagePartPreview,
     MessagePreviewResponse,
     QueryPreviewResponse,
     SaveJobRequest,
     TestPushResponse,
 )
+from app.modules.editor.templates import render_and_save_template
 from app.plugins.base import Message, MessagePart, QueryResult
 from app.plugins.registry import plugin_registry
 
@@ -61,8 +63,15 @@ def _get_data_source(db: Session, data_source_id: UUID) -> DataSource:
     return ds
 
 
-def _ensure_channels(db: Session, channel_ids: list[UUID]) -> list[Channel]:
+def _ensure_channels(
+    db: Session,
+    channel_ids: list[UUID],
+    *,
+    allow_empty: bool = False,
+) -> list[Channel]:
     if not channel_ids:
+        if allow_empty:
+            return []
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="channel_ids must not be empty",
@@ -172,6 +181,30 @@ def message_preview(
         parts=parts,
         markdown_text=_markdown_from_message(message),
     )
+
+
+def image_preview(
+    db: Session,
+    data_source_id: UUID,
+    sql: str,
+    design: Any,
+    params: dict[str, Any] | None = None,
+    *,
+    max_rows: int = 200,
+) -> ImagePreviewResponse:
+    """Query + render image template; return base64 data URL for UI preview."""
+    import base64
+
+    result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
+    design_dict = _as_design(design)
+    # Force image mode for this endpoint
+    design_dict = {**design_dict, "output_mode": "image"}
+    if not design_dict.get("template_id"):
+        design_dict["template_id"] = "report_v1"
+    png, path = render_and_save_template(result, design_dict, filename="preview.png")
+    b64 = base64.b64encode(png).decode("ascii")
+    data_url = f"data:image/png;base64,{b64}"
+    return ImagePreviewResponse(image_base64=data_url, path=path, content_type="image/png")
 
 
 def test_push(
@@ -313,7 +346,8 @@ def save_job(db: Session, payload: SaveJobRequest) -> PushJob:
     }
 
     _get_data_source(db, payload.data_source_id)
-    _ensure_channels(db, payload.channel_ids)
+    # Allow empty channel_ids so draft jobs can be saved from the editor.
+    _ensure_channels(db, payload.channel_ids, allow_empty=True)
 
     if payload.id is not None:
         row = db.get(PushJob, payload.id)
