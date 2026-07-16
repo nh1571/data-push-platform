@@ -62,3 +62,7 @@ htmlcov/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# Runtime generated images
+backend/storage/
+!backend/storage/.gitkeep
