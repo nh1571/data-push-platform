@@ -55,6 +55,34 @@ def test_compile_artboard_message_parts() -> None:
     assert result.message.parts[0].kind == "text"
 
 
+def test_theme_pack_css_in_html() -> None:
+    doc = default_daily_artboard()
+    doc["artboard"]["theme"] = {"pack": "alert", "table_style": "alert"}
+    html = build_artboard_html(doc, {"main": _sample_result()})
+    assert "#ff4d4f" in html or "alert" in html
+    assert "artboard-chrome" in html
+
+
+def test_line_chart_svg() -> None:
+    from app.modules.studio.compile import _render_chart_html
+
+    result = QueryResult(columns=["日", "量"], rows=[["一", 10], ["二", 20], ["三", 15]])
+    html = _render_chart_html(
+        {
+            "type": "Chart",
+            "props": {"chart_type": "line", "title": "趋势"},
+            "binding": {
+                "dataset_id": "main",
+                "category_column": "日",
+                "value_column": "量",
+            },
+        },
+        {"main": result},
+    )
+    assert "<svg" in html
+    assert "path" in html or "circle" in html
+
+
 def test_chart_bar_and_pie_html() -> None:
     from app.modules.studio.compile import _render_chart_html
 

@@ -24,6 +24,7 @@ import type {
   SaveJobRequest,
   StudioCompileRequest,
   StudioCompileResponse,
+  StudioMeta,
   StudioSaveJobRequest,
   StudioTemplate,
   StudioTestPushRequest,
@@ -223,6 +224,11 @@ export async function saveJob(body: SaveJobRequest): Promise<PushJob> {
 
 export async function listStudioTemplates(): Promise<StudioTemplate[]> {
   const { data } = await api.get<StudioTemplate[]>('/v1/editor/studio/templates')
+  return data
+}
+
+export async function getStudioMeta(): Promise<StudioMeta> {
+  const { data } = await api.get<StudioMeta>('/v1/editor/studio/meta')
   return data
 }
 

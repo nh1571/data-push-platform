@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.modules.studio.themes import resolve_theme, theme_css_vars
 from app.plugins.base import Message, MessagePart, QueryResult
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -16,7 +17,8 @@ _PERCENT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
 _MAX_ROWS = 50
 
 _CSS = """
-:root { --theme: #1677ff; --fg: #1f1f1f; --muted: #666; --border: #e5e5e5; --header-bg: #f5f7fa; }
+:root { --theme: #1677ff; --fg: #1f1f1f; --muted: #666; --border: #e5e5e5;
+  --header-bg: #f5f7fa; --kpi-bg: #fafcff; --table-fs: 13px; --table-pad: 8px 10px; --table-hw: 600; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -28,8 +30,20 @@ body {
   width: var(--ab-width, 750px);
   margin: 0 auto;
   background: #fff;
-  padding: 16px 18px 20px;
+  padding: 0 0 18px;
+  overflow: hidden;
+  border-radius: 4px;
 }
+.artboard-chrome {
+  background: var(--theme);
+  color: #fff;
+  padding: 12px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.artboard-chrome.alert { background: #ff4d4f; }
+.artboard-body { padding: 16px 18px 4px; }
 .comp-text-h1 {
   font-size: 20px;
   font-weight: 700;
@@ -57,7 +71,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px;
-  background: #fafcff;
+  background: var(--kpi-bg);
   min-width: 0;
 }
 .comp-kpi .label { color: var(--muted); font-size: 12px; }
@@ -65,17 +79,19 @@ body {
 table.comp-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--table-fs);
 }
 table.comp-table th, table.comp-table td {
   border: 1px solid var(--border);
-  padding: 8px 10px;
+  padding: var(--table-pad);
   text-align: left;
   max-width: 180px;
   word-break: break-word;
 }
-table.comp-table th { background: var(--header-bg); font-weight: 600; }
+table.comp-table th { background: var(--header-bg); font-weight: var(--table-hw); color: var(--fg); }
 table.comp-table tr:nth-child(even) td { background: #fafbfc; }
+table.comp-table.style-alert th { background: #fff1f0; color: #cf1322; }
+table.comp-table.style-compact th, table.comp-table.style-compact td { max-width: 140px; }
 .r-pos-strong { color: #005737; font-weight: 600; }
 .r-pos { color: #00B050; font-weight: 600; }
 .r-neg { color: #FF0000; font-weight: 600; }
@@ -91,6 +107,18 @@ table.comp-table tr:nth-child(even) td { background: #fafbfc; }
 .comp-chart-swatch {
   width: 10px; height: 10px; border-radius: 2px; display: inline-block;
 }
+.comp-alert {
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid #ffccc7;
+  background: #fff2f0;
+  color: #a8071a;
+}
+.comp-alert.info { border-color: #91caff; background: #e6f4ff; color: #0958d9; }
+.comp-alert.success { border-color: #b7eb8f; background: #f6ffed; color: #389e0d; }
+.comp-alert.warning { border-color: #ffe58f; background: #fffbe6; color: #d48806; }
 """
 
 
@@ -263,7 +291,9 @@ def _render_table_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     rows = list(result.rows or [])[:max_rows]
     if not columns:
         return "<p class='comp-empty'>（无数据）</p>"
-    parts = ["<table class='comp-table'><thead><tr>"]
+    style = str(props.get("style") or "business")
+    style_cls = f" style-{html.escape(style)}" if style in ("compact", "alert", "business") else ""
+    parts = [f"<table class='comp-table{style_cls}'><thead><tr>"]
     for c in columns:
         parts.append(f"<th>{_esc(c)}</th>")
     parts.append("</tr></thead><tbody>")
@@ -335,7 +365,7 @@ def _chart_series(
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
     chart_type = str(props.get("chart_type") or binding.get("chart_type") or "bar").lower()
-    if chart_type not in ("bar", "pie"):
+    if chart_type not in ("bar", "pie", "line"):
         chart_type = "bar"
 
     if result is None or not result.columns or not result.rows:
@@ -424,6 +454,44 @@ def _fmt_num(v: float) -> str:
     return f"{v:.1f}"
 
 
+def _render_line_svg(labels: list[str], values: list[float], *, width: int = 680, height: int = 260) -> str:
+    if not values:
+        return "<p class='comp-empty'>（图表无有效数值）</p>"
+    max_v = max(values) or 1.0
+    min_v = min(0.0, min(values))
+    span = max_v - min_v or 1.0
+    pad_l, pad_r, pad_t, pad_b = 40, 16, 20, 48
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    n = len(values)
+    parts = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>",
+        f"<line x1='{pad_l}' y1='{pad_t}' x2='{pad_l}' y2='{pad_t + plot_h}' stroke='#d9d9d9'/>",
+        f"<line x1='{pad_l}' y1='{pad_t + plot_h}' x2='{pad_l + plot_w}' y2='{pad_t + plot_h}' stroke='#d9d9d9'/>",
+    ]
+    pts: list[tuple[float, float]] = []
+    for i, val in enumerate(values):
+        x = pad_l + (plot_w * i / max(n - 1, 1))
+        y = pad_t + plot_h - ((val - min_v) / span) * plot_h
+        pts.append((x, y))
+    if len(pts) >= 2:
+        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        parts.append(f"<path d='{d}' fill='none' stroke='var(--theme,#1677ff)' stroke-width='2.5'/>")
+    for i, ((x, y), lab, val) in enumerate(zip(pts, labels, values, strict=False)):
+        parts.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='4' fill='var(--theme,#1677ff)'/>")
+        parts.append(
+            f"<text x='{x:.1f}' y='{y - 8:.1f}' text-anchor='middle' font-size='10' fill='#666'>"
+            f"{_esc(_fmt_num(val))}</text>"
+        )
+        short = lab if len(lab) <= 8 else lab[:7] + "…"
+        parts.append(
+            f"<text x='{x:.1f}' y='{pad_t + plot_h + 16}' text-anchor='middle' font-size='11' fill='#666'>"
+            f"{_esc(short)}</text>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) -> str:
     if not values:
         return "<p class='comp-empty'>（图表无有效数值）</p>"
@@ -483,6 +551,8 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
         return f"<div class='comp-chart'>{title_html}<p class='comp-empty'>（请绑定分类列与数值列，并先取数）</p></div>"
     if chart_type == "pie":
         body = _render_pie_svg(labels, values)
+    elif chart_type == "line":
+        body = _render_line_svg(labels, values)
     else:
         body = _render_bar_svg(labels, values)
     return f"<div class='comp-chart'>{title_html}{body}</div>"
@@ -491,13 +561,34 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     props = dict(node.get("props") or {})
     labels, values, chart_type = _chart_series(node, data_ctx)
-    title = str(props.get("title") or ("饼图" if chart_type == "pie" else "柱状图"))
+    type_label = {"pie": "饼图", "line": "折线图", "bar": "柱状图"}.get(chart_type, chart_type)
+    title = str(props.get("title") or type_label)
     if not values:
         return f"**{title}**（无数据）"
-    lines = [f"**{title}**（{chart_type}）"]
+    lines = [f"**{title}**（{type_label}）"]
     for lab, val in zip(labels, values, strict=False):
         lines.append(f"- {lab}: {_fmt_num(val)}")
     return "\n".join(lines)
+
+
+def _render_alert_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    props = dict(node.get("props") or {})
+    binding = dict(node.get("binding") or {})
+    result = _get_dataset(data_ctx, binding)
+    text = substitute_first_row(str(props.get("text") or "请注意相关指标异常"), result)
+    level = str(props.get("level") or "error")
+    cls = "comp-alert"
+    if level in ("info", "success", "warning"):
+        cls = f"comp-alert {level}"
+    return f"<div class='{cls}'>{_esc(text)}</div>"
+
+
+def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    props = dict(node.get("props") or {})
+    binding = dict(node.get("binding") or {})
+    result = _get_dataset(data_ctx, binding)
+    text = substitute_first_row(str(props.get("text") or "请注意相关指标异常"), result)
+    return f"> ⚠ {text}"
 
 
 def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
@@ -524,6 +615,8 @@ def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
         return _render_table_html(node, data_ctx)
     if ntype == "Chart":
         return _render_chart_html(node, data_ctx)
+    if ntype == "Alert":
+        return _render_alert_html(node, data_ctx)
     if ntype == "Divider":
         return "<hr style='border:none;border-top:1px solid #e5e5e5;margin:4px 0'/>"
     return ""
@@ -550,22 +643,34 @@ def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str
     if ntype == "Chart":
         t = _render_chart_md(node, data_ctx)
         return [t] if t else []
+    if ntype == "Alert":
+        t = _render_alert_md(node, data_ctx)
+        return [t] if t else []
     return []
 
 
 def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     ab = dict(doc.get("artboard") or {})
-    theme = dict(ab.get("theme") or {})
-    color = str(theme.get("color") or "#1677ff")
+    pack = resolve_theme(ab)
     width = int(ab.get("width") or 750)
     tree = doc.get("tree") or {"type": "Container", "children": []}
     body = _walk_html(tree if isinstance(tree, dict) else {}, data_ctx)
+    chrome_title = str(ab.get("chrome_title") or doc.get("scene_id") or "数据推送")
+    # Allow first-row sub on chrome title from main dataset
+    main = data_ctx.get("main") or (next(iter(data_ctx.values())) if data_ctx else None)
+    if main:
+        chrome_title = substitute_first_row(chrome_title, main)
+    bar_cls = "artboard-chrome alert" if pack.get("bar_class") == "alert" else "artboard-chrome"
+    show_chrome = ab.get("show_chrome", True) is not False
+    chrome_html = (
+        f"<div class='{bar_cls}'>{_esc(chrome_title)}</div>" if show_chrome else ""
+    )
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<style>{_CSS}\n:root {{ --theme: {html.escape(color)}; "
-        f"--ab-width: {width}px; }}</style>"
+        f"<style>{_CSS}\n:root {{ {theme_css_vars(pack)} --ab-width: {width}px; }}</style>"
         "</head><body>"
-        f"<div class='artboard' id='artboard'>{body}</div>"
+        f"<div class='artboard' id='artboard'>{chrome_html}"
+        f"<div class='artboard-body'>{body}</div></div>"
         "</body></html>"
     )
 

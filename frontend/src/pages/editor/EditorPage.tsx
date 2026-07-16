@@ -45,15 +45,21 @@ import {
   appendChild,
   applyColumnToNode,
   bindingHint,
+  defaultAlertArtboard,
   defaultDailyArtboard,
   emptyArtboard,
+  ensureSecondaryDataset,
   extractArtboardFromJob,
   findNode,
   flattenOutline,
   moveSibling,
   newComponent,
   removeNode,
+  syncMainDataset,
+  TABLE_STYLES,
+  THEME_PACKS,
   updateNode,
+  upsertDataset,
 } from './studioUtils'
 
 function colorToHex(color: Color | string): string {
@@ -63,10 +69,12 @@ function colorToHex(color: Color | string): string {
 
 const PALETTE = [
   { type: 'Text', label: '文本' },
-  { type: 'Kpi', label: 'KPI 指标' },
+  { type: 'Kpi', label: 'KPI' },
   { type: 'Table', label: '数据表' },
   { type: 'ChartBar', label: '柱状图' },
+  { type: 'ChartLine', label: '折线图' },
   { type: 'ChartPie', label: '饼图' },
+  { type: 'Alert', label: '告警条' },
   { type: 'Container', label: '横向分栏' },
   { type: 'Divider', label: '分隔线' },
 ]
@@ -91,6 +99,7 @@ export function EditorPage() {
 
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<unknown[][]>([])
+  const [activeDatasetId, setActiveDatasetId] = useState('main')
   const [markdownText, setMarkdownText] = useState('')
   const [imageBase64, setImageBase64] = useState('')
   const [previewHtml, setPreviewHtml] = useState('')
@@ -107,6 +116,13 @@ export function EditorPage() {
     [selectedId, tree],
   )
   const themeColor = artboard.artboard?.theme?.color || '#1677ff'
+  const themePack = artboard.artboard?.theme?.pack || 'business'
+  const datasets = artboard.datasets || []
+  const activeDs = datasets.find((d) => d.id === activeDatasetId) || datasets[0]
+  const datasetOptions = datasets.map((d) => ({
+    value: d.id,
+    label: d.name || d.id,
+  }))
 
   const setTree = (next: StudioNode) => {
     setArtboard((prev) => ({ ...prev, tree: next }))
@@ -172,20 +188,52 @@ export function EditorPage() {
       .finally(() => setLoading(false))
   }, [jobId, loadMeta])
 
+  const buildDoc = (): ArtboardDoc => {
+    let doc = syncMainDataset(artboard, dataSourceId, sql)
+    // Fill missing data_source_id on secondary datasets with main source
+    doc = {
+      ...doc,
+      datasets: (doc.datasets || []).map((d) => ({
+        ...d,
+        data_source_id: d.data_source_id || dataSourceId || null,
+      })),
+    }
+    return doc
+  }
+
   const onQuery = async () => {
     if (!dataSourceId) {
       message.error('请选择数据源')
       return
     }
+    const slot = activeDs?.id || 'main'
+    const slotSql =
+      slot === 'main' ? sql : String(activeDs?.sql || sql)
+    const slotDs = String(activeDs?.data_source_id || dataSourceId)
     setQuerying(true)
     try {
-      const res = await queryPreview({ data_source_id: dataSourceId, sql, max_rows: 50 })
+      const res = await queryPreview({
+        data_source_id: slotDs,
+        sql: slotSql,
+        max_rows: 50,
+      })
       setPreviewColumns(res.columns)
       setPreviewRows(res.rows)
-      // Only fill Chart bindings that are still empty (do not overwrite KPI/template)
+      if (slot === 'main') {
+        setArtboard((prev) => syncMainDataset(prev, dataSourceId, sql))
+      } else {
+        setArtboard((prev) =>
+          upsertDataset(prev, {
+            id: slot,
+            name: activeDs?.name,
+            data_source_id: slotDs,
+            sql: slotSql,
+          }),
+        )
+      }
       if (tree && res.columns.length) {
         const walk = (n: StudioNode): StudioNode => {
-          if (n.type === 'Chart') {
+          if (n.type === 'Chart' && String(n.binding?.dataset_id || 'main') === slot) {
             const b = { ...n.binding }
             let changed = false
             if (!b.category_column) {
@@ -203,7 +251,7 @@ export function EditorPage() {
         }
         setTree(walk(tree))
       }
-      message.success(`取数 ${res.row_count} 行 · 点列名可绑定到当前组件`)
+      message.success(`[${slot}] 取数 ${res.row_count} 行`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -218,17 +266,7 @@ export function EditorPage() {
     }
     setCompiling(true)
     try {
-      const doc: ArtboardDoc = {
-        ...artboard,
-        datasets: [
-          {
-            id: 'main',
-            name: '主查询',
-            data_source_id: dataSourceId,
-            sql,
-          },
-        ],
-      }
+      const doc = buildDoc()
       const res = await studioCompile({
         artboard: doc,
         data_source_id: dataSourceId,
@@ -240,7 +278,7 @@ export function EditorPage() {
       setImageBase64(res.image_base64 || '')
       setPreviewHtml(res.html || '')
       setArtboard(res.artboard || doc)
-      message.success(`编译完成（${res.row_count} 行）`)
+      message.success(`编译完成（主集 ${res.row_count} 行）`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -259,10 +297,7 @@ export function EditorPage() {
     }
     setSaving(true)
     try {
-      const doc: ArtboardDoc = {
-        ...artboard,
-        datasets: [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }],
-      }
+      const doc = buildDoc()
       const saved = await studioSaveJob({
         id: currentJobId,
         name: name.trim(),
@@ -295,10 +330,7 @@ export function EditorPage() {
     }
     setPushing(true)
     try {
-      const doc: ArtboardDoc = {
-        ...artboard,
-        datasets: [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }],
-      }
+      const doc = buildDoc()
       const res = await studioTestPush({
         artboard: doc,
         data_source_id: dataSourceId,
@@ -328,16 +360,44 @@ export function EditorPage() {
     setSelectedId(node.id)
   }
 
-  const applyTemplate = (kind: 'daily' | 'blank') => {
-    const board = kind === 'daily' ? defaultDailyArtboard() : emptyArtboard()
-    if (dataSourceId) {
-      board.datasets = [{ id: 'main', name: '主查询', data_source_id: dataSourceId, sql }]
-    } else {
-      setSql(board.datasets?.[0]?.sql || sql)
-    }
-    setArtboard(board)
+  const applyTemplate = (kind: 'daily' | 'alert' | 'blank') => {
+    const board =
+      kind === 'daily'
+        ? defaultDailyArtboard()
+        : kind === 'alert'
+          ? defaultAlertArtboard()
+          : emptyArtboard()
+    const next = dataSourceId
+      ? syncMainDataset(board, dataSourceId, board.datasets?.[0]?.sql || sql)
+      : board
+    if (!dataSourceId) setSql(next.datasets?.[0]?.sql || sql)
+    else if (board.datasets?.[0]?.sql) setSql(String(board.datasets[0].sql))
+    setArtboard(next)
+    setActiveDatasetId('main')
     setSelectedId(null)
-    message.info(kind === 'daily' ? '已应用日报模板' : '已清空为空白画板')
+    message.info(
+      kind === 'daily' ? '已应用日报模板' : kind === 'alert' ? '已应用告警模板' : '已清空画板',
+    )
+  }
+
+  const applyThemePack = (packId: string) => {
+    const pack = THEME_PACKS.find((p) => p.id === packId)
+    if (!pack) return
+    setArtboard((prev) => ({
+      ...prev,
+      artboard: {
+        ...prev.artboard,
+        theme: {
+          ...prev.artboard?.theme,
+          pack: pack.id,
+          color: pack.color,
+          table_style:
+            pack.id === 'alert'
+              ? 'alert'
+              : prev.artboard?.theme?.table_style || 'business',
+        },
+      },
+    }))
   }
 
   const tableData = useMemo(
@@ -381,7 +441,8 @@ export function EditorPage() {
             <Tag color="blue">Flow 画板</Tag>
           </Space>
           <Space wrap>
-            <Button onClick={() => applyTemplate('daily')}>日报模板</Button>
+            <Button onClick={() => applyTemplate('daily')}>日报</Button>
+            <Button onClick={() => applyTemplate('alert')}>告警</Button>
             <Button onClick={() => applyTemplate('blank')}>空白</Button>
             <Button icon={<SearchOutlined />} loading={querying} onClick={() => void onQuery()}>
               取数
@@ -538,14 +599,103 @@ export function EditorPage() {
                 children: (
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <div>
-                      <Typography.Text type="secondary">数据源</Typography.Text>
+                      <Typography.Text type="secondary">主题包</Typography.Text>
+                      <Select
+                        style={{ width: '100%', marginTop: 4 }}
+                        value={themePack}
+                        onChange={applyThemePack}
+                        options={THEME_PACKS.map((p) => ({
+                          value: p.id,
+                          label: p.label,
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">画板顶栏标题</Typography.Text>
+                      <Input
+                        style={{ marginTop: 4 }}
+                        value={String(artboard.artboard?.chrome_title || '')}
+                        onChange={(e) =>
+                          setArtboard((prev) => ({
+                            ...prev,
+                            artboard: { ...prev.artboard, chrome_title: e.target.value },
+                          }))
+                        }
+                        placeholder="支持 {{列名}}"
+                      />
+                      <div style={{ marginTop: 6 }}>
+                        <Switch
+                          size="small"
+                          checked={artboard.artboard?.show_chrome !== false}
+                          onChange={(v) =>
+                            setArtboard((prev) => ({
+                              ...prev,
+                              artboard: { ...prev.artboard, show_chrome: v },
+                            }))
+                          }
+                        />{' '}
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          显示顶栏色条
+                        </Typography.Text>
+                      </div>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">数据集</Typography.Text>
+                      <Space style={{ width: '100%', marginTop: 4 }} wrap>
+                        <Select
+                          style={{ minWidth: 140 }}
+                          value={activeDatasetId}
+                          onChange={(id) => {
+                            setActiveDatasetId(id)
+                            const d = datasets.find((x) => x.id === id)
+                            if (d?.id === 'main') {
+                              /* sql state is main */
+                            } else if (d?.sql) {
+                              /* keep secondary sql in artboard only */
+                            }
+                            setPreviewColumns([])
+                            setPreviewRows([])
+                          }}
+                          options={datasetOptions}
+                        />
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setArtboard((prev) => ensureSecondaryDataset(prev))
+                            setActiveDatasetId('trend')
+                            message.info('已添加第二数据集 trend，可写独立 SQL')
+                          }}
+                        >
+                          + 第二数据集
+                        </Button>
+                      </Space>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">
+                        数据源（{activeDatasetId === 'main' ? '主任务' : activeDatasetId}）
+                      </Typography.Text>
                       <Select
                         style={{ width: '100%', marginTop: 4 }}
                         showSearch
                         optionFilterProp="label"
                         placeholder="选择数据源"
-                        value={dataSourceId}
-                        onChange={setDataSourceId}
+                        value={
+                          activeDatasetId === 'main'
+                            ? dataSourceId
+                            : (activeDs?.data_source_id as string) || dataSourceId
+                        }
+                        onChange={(v) => {
+                          if (activeDatasetId === 'main') setDataSourceId(v)
+                          else
+                            setArtboard((prev) =>
+                              upsertDataset(prev, {
+                                id: activeDatasetId,
+                                name: activeDs?.name,
+                                data_source_id: v,
+                                sql: activeDs?.sql,
+                              }),
+                            )
+                        }}
                         options={sources.map((s) => ({
                           value: s.id,
                           label: `${s.name} (${s.type})`,
@@ -557,12 +707,27 @@ export function EditorPage() {
                       <Input.TextArea
                         style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
                         rows={6}
-                        value={sql}
-                        onChange={(e) => setSql(e.target.value)}
+                        value={
+                          activeDatasetId === 'main'
+                            ? sql
+                            : String(activeDs?.sql || '')
+                        }
+                        onChange={(e) => {
+                          if (activeDatasetId === 'main') setSql(e.target.value)
+                          else
+                            setArtboard((prev) =>
+                              upsertDataset(prev, {
+                                id: activeDatasetId,
+                                name: activeDs?.name,
+                                data_source_id: activeDs?.data_source_id,
+                                sql: e.target.value,
+                              }),
+                            )
+                        }}
                       />
                     </div>
                     <Button block loading={querying} onClick={() => void onQuery()}>
-                      运行取数
+                      运行取数（当前数据集）
                     </Button>
                     {selected && tree ? (
                       <Alert
@@ -648,8 +813,8 @@ export function EditorPage() {
                       />
                     </div>
                     <div>
-                      <Space>
-                        <Typography.Text type="secondary">主题色</Typography.Text>
+                      <Space wrap>
+                        <Typography.Text type="secondary">主题色覆盖</Typography.Text>
                         <ColorPicker
                           value={themeColor}
                           onChange={(c) =>
@@ -666,7 +831,7 @@ export function EditorPage() {
                           }
                         />
                         <Switch
-                          checkedChildren="启用"
+                          checkedChildren="任务启用"
                           unCheckedChildren="停用"
                           checked={enabled}
                           onChange={setEnabled}
@@ -700,6 +865,7 @@ export function EditorPage() {
                   <ComponentProps
                     node={selected}
                     columns={previewColumns}
+                    datasetOptions={datasetOptions}
                     onChange={(patch) => setTree(updateNode(tree, selectedId, patch))}
                     onMove={(dir) => setTree(moveSibling(tree, selectedId, dir))}
                     onDelete={() => {
@@ -849,14 +1015,16 @@ function ArtboardBlock({
     const ct = String(node.props?.chart_type || 'bar')
     const cat = String(node.binding?.category_column || '？')
     const val = String(node.binding?.value_column || '？')
+    const ds = String(node.binding?.dataset_id || 'main')
+    const icon = ct === 'pie' ? '🥧 饼图' : ct === 'line' ? '📈 折线' : '📊 柱状图'
     return (
       <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
         <Typography.Text strong style={{ fontSize: 13 }}>
-          {ct === 'pie' ? '🥧 饼图' : '📊 柱状图'}
+          {icon}
           {node.props?.title ? ` · ${String(node.props.title)}` : ''}
         </Typography.Text>
         <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-          分类=<Tag style={{ margin: 0 }}>{cat}</Tag> 数值=
+          @{ds} 分类=<Tag style={{ margin: 0 }}>{cat}</Tag> 数值=
           <Tag style={{ margin: 0 }}>{val}</Tag>
         </div>
         <div
@@ -867,10 +1035,32 @@ function ArtboardBlock({
             background:
               ct === 'pie'
                 ? 'conic-gradient(#1677ff 0 35%, #52c41a 0 60%, #faad14 0 80%, #ff4d4f 0)'
-                : 'repeating-linear-gradient(90deg,#1677ff 0 18px,transparent 18px 28px)',
+                : ct === 'line'
+                  ? 'linear-gradient(180deg, transparent 40%, #e6f4ff 40%), linear-gradient(135deg, transparent 48%, #1677ff 48% 52%, transparent 52%)'
+                  : 'repeating-linear-gradient(90deg,#1677ff 0 18px,transparent 18px 28px)',
             opacity: 0.85,
           }}
         />
+      </div>
+    )
+  }
+
+  if (node.type === 'Alert') {
+    return (
+      <div
+        style={{
+          ...style,
+          background: '#fff2f0',
+          borderColor: selected ? '#1677ff' : '#ffccc7',
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          onSelect(node.id)
+        }}
+      >
+        <Typography.Text style={{ color: '#a8071a', fontSize: 13 }}>
+          ⚠ {String(node.props?.text || '告警')}
+        </Typography.Text>
       </div>
     )
   }
@@ -893,12 +1083,14 @@ function ArtboardBlock({
 function ComponentProps({
   node,
   columns,
+  datasetOptions,
   onChange,
   onMove,
   onDelete,
 }: {
   node: StudioNode
   columns: string[]
+  datasetOptions: { value: string; label: string }[]
   onChange: (patch: Partial<StudioNode>) => void
   onMove: (dir: -1 | 1) => void
   onDelete: () => void
@@ -933,6 +1125,23 @@ function ComponentProps({
         message="数据如何进入此组件"
         description={bindingHint(node, columns)}
       />
+      {['Text', 'Kpi', 'Table', 'Chart', 'Alert'].includes(String(node.type)) ? (
+        <div>
+          <Typography.Text type="secondary">绑定数据集</Typography.Text>
+          <Select
+            style={{ width: '100%', marginTop: 4 }}
+            value={String(node.binding?.dataset_id || 'main')}
+            onChange={(v) =>
+              onChange({ binding: { ...node.binding, dataset_id: v } })
+            }
+            options={
+              datasetOptions.length
+                ? datasetOptions
+                : [{ value: 'main', label: 'main' }]
+            }
+          />
+        </div>
+      ) : null}
       {node.type === 'Text' ? (
         <>
           <div>
@@ -999,8 +1208,17 @@ function ComponentProps({
             type="info"
             showIcon
             style={{ fontSize: 12 }}
-            message="表格自动使用当前 SQL 全部结果，无需逐列绑定"
+            message="表格使用绑定数据集的全部结果"
           />
+          <div>
+            <Typography.Text type="secondary">表风格</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              value={String(node.props?.style || 'business')}
+              onChange={(v) => onChange({ props: { ...node.props, style: v } })}
+              options={TABLE_STYLES.map((s) => ({ value: s.id, label: s.label }))}
+            />
+          </div>
           <div>
             <Typography.Text type="secondary">百分比着色</Typography.Text>
             <div>
@@ -1029,27 +1247,31 @@ function ComponentProps({
             type="info"
             showIcon
             style={{ fontSize: 12 }}
-            message="图表绑定：分类列（横轴/扇区名）+ 数值列（柱高/扇区大小）"
+            message="分类列 + 数值列；可切换绑定数据集（如趋势用 trend）"
           />
           <div>
             <Typography.Text type="secondary">图表类型</Typography.Text>
             <Radio.Group
               style={{ marginTop: 4, display: 'block' }}
               value={String(node.props?.chart_type || 'bar')}
-              onChange={(e) =>
+              onChange={(e) => {
+                const map: Record<string, string> = {
+                  bar: '柱状图',
+                  pie: '饼图',
+                  line: '折线图',
+                }
                 onChange({
                   props: {
                     ...node.props,
                     chart_type: e.target.value,
-                    title:
-                      node.props?.title ||
-                      (e.target.value === 'pie' ? '饼图' : '柱状图'),
+                    title: node.props?.title || map[e.target.value] || '图表',
                   },
                 })
-              }
+              }}
             >
-              <Radio.Button value="bar">柱状图</Radio.Button>
-              <Radio.Button value="pie">饼图</Radio.Button>
+              <Radio.Button value="bar">柱</Radio.Button>
+              <Radio.Button value="line">折线</Radio.Button>
+              <Radio.Button value="pie">饼</Radio.Button>
             </Radio.Group>
           </div>
           <div>
@@ -1094,9 +1316,36 @@ function ComponentProps({
           </div>
           {columns.length === 0 ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              请先在「数据」里取数，才能从下拉选择列名。
+              请先在「数据」里对当前数据集取数，才能从下拉选择列名。
             </Typography.Text>
           ) : null}
+        </>
+      ) : null}
+      {node.type === 'Alert' ? (
+        <>
+          <div>
+            <Typography.Text type="secondary">级别</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              value={String(node.props?.level || 'error')}
+              onChange={(v) => onChange({ props: { ...node.props, level: v } })}
+              options={[
+                { value: 'error', label: '严重' },
+                { value: 'warning', label: '警告' },
+                { value: 'info', label: '信息' },
+                { value: 'success', label: '成功' },
+              ]}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">文案（支持 {'{{列}}'}）</Typography.Text>
+            <Input.TextArea
+              style={{ marginTop: 4 }}
+              rows={3}
+              value={String(node.props?.text || '')}
+              onChange={(e) => onChange({ props: { ...node.props, text: e.target.value } })}
+            />
+          </div>
         </>
       ) : null}
       {node.type === 'Container' ? (

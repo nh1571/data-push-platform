@@ -268,7 +268,14 @@ export interface SaveJobRequest {
 // Studio artboard
 // ---------------------------------------------------------------------------
 
-export type StudioComponentType = 'Container' | 'Text' | 'Kpi' | 'Table' | 'Divider'
+export type StudioComponentType =
+  | 'Container'
+  | 'Text'
+  | 'Kpi'
+  | 'Table'
+  | 'Chart'
+  | 'Alert'
+  | 'Divider'
 
 export interface StudioNode {
   id: string
@@ -293,12 +300,21 @@ export interface ArtboardDoc {
   artboard?: {
     width?: number
     height?: number | null
-    theme?: { color?: string; table_style?: string }
+    theme?: { pack?: string; color?: string; table_style?: string }
     layout_default?: string
+    show_chrome?: boolean
+    chrome_title?: string
   }
   datasets?: StudioDataset[]
   tree?: StudioNode
   compose?: { mode?: string; markdown_caption?: boolean }
+}
+
+export interface StudioMeta {
+  theme_packs: { id: string; label: string; color: string }[]
+  table_styles: { id: string; label: string }[]
+  chart_types: { id: string; label: string }[]
+  components: { type: string; label: string }[]
 }
 
 export interface StudioTemplate {

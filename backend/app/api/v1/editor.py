@@ -29,7 +29,12 @@ from app.modules.editor.schemas import (
     TestPushResponse,
 )
 from app.modules.studio import service as studio_service
-from app.modules.studio.defaults import default_daily_artboard, empty_artboard
+from app.modules.studio.defaults import (
+    default_alert_artboard,
+    default_daily_artboard,
+    empty_artboard,
+)
+from app.modules.studio.themes import list_table_styles, list_theme_packs
 
 router = APIRouter()
 
@@ -131,11 +136,39 @@ def studio_templates() -> list[StudioTemplateResponse]:
             artboard=default_daily_artboard(),
         ),
         StudioTemplateResponse(
+            id="alert",
+            name="指标告警",
+            artboard=default_alert_artboard(),
+        ),
+        StudioTemplateResponse(
             id="blank",
             name="空白画板",
             artboard=empty_artboard(),
         ),
     ]
+
+
+@router.get("/studio/meta")
+def studio_meta() -> dict:
+    """Theme packs, table styles, component types for the designer."""
+    return {
+        "theme_packs": list_theme_packs(),
+        "table_styles": list_table_styles(),
+        "chart_types": [
+            {"id": "bar", "label": "柱状图"},
+            {"id": "line", "label": "折线图"},
+            {"id": "pie", "label": "饼图"},
+        ],
+        "components": [
+            {"type": "Text", "label": "文本"},
+            {"type": "Kpi", "label": "KPI"},
+            {"type": "Table", "label": "数据表"},
+            {"type": "Chart", "label": "图表"},
+            {"type": "Alert", "label": "告警条"},
+            {"type": "Container", "label": "容器"},
+            {"type": "Divider", "label": "分隔线"},
+        ],
+    }
 
 
 @router.post("/studio/compile", response_model=StudioCompileResponse)

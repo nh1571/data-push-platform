@@ -76,7 +76,11 @@ def resolve_data_context(
     for ds in datasets:
         ds_id = str(ds.get("id") or "main")
         raw_source = ds.get("data_source_id") or fallback_data_source_id
-        sql = str(ds.get("sql") or fallback_sql or "").strip()
+        # main SQL always prefers explicit fallback_sql from job/editor
+        if ds_id == "main" and fallback_sql:
+            sql = str(fallback_sql).strip()
+        else:
+            sql = str(ds.get("sql") or (fallback_sql if ds_id == "main" else "") or "").strip()
         if not raw_source or not sql:
             continue
         try:
@@ -86,9 +90,15 @@ def resolve_data_context(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid data_source_id for dataset {ds_id}",
             ) from exc
-        ctx[ds_id] = editor_service.execute_query(
-            db, source_uuid, sql, params, max_rows=max_rows
-        )
+        try:
+            ctx[ds_id] = editor_service.execute_query(
+                db, source_uuid, sql, params, max_rows=max_rows
+            )
+        except HTTPException:
+            if ds_id == "main":
+                raise
+            # Secondary datasets optional at compile time
+            continue
 
     if not ctx:
         raise HTTPException(

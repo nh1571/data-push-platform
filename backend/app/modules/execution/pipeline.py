@@ -143,6 +143,8 @@ def render_message(
     result: QueryResult,
     render_spec: Any,
     params: dict[str, Any],
+    *,
+    data_ctx: dict[str, QueryResult] | None = None,
 ) -> Message:
     """Apply renderers from *render_spec* and return a composed :class:`Message`.
 
@@ -151,6 +153,7 @@ def render_message(
     placeholders and table flags are applied against live query data.
 
     When *render_spec* is a studio artboard (v3), compile the component tree.
+    *data_ctx* maps dataset id → QueryResult for multi-dataset artboards.
     """
     if isinstance(render_spec, dict):
         from app.modules.studio.migrate import extract_artboard, is_artboard_spec
@@ -161,7 +164,10 @@ def render_message(
         if doc is not None:
             from app.modules.studio.compile import artboard_to_message
 
-            return artboard_to_message(doc, {"main": result}, with_image=True)
+            ctx = dict(data_ctx) if data_ctx else {"main": result}
+            if "main" not in ctx:
+                ctx["main"] = result
+            return artboard_to_message(doc, ctx, with_image=True)
 
         if render_spec.get("design") is not None:
             from app.modules.editor.design import build_message_from_design
@@ -273,6 +279,49 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         )
         db.commit()
 
+        # Multi-dataset artboard: execute additional slots (main uses job SQL)
+        data_ctx: dict[str, QueryResult] = {"main": result}
+        from app.modules.studio.migrate import extract_artboard, is_artboard_spec
+
+        artboard_doc = extract_artboard(job.render_spec)
+        if artboard_doc is None and isinstance(job.render_spec, dict) and is_artboard_spec(
+            job.render_spec
+        ):
+            artboard_doc = job.render_spec
+        if isinstance(artboard_doc, dict):
+            for ds_def in artboard_doc.get("datasets") or []:
+                if not isinstance(ds_def, dict):
+                    continue
+                slot = str(ds_def.get("id") or "main")
+                if slot == "main":
+                    continue
+                raw_ds = ds_def.get("data_source_id") or job.data_source_id
+                sql_extra = str(ds_def.get("sql") or "").strip()
+                if not sql_extra:
+                    continue
+                try:
+                    extra_ds = db.get(DataSource, _as_uuid(raw_ds))
+                    if extra_ds is None:
+                        continue
+                    extra_plugin = plugin_registry.get("datasource", extra_ds.type)
+                    extra_cfg = decrypt_dict(extra_ds.config_enc)
+                    data_ctx[slot] = extra_plugin.execute(extra_cfg, sql_extra, params)
+                    _log(
+                        db,
+                        job_run_id,
+                        "query",
+                        f"dataset {slot!r}: {len(data_ctx[slot].rows or [])} row(s)",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    _log(
+                        db,
+                        job_run_id,
+                        "query",
+                        f"dataset {slot!r} failed: {exc}",
+                        level=LogLevel.ERROR,
+                    )
+            db.commit()
+
         # --- skip_if_empty ---
         if row_count == 0 and job.skip_if_empty:
             _log(
@@ -288,7 +337,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
 
         # --- render ---
         _log(db, job_run_id, "render", "rendering message from query result")
-        message = render_message(result, job.render_spec, params)
+        message = render_message(result, job.render_spec, params, data_ctx=data_ctx)
         _log(
             db,
             job_run_id,
