@@ -1,52 +1,176 @@
 ---
 name: continue-data-push-dev
 description: >
-  Use when resuming or starting work on the data-push-platform / 数据推送中台 project:
+  Use when starting, resuming, or stopping work on the data-push-platform / 数据推送中台 project:
   continue development, 继续开发, 接着做, 恢复开发, 启动开发, handoff resume,
+  stop development, 停止开发, 收工, 下班, 结束开发, pause work, 保存进度,
   /continue-data-push-dev, or any agent opens this repo without prior chat context.
 ---
 
-# Continue Data Push Platform Development
+# Continue / Stop Data Push Platform Development
 
 ## Overview
 
-Long-running **数据推送中台** project. Progress lives in git + docs, not chat history.
-**Core rule:** Read handoff docs and update them before/after work. Never invent product goals from scratch.
+Long-running **数据推送中台**. Progress lives in **git + docs**, not chat history.
 
-## Hard Rules
+**Two modes** (detect from user message):
 
-1. **First action:** Read these files (in order). Do not write feature code before step 1–3 of the Startup sequence.
-2. **Do not** reverse confirmed principles (Message ⊥ Channel, MySQL meta DB, plugin SPI, hybrid schedule C) unless the user explicitly changes them.
-3. **Do not** treat the current UI as “done product”; user wants template→image editing and full DingTalk modes (see handoff §2 / Obsidian 09).
-4. **End of session:** Update handoff §7 “当前阻塞 / 进行中” and mention what changed to the user.
+| Mode | Triggers | Goal |
+|------|----------|------|
+| **START** | 继续开发、启动开发、接着做、resume、start | Read handoff → env up → work |
+| **STOP** | 停止开发、收工、下班、结束开发、pause、保存进度 | Save code/progress → stop helpers → handoff note |
+
+If both mentioned, do **STOP** first only if they said they're leaving; else ask once.
+
+**Core rule:** Never invent product goals from scratch. Read handoff. On STOP, leave the next agent a clean slate.
+
+---
 
 ## Paths (absolute)
 
 | Item | Path |
 |------|------|
 | Repo | `/Users/hello/grok/data-push-platform` |
-| Branch | `feature/m0-scaffold` |
-| **Handoff (authority)** | `/Users/hello/grok/data-push-platform/docs/DEVELOPMENT_HANDOFF.md` |
+| Branch | `feature/m0-scaffold` (verify with `git branch`) |
+| **Handoff** | `/Users/hello/grok/data-push-platform/docs/DEVELOPMENT_HANDOFF.md` |
 | Checklist | `/Users/hello/grok/data-push-platform/docs/CONTINUE_CHECKLIST.md` |
-| README | `/Users/hello/grok/data-push-platform/README.md` |
-| Obsidian design | `/Users/hello/Documents/obsidian/notes/20_项目/企业数据推送中台/` |
-| Design index | `.../00-项目索引.md` |
-| User feedback | `.../07-体验反馈与缺口.md`, `.../09-产品分析修正-钉钉能力与信息架构.md` |
+| Obsidian | `/Users/hello/Documents/obsidian/notes/20_项目/企业数据推送中台/` |
+| Session log (optional) | `.../20_项目/企业数据推送中台/10-开发进度与交接.md` |
 
-## Startup Sequence (mandatory)
+---
 
-Execute in order every time this skill is used:
+## Mode detection
+
+```text
+用户说 停止/收工/下班/结束开发/pause  →  STOP sequence only (do not start coding)
+用户说 继续/启动/接着/resume        →  START sequence
+用户说 继续做完再收工               →  implement then STOP
+```
+
+---
+
+# MODE: STOP（停止开发 / 收工）
+
+Run **in order**. Do not skip. Goal: machine quiet, git clean or intentionally saved, next session can START smoothly.
+
+## S1. Summarize today's work
+
+From this session (or git log since last handoff):
+
+- What was implemented / fixed / decided  
+- What is unfinished  
+- One concrete **next action** for tomorrow  
+
+## S2. Save code (git)
+
+```bash
+cd /Users/hello/grok/data-push-platform
+git status
+git branch --show-current
+git diff --stat
+```
+
+| Working tree | Action |
+|--------------|--------|
+| **Clean** | Note "nothing to commit" |
+| **Has changes user intends to keep** | Stage + commit with clear message (`feat:`/`fix:`/`docs:`). Prefer complete sentences. |
+| **Dirty but incomplete / risky** | Prefer `git stash push -u -m "wip: pause YYYY-MM-DD"` **after asking once** if intent unclear; or commit WIP with `wip:` if user said 保存进度 |
+| **Secrets in diff** (.env with real keys) | **Never commit** secrets; restore or gitignore |
+
+Do **not** `git push` unless user explicitly asks.
+
+If commit succeeds, record SHA for handoff §7.
+
+## S3. Persist progress in docs (mandatory)
+
+### 3a. Update `docs/DEVELOPMENT_HANDOFF.md` §7
+
+Replace **§7 当前阻塞 / 进行中** block with:
+
+```text
+进行中：无（已收工 YYYY-MM-DD）
+阻塞：<无 / 具体阻塞>
+上次完成：<今日 commits 与摘要>
+建议下一动作：<一条可执行的下一步>
+停工环境：docker 已 down；API/前端已停（或注明仍在跑）
+```
+
+### 3b. Optional Obsidian line
+
+Append to `10-开发进度与交接.md` 变更:
+
+```text
+- YYYY-MM-DD：收工 — <一句话>；下一动作 <…>
+```
+
+### 3c. Commit doc updates if §7 changed
+
+```bash
+git add docs/DEVELOPMENT_HANDOFF.md
+git commit -m "docs: session pause handoff YYYY-MM-DD"
+```
+
+(Include Obsidian only if that vault is not the git repo — Obsidian path is outside repo; only update file on disk.)
+
+## S4. Stop helper processes
+
+### 4a. Docker (meta MySQL + Redis + any compose services)
+
+```bash
+cd /Users/hello/grok/data-push-platform
+docker compose ps
+docker compose down
+# Do NOT use docker compose down -v unless user explicitly wants to wipe DB volumes
+```
+
+**Never** `-v` by default (wipes MySQL data).
+
+### 4b. Local API / frontend (if running outside compose)
+
+```bash
+# Free common ports if still listening (macOS)
+lsof -tiTCP:8000 -sTCP:LISTEN | xargs kill 2>/dev/null || true
+lsof -tiTCP:5173 -sTCP:LISTEN | xargs kill 2>/dev/null || true
+```
+
+Only kill processes clearly from this project (uvicorn on 8000, vite on 5173). Do not kill unrelated system services.
+
+### 4c. Verify quiet
+
+```bash
+docker compose ps
+curl -s -m 1 http://localhost:8000/health || echo "api:stopped"
+curl -s -m 1 -o /dev/null -w "fe:%{http_code}\n" http://localhost:5173/ || echo "fe:stopped"
+```
+
+## S5. Final report to user (STOP)
+
+Tell the user clearly:
+
+1. **Git:** clean / committed SHA / stashed  
+2. **Docs:** §7 updated  
+3. **Docker:** down (data volumes kept)  
+4. **Ports 8000/5173:** stopped or still up  
+5. **Tomorrow:** open handoff §7 + say「继续开发推送中台」or `/continue-data-push-dev`  
+
+---
+
+# MODE: START（启动 / 继续开发）
+
+## Hard Rules (START)
+
+1. Do **not** write feature code before Startup steps 1–3.  
+2. Do **not** reverse Message ⊥ Channel, MySQL meta DB, plugin SPI, hybrid schedule C unless user says so.  
+3. Product is still incomplete: template→image + full DingTalk modes matter (Obsidian 09).  
+4. End with STOP sequence if user is leaving; otherwise at least update §7 if substantial work done.
+
+## Startup Sequence
 
 ### 1. Read handoff
 
-```bash
-# Prefer Read tool on these files
-```
-
-- `docs/DEVELOPMENT_HANDOFF.md` — full progress, priorities, principles
-- `docs/CONTINUE_CHECKLIST.md` — short checklist
-- Handoff **§7 当前阻塞 / 进行中** — pick up exact next work
-- If product questions: Obsidian `09` then `08` then `03`
+- `docs/DEVELOPMENT_HANDOFF.md` (full, especially §6–§7)  
+- `docs/CONTINUE_CHECKLIST.md`  
+- Product gaps if needed: Obsidian `09`, `08`, `07`
 
 ### 2. Git state
 
@@ -55,29 +179,26 @@ cd /Users/hello/grok/data-push-platform
 git status
 git branch --show-current
 git log -5 --oneline
+# If stashed last time:
+git stash list
 ```
 
-Expect branch `feature/m0-scaffold`. If dirty, summarize uncommitted work before coding.
+If `stash` exists with `wip: pause`, ask whether to `git stash pop` before coding.
 
 ### 3. Environment pulse
 
 ```bash
-cd /Users/hello/grok/data-push-platform
 docker compose ps
 curl -s -m 2 http://localhost:8000/health || true
 curl -s -m 2 -o /dev/null -w "%{http_code}" http://localhost:5173/ || true
 ```
 
-### 4. Start stack if user wants to run/UI (or if health fails)
-
-**Meta DB + Redis:**
+### 4. Start stack (if UI/API needed or health down)
 
 ```bash
 cd /Users/hello/grok/data-push-platform
 docker compose up -d mysql redis
 ```
-
-**API** (background if long-running):
 
 ```bash
 cd /Users/hello/grok/data-push-platform/backend
@@ -93,8 +214,6 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Frontend:**
-
 ```bash
 cd /Users/hello/grok/data-push-platform/frontend
 npm run dev -- --host 0.0.0.0 --port 5173
@@ -106,72 +225,57 @@ npm run dev -- --host 0.0.0.0 --port 5173
 | User | `admin` |
 | Pass | `admin123` |
 
-**Note:** Meta DB is **MySQL**, not Postgres. Compose service name is `mysql`.
+Meta DB = **MySQL** service `mysql`, not Postgres.
 
-### 5. Report status to user (before coding)
-
-Tell the user in plain language:
+### 5. Report before coding
 
 1. Branch + latest commit  
 2. Services up/down  
-3. Handoff §7 status  
-4. **Proposed next task** from HANDOFF §6 (P0 list) unless user already specified a task  
-5. Ask confirm only if task is ambiguous; if user said “继续开发” with no detail, start top P0
+3. §7 status + proposed next task from §6  
+4. If user only said「继续开发」, start top P0 after brief status  
 
 ### 6. Implement
 
-- Follow HANDOFF §6 priorities unless user overrides  
-- Prefer TDD for backend (`cd backend && pytest`)  
+- HANDOFF §6 priorities unless user overrides  
+- Backend: `cd backend && pytest`  
 - Frontend: `npm run build` when UI changes  
-- Small commits: `feat:` / `fix:` / `docs:`
+- Small commits  
 
-### 7. Shutdown / handoff update (end of work)
+### 7. Mid-session pause vs full STOP
 
-Edit `docs/DEVELOPMENT_HANDOFF.md` section **§7 当前阻塞 / 进行中**:
+| User says | Action |
+|-----------|--------|
+| 先停一下 / 等等 | Light: update §7 only, leave docker running if useful |
+| 收工 / 下班 / 停止开发 | **Full STOP sequence** (S1–S5) |
 
-```text
-进行中：<what you were doing>
-阻塞：<or 无>
-上次完成：<commits / summary>
-建议下一动作：<one concrete next step>
-```
-
-Optionally append one line to Obsidian `10-开发进度与交接.md` 变更.
+---
 
 ## What NOT to do
 
 | Anti-pattern | Do instead |
 |--------------|------------|
-| Redesign product from zero | Read 09 + HANDOFF |
-| Switch meta DB back to Postgres | Keep MySQL |
-| Only improve CRUD forms | Editor + templates + channel modes are the product |
-| Skip reading handoff “to save time” | Always read §7 + §6 |
-| Leave session without updating §7 | Always update |
+| Leave dirty git + stop docker with no handoff | STOP S2+S3 first |
+| `docker compose down -v` on pause | `down` without `-v` |
+| Redesign product from zero on resume | Read 09 + HANDOFF |
+| Skip §7 on stop | Always write §7 |
+| Commit `.env` secrets | Never |
 
-## Quick architecture reminder
+---
+
+## Quick architecture
 
 ```text
-DataSource plugin (mysql|doris)
-  → SQL → QueryResult
-  → design/templates → Message (text|image|card|file)
-  → Channel plugin (dingtalk.*) → DingTalk
-JobRun unifies manual / cron / DS HTTP / editor test-push
+DataSource (mysql|doris) → SQL → design/templates → Message → Channel (dingtalk.*)
+JobRun: manual | cron | DS HTTP | editor test-push
 ```
 
-Key packages: `backend/app/modules/editor/`, `backend/app/modules/execution/`, `backend/app/plugins/`, `frontend/src/pages/editor/`.
+Key code: `backend/app/modules/editor/`, `execution/`, `plugins/`, `frontend/src/pages/editor/`.
 
-## Related skills (optional after handoff read)
+---
 
-- `fastapi-python`, `celery-expert` — backend  
-- `dingtalk-message` — DingTalk API reference  
-- `test-driven-development`, `verification-before-completion` — quality  
-- `subagent-driven-development` — multi-task execution  
+## Red Flags
 
-## Red Flags — STOP
+**START:** coding before reading HANDOFF; inventing scope; Postgres URLs.  
+**STOP:** stopping docker without committing/stashing; wiping volumes; no §7 update.
 
-- Coding before reading `DEVELOPMENT_HANDOFF.md`  
-- “I’ll just improve the UI a bit” without checking §6  
-- Inventing new product scope not in handoff/user message  
-- Using PostgreSQL URLs from old docs  
-
-**If any red flag:** Stop, read handoff, realign with user.
+**If red flag:** Stop, fix process, then continue.

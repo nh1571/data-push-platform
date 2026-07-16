@@ -50,9 +50,26 @@ cd backend && pytest -q
 - [ ] 若有架构/产品变化，更新 Obsidian 对应笔记 + `00` 变更日志
 - [ ] 告诉用户：改了什么、怎么验收、下一步建议
 
+## 收工 / 停止开发（STOP）
+
+用户说「停止开发 / 收工 / 下班」时走技能 **STOP** 模式：
+
+- [ ] 汇总今日完成与未完成
+- [ ] `git status`：提交可保留改动，或 `stash` 半成品（勿提交密钥）
+- [ ] 更新 `docs/DEVELOPMENT_HANDOFF.md` §7（进行中=已收工、建议下一动作）
+- [ ] 文档变更可再 commit：`docs: session pause handoff`
+- [ ] `docker compose down`（**不要** `-v`）
+- [ ] 结束本机 uvicorn(:8000) / vite(:5173) 若在跑
+- [ ] 向用户确认：代码状态、docker 已停、明天怎么开
+
 ## 开场白模板
 
+**继续：**
 ```text
-继续 data-push-platform。先读 docs/DEVELOPMENT_HANDOFF.md 与 docs/CONTINUE_CHECKLIST.md。
-当前分支 feature/m0-scaffold。本次任务：<一句话>。
+继续开发推送中台 / 使用技能 continue-data-push-dev
+```
+
+**收工：**
+```text
+停止开发 / 收工下班，请按 continue-data-push-dev 的 STOP 流程处理
 ```
