@@ -34,8 +34,8 @@
 | **产品** | 数据中心推送中台：SQL 取数 → 渲染消息 → 钉钉等多通道投递 |
 | **仓库** | `/Users/hello/grok/data-push-platform` |
 | **分支** | `feature/m0-scaffold`（尚未合并 main） |
-| **最新提交** | `ba8d336` — stage2 product fixes（IA / 通道 mode / 图片模板） |
-| **当前阶段** | **可用骨架 + 编辑工作台初版**；**非**生产完美版 |
+| **最新提交** | 见 git log（含内容管线里程碑 + 内容优先 IA） |
+| **当前阶段** | **可用骨架 + 内容工作台（内容优先）**；**非**生产完美版 |
 | **元数据库** | **MySQL 8**（不是 PostgreSQL） |
 | **业务取数** | 插件：Doris、MySQL |
 | **设计记忆** | Obsidian：`/Users/hello/Documents/obsidian/notes/20_项目/企业数据推送中台/` |
@@ -366,22 +366,24 @@ data-push-platform/
 
 ### P0（下一迭代必须）
 
-> 已对照存量系统 pythonProject4（见 Obsidian `12-存量系统参考与通道对照`）：旧系统用 **single / orggroupsend / webhook** × **simple|image|file|care…** 满足业务；新系统对齐能力、避开脚本化。
+> 已对照存量系统 pythonProject4（见 Obsidian `12-存量系统参考与通道对照`）：旧系统用 **single / orggroupsend / webhook** × **simple|image|file|care…** 满足业务；新系统对齐能力、避开脚本化。  
+> **交互理念（2026-07-16）**：内容优先，见 Obsidian `15-交互理念重设计`。
 
-1. **验收并修 IA**  
-   - 推送任务「新建」= 弹窗（名称+数据源）→ draft → `/editor/:id`  
-   - 无 jobId 的 `/editor` 应引导去任务列表  
+1. **信息架构（内容优先）✅ 初版**  
+   - `/editor` 可空白开工：取数 → 设计 → 预览 → 试推 →「保存为任务」  
+   - 侧栏：内容工作台 / 任务管理（运营调度，非创作门禁）  
+   - 任务列表「新建」仍可快捷建 draft，但**不再**要求先建任务才能进编辑  
 
 2. **钉钉 Mode 与旧工厂对齐**  
    - ✅ webhook ≈ masstexting  
    - ✅ openapi_group ≈ orggroupsend（真机联调）  
-   - ⬜ openapi_oto ≈ **single（BatchSendOTO）——旧系统主力单发，优先补齐**  
+   - ✅ openapi_oto ≈ single（BatchSendOTO）— 真机联调待验收  
    - ✅ work_notice（完善选人）  
    - 消息形态：simple/image/file 与 Mode 正交；单发 >20 人要拆批（旧 split_userid）
 
 3. **成图管线向旧业务对齐**  
-   - 短期：打磨 Pillow/模板预览  
-   - 中期：**HTML + CSS + 截图（wkhtmltoimage/Playwright）** 复刻旧「好看表」（css 独立、条件着色）  
+   - ✅ HTML+CSS 成图引擎（playwright / wkhtml / pillow 回退）  
+   - 短期：打磨模板与预览体验  
    - 发图走 OpenAPI 单/群，**不**依赖 Webhook  
 
 ### P1
@@ -420,12 +422,12 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：无（里程碑 M-Content-v1 可验收）
+进行中：交互理念重设计已落地前端（待用户硬刷新验收）
 阻塞：无
-上次完成：HTML+CSS 成图引擎（playwright/wkhtml/pillow 回退）；任务列表最近运行；百分比着色；SQL Server；单发 OTO
-建议下一动作：用户验收内容工作台；可选 playwright install chromium 提升成图；真机钉钉联调
+上次完成：去掉「无 jobId 整页拦截」；/editor 空白可编辑；「保存为任务」；菜单改内容工作台/任务管理；Obsidian 15
+建议下一动作：用户打开「内容工作台」验收；若 OK 则继续成图/真机联调；否则按反馈再调 IA
 
-参考：Obsidian 12–14；技能 continue-data-push-dev
+参考：Obsidian 12–15；技能 continue-data-push-dev
 ```
 
 

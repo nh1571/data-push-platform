@@ -17,10 +17,10 @@ const { Header, Sider, Content } = Layout
 
 const MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: '工作台' },
-  { key: '/editor', icon: <FormOutlined />, label: '推送编辑' },
+  { key: '/editor', icon: <FormOutlined />, label: '内容工作台' },
+  { key: '/push-jobs', icon: <SendOutlined />, label: '任务管理' },
   { key: '/data-sources', icon: <CloudServerOutlined />, label: '数据源' },
   { key: '/channels', icon: <ApiOutlined />, label: '通道' },
-  { key: '/push-jobs', icon: <SendOutlined />, label: '推送任务' },
   { key: '/job-runs', icon: <HistoryOutlined />, label: '执行记录' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统' },
 ]

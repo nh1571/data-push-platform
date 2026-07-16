@@ -199,15 +199,18 @@ export function PushJobListPage() {
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} align="start">
         <div>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            推送任务
+            任务管理
           </Typography.Title>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            推送任务负责管理与调度；内容在「推送编辑」中制作
+            调度、启用、最近运行。日常取数与样式请用「内容工作台」；也可在此新建任务后进入编辑。
           </Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>
-          新建任务
-        </Button>
+        <Space>
+          <Button onClick={() => navigate('/editor')}>打开内容工作台</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>
+            新建任务
+          </Button>
+        </Space>
       </Space>
       <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
 

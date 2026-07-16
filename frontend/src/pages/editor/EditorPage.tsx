@@ -171,12 +171,35 @@ export function EditorPage() {
   }, [])
 
   useEffect(() => {
-    if (!jobId) {
-      return
-    }
     setLoading(true)
     loadMeta()
       .then(async () => {
+        if (!jobId) {
+          // Editor-first: blank workspace; save will create a task
+          setCurrentJobId(null)
+          setName('')
+          setDataSourceId(undefined)
+          setSql('-- 编写 SQL 后点「运行取数」\nSELECT 1 AS demo')
+          setChannelIds([])
+          setSkipIfEmpty(false)
+          setEnabled(true)
+          const d = { ...DEFAULT_DESIGN }
+          setHeaderText(d.header_text ?? '')
+          setFooterText(d.footer_text ?? '')
+          setTitle(d.title ?? '')
+          setIncludeMarkdownTable(true)
+          setShowTable(true)
+          setColorRatios(true)
+          setOutputMode('image')
+          setTemplateId('report_v1')
+          setThemeColor('#1677ff')
+          setMarkdownText('')
+          setImageBase64('')
+          setPreviewColumns([])
+          setPreviewRows([])
+          setPreviewRowCount(0)
+          return
+        }
         const job = await getPushJob(jobId)
         setCurrentJobId(job.id)
         setName(job.name)
@@ -205,23 +228,6 @@ export function EditorPage() {
       .finally(() => setLoading(false))
   }, [jobId, loadMeta])
 
-  if (!jobId) {
-    return (
-      <div style={{ padding: 24 }}>
-        <Alert
-          type="info"
-          showIcon
-          message="请从「推送任务」新建任务"
-          description="内容编辑需要先有任务实体。请到推送任务列表创建任务后再进入编辑。"
-          action={
-            <Button type="primary" onClick={() => navigate('/push-jobs')}>
-              去任务列表
-            </Button>
-          }
-        />
-      </div>
-    )
-  }
 
   const requireBasics = (): boolean => {
     if (!dataSourceId) {
@@ -429,11 +435,18 @@ export function EditorPage() {
         <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
           <Space wrap>
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/push-jobs')}>
-              返回任务列表
+              任务管理
             </Button>
             <Typography.Title level={5} style={{ margin: 0 }}>
-              编辑推送内容 · {name || '…'}
+              {currentJobId ? `编辑 · ${name || '…'}` : '内容工作台'}
             </Typography.Title>
+            <Input
+              style={{ width: 240 }}
+              placeholder="推送名称（首次保存时创建任务）"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={loading}
+            />
           </Space>
           <Space>
             <Button
@@ -443,7 +456,7 @@ export function EditorPage() {
               disabled={loading}
               onClick={() => void onSave()}
             >
-              保存
+              {currentJobId ? '保存' : '保存为任务'}
             </Button>
             <Button
               icon={<PlayCircleOutlined />}
@@ -458,6 +471,15 @@ export function EditorPage() {
       </div>
 
       <div style={{ padding: 16 }}>
+        {!currentJobId ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="内容优先：可直接取数、设计、预览"
+            description="保存时会创建「推送任务」。任务列表用于调度、启用和查看最近运行；日常改稿请以本页为主。"
+          />
+        ) : null}
         <Row gutter={16}>
           <Col xs={24} lg={12}>
             <Typography.Title level={5} style={{ marginTop: 0 }}>
