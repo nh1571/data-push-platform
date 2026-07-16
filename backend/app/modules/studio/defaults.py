@@ -120,6 +120,21 @@ def default_daily_artboard(*, theme_color: str = "#1677ff") -> dict[str, Any]:
                     "visible": True,
                 },
                 {
+                    "id": _nid(),
+                    "type": "Chart",
+                    "props": {
+                        "chart_type": "bar",
+                        "title": "门诊量对比",
+                        "max_rows": 12,
+                    },
+                    "binding": {
+                        "dataset_id": "main",
+                        "category_column": "院区",
+                        "value_column": "门诊量",
+                    },
+                    "visible": True,
+                },
+                {
                     "id": f1,
                     "type": "Text",
                     "props": {

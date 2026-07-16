@@ -55,6 +55,38 @@ def test_compile_artboard_message_parts() -> None:
     assert result.message.parts[0].kind == "text"
 
 
+def test_chart_bar_and_pie_html() -> None:
+    from app.modules.studio.compile import _render_chart_html
+
+    result = _sample_result()
+    ctx = {"main": result}
+    bar = {
+        "type": "Chart",
+        "props": {"chart_type": "bar", "title": "门诊"},
+        "binding": {
+            "dataset_id": "main",
+            "category_column": "院区",
+            "value_column": "门诊量",
+        },
+    }
+    pie = {
+        "type": "Chart",
+        "props": {"chart_type": "pie", "title": "占比"},
+        "binding": {
+            "dataset_id": "main",
+            "category_column": "院区",
+            "value_column": "住院",
+        },
+    }
+    bar_html = _render_chart_html(bar, ctx)
+    pie_html = _render_chart_html(pie, ctx)
+    assert "<svg" in bar_html
+    assert "rect" in bar_html
+    assert "<svg" in pie_html
+    assert "path" in pie_html or "circle" in pie_html
+    assert "演示院区" in pie_html or "comp-chart" in pie_html
+
+
 def test_design_to_artboard_migration() -> None:
     design = {
         "output_mode": "image",

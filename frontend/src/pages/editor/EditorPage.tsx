@@ -43,6 +43,8 @@ import { getErrorMessage } from '../../api/client'
 import type { ArtboardDoc, Channel, DataSource, StudioNode } from '../../api/types'
 import {
   appendChild,
+  applyColumnToNode,
+  bindingHint,
   defaultDailyArtboard,
   emptyArtboard,
   extractArtboardFromJob,
@@ -63,6 +65,8 @@ const PALETTE = [
   { type: 'Text', label: '文本' },
   { type: 'Kpi', label: 'KPI 指标' },
   { type: 'Table', label: '数据表' },
+  { type: 'ChartBar', label: '柱状图' },
+  { type: 'ChartPie', label: '饼图' },
   { type: 'Container', label: '横向分栏' },
   { type: 'Divider', label: '分隔线' },
 ]
@@ -178,7 +182,28 @@ export function EditorPage() {
       const res = await queryPreview({ data_source_id: dataSourceId, sql, max_rows: 50 })
       setPreviewColumns(res.columns)
       setPreviewRows(res.rows)
-      message.success(`取数 ${res.row_count} 行`)
+      // Only fill Chart bindings that are still empty (do not overwrite KPI/template)
+      if (tree && res.columns.length) {
+        const walk = (n: StudioNode): StudioNode => {
+          if (n.type === 'Chart') {
+            const b = { ...n.binding }
+            let changed = false
+            if (!b.category_column) {
+              b.category_column = res.columns[0]
+              changed = true
+            }
+            if (!b.value_column) {
+              b.value_column =
+                res.columns.length > 1 ? res.columns[1]! : res.columns[0]!
+              changed = true
+            }
+            if (changed) return { ...n, binding: b, children: n.children?.map(walk) }
+          }
+          return { ...n, children: n.children?.map(walk) }
+        }
+        setTree(walk(tree))
+      }
+      message.success(`取数 ${res.row_count} 行 · 点列名可绑定到当前组件`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -383,14 +408,13 @@ export function EditorPage() {
         </Space>
       </div>
 
-      {!currentJobId ? (
-        <Alert
-          type="info"
-          showIcon
-          banner
-          message="组件画板：从左侧添加组件，绑定数据，编译成图/文案，再保存或试推"
-        />
-      ) : null}
+      <Alert
+        type="info"
+        showIcon
+        banner
+        message="数据怎么上模板：① 选数据源写 SQL → 取数 ② 点选组件 → 在「属性」绑列（或点右侧列名芯片）③ 编译预览"
+        description="Text 用 {{列名}}；KPI 绑一个数值列（第一行）；表自动用整表；图需「分类列 + 数值列」。"
+      />
 
       {/* Three columns */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
@@ -540,37 +564,57 @@ export function EditorPage() {
                     <Button block loading={querying} onClick={() => void onQuery()}>
                       运行取数
                     </Button>
+                    {selected && tree ? (
+                      <Alert
+                        type="success"
+                        showIcon
+                        style={{ fontSize: 12 }}
+                        message={`当前组件：${selected.type}`}
+                        description={bindingHint(selected, previewColumns)}
+                      />
+                    ) : (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        style={{ fontSize: 12 }}
+                        message="请先在中间画板或左侧结构里点选一个组件，再绑数据"
+                      />
+                    )}
                     {previewColumns.length > 0 ? (
                       <>
                         <div>
-                          <Typography.Text type="secondary">列（点击填入 KPI）</Typography.Text>
+                          <Typography.Text type="secondary">
+                            结果列（点击绑定到当前组件）
+                          </Typography.Text>
                           <div style={{ marginTop: 6 }}>
                             {previewColumns.map((c) => (
                               <Tag
                                 key={c}
+                                color="processing"
                                 style={{ cursor: 'pointer', marginBottom: 4 }}
                                 onClick={() => {
-                                  if (selected?.type === 'Kpi' && tree && selectedId) {
-                                    setTree(
-                                      updateNode(tree, selectedId, {
-                                        binding: {
-                                          ...selected.binding,
-                                          value_column: c,
-                                          label: c,
-                                        },
-                                        props: { ...selected.props, label: c },
-                                      }),
-                                    )
-                                    message.success(`已绑定 ${c}`)
-                                  } else {
-                                    message.info('请先选中 KPI 组件再点列名')
+                                  if (!selected || !tree || !selectedId) {
+                                    message.info('请先选中组件')
+                                    return
                                   }
+                                  const patch = applyColumnToNode(selected, c, 'auto')
+                                  if (!Object.keys(patch).length) {
+                                    message.info('当前组件类型无需点列绑定（如表已自动用整表）')
+                                    return
+                                  }
+                                  setTree(updateNode(tree, selectedId, patch))
+                                  message.success(`已应用到列：${c}`)
                                 }}
                               >
                                 {c}
                               </Tag>
                             ))}
                           </div>
+                          {selected?.type === 'Chart' ? (
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              图表：第一次点列 → 分类；再点 → 数值。也可在「属性」里精确选择。
+                            </Typography.Text>
+                          ) : null}
                         </div>
                         <Table
                           size="small"
@@ -786,7 +830,7 @@ function ArtboardBlock({
   if (node.type === 'Table') {
     return (
       <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
-        <Typography.Text type="secondary">📊 数据表组件</Typography.Text>
+        <Typography.Text type="secondary">📊 数据表 · 自动用 SQL 全表</Typography.Text>
         <div
           style={{
             marginTop: 6,
@@ -795,6 +839,36 @@ function ArtboardBlock({
             backgroundSize: '100% 24px',
             border: '1px solid #eee',
             borderRadius: 4,
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (node.type === 'Chart') {
+    const ct = String(node.props?.chart_type || 'bar')
+    const cat = String(node.binding?.category_column || '？')
+    const val = String(node.binding?.value_column || '？')
+    return (
+      <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
+        <Typography.Text strong style={{ fontSize: 13 }}>
+          {ct === 'pie' ? '🥧 饼图' : '📊 柱状图'}
+          {node.props?.title ? ` · ${String(node.props.title)}` : ''}
+        </Typography.Text>
+        <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+          分类=<Tag style={{ margin: 0 }}>{cat}</Tag> 数值=
+          <Tag style={{ margin: 0 }}>{val}</Tag>
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            height: 56,
+            borderRadius: 4,
+            background:
+              ct === 'pie'
+                ? 'conic-gradient(#1677ff 0 35%, #52c41a 0 60%, #faad14 0 80%, #ff4d4f 0)'
+                : 'repeating-linear-gradient(90deg,#1677ff 0 18px,transparent 18px 28px)',
+            opacity: 0.85,
           }}
         />
       </div>
@@ -852,6 +926,13 @@ function ComponentProps({
           />
         </div>
       </div>
+      <Alert
+        type="success"
+        showIcon
+        style={{ fontSize: 12 }}
+        message="数据如何进入此组件"
+        description={bindingHint(node, columns)}
+      />
       {node.type === 'Text' ? (
         <>
           <div>
@@ -914,6 +995,12 @@ function ComponentProps({
       ) : null}
       {node.type === 'Table' ? (
         <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ fontSize: 12 }}
+            message="表格自动使用当前 SQL 全部结果，无需逐列绑定"
+          />
           <div>
             <Typography.Text type="secondary">百分比着色</Typography.Text>
             <div>
@@ -934,6 +1021,82 @@ function ComponentProps({
               }
             />
           </div>
+        </>
+      ) : null}
+      {node.type === 'Chart' ? (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ fontSize: 12 }}
+            message="图表绑定：分类列（横轴/扇区名）+ 数值列（柱高/扇区大小）"
+          />
+          <div>
+            <Typography.Text type="secondary">图表类型</Typography.Text>
+            <Radio.Group
+              style={{ marginTop: 4, display: 'block' }}
+              value={String(node.props?.chart_type || 'bar')}
+              onChange={(e) =>
+                onChange({
+                  props: {
+                    ...node.props,
+                    chart_type: e.target.value,
+                    title:
+                      node.props?.title ||
+                      (e.target.value === 'pie' ? '饼图' : '柱状图'),
+                  },
+                })
+              }
+            >
+              <Radio.Button value="bar">柱状图</Radio.Button>
+              <Radio.Button value="pie">饼图</Radio.Button>
+            </Radio.Group>
+          </div>
+          <div>
+            <Typography.Text type="secondary">标题</Typography.Text>
+            <Input
+              style={{ marginTop: 4 }}
+              value={String(node.props?.title || '')}
+              onChange={(e) => onChange({ props: { ...node.props, title: e.target.value } })}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">分类列（类别）</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              allowClear
+              showSearch
+              placeholder="如：院区、科室"
+              value={(node.binding?.category_column as string) || undefined}
+              onChange={(v) =>
+                onChange({
+                  binding: { ...node.binding, category_column: v || '', dataset_id: 'main' },
+                })
+              }
+              options={columns.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">数值列</Typography.Text>
+            <Select
+              style={{ width: '100%', marginTop: 4 }}
+              allowClear
+              showSearch
+              placeholder="如：门诊量、金额"
+              value={(node.binding?.value_column as string) || undefined}
+              onChange={(v) =>
+                onChange({
+                  binding: { ...node.binding, value_column: v || '', dataset_id: 'main' },
+                })
+              }
+              options={columns.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+          {columns.length === 0 ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              请先在「数据」里取数，才能从下拉选择列名。
+            </Typography.Text>
+          ) : null}
         </>
       ) : null}
       {node.type === 'Container' ? (

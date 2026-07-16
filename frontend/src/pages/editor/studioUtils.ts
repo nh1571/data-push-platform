@@ -74,6 +74,17 @@ export function defaultDailyArtboard(): ArtboardDoc {
           visible: true,
         },
         {
+          id: nid(),
+          type: 'Chart',
+          props: { chart_type: 'bar', title: '门诊量对比', max_rows: 12 },
+          binding: {
+            dataset_id: 'main',
+            category_column: '院区',
+            value_column: '门诊量',
+          },
+          visible: true,
+        },
+        {
           id: f1,
           type: 'Text',
           props: { variant: 'caption', text: '数据来源：数据推送中台 · 仅供内部参考' },
@@ -192,10 +203,43 @@ export function nodeLabel(node: StudioNode): string {
   if (t === 'Kpi')
     return `KPI · ${String(node.binding?.label || node.props?.label || node.binding?.value_column || '指标')}`
   if (t === 'Table') return '数据表'
+  if (t === 'Chart') {
+    const ct = String(node.props?.chart_type || 'bar')
+    const title = String(node.props?.title || '')
+    return `${ct === 'pie' ? '饼图' : '柱状图'}${title ? ` · ${title}` : ''}`
+  }
   if (t === 'Container')
     return String(node.props?.direction) === 'row' ? '横向容器' : '纵向容器'
   if (t === 'Divider') return '分隔线'
   return t
+}
+
+/** Human-readable binding summary for UI guidance. */
+export function bindingHint(node: StudioNode, columns: string[]): string {
+  const t = String(node.type)
+  const b = node.binding || {}
+  if (t === 'Text') {
+    return '文案里写 {{列名}}，编译时用「取数结果第一行」替换。例如 {{院区}} 运营日报'
+  }
+  if (t === 'Kpi') {
+    const col = String(b.value_column || '')
+    if (!col) return '请在属性里选「数值列」，或取数后点列名芯片绑定。取第一行该列的值。'
+    if (columns.length && !columns.includes(col))
+      return `已绑列「${col}」但当前结果集没有该列，请重新选列。`
+    return `显示第一行「${col}」的值作为大数字。`
+  }
+  if (t === 'Table') {
+    return '整表渲染：SQL 返回的所有行/列（可限制最大行数）。无需逐列绑定。'
+  }
+  if (t === 'Chart') {
+    const cat = String(b.category_column || '')
+    const val = String(b.value_column || '')
+    const ct = String(node.props?.chart_type || 'bar')
+    if (!cat || !val)
+      return `请指定「分类列」和「数值列」。${ct === 'pie' ? '饼图' : '柱状图'}按每一行画一个系列。`
+    return `${ct === 'pie' ? '饼图' : '柱状图'}：分类=${cat}，数值=${val}（每行一个扇区/柱）。`
+  }
+  return '此组件不直接绑数据列。'
 }
 
 export function newComponent(type: string): StudioNode {
@@ -225,6 +269,31 @@ export function newComponent(type: string): StudioNode {
         binding: { dataset_id: 'main' },
         visible: true,
       }
+    case 'Chart':
+    case 'ChartBar':
+      return {
+        id,
+        type: 'Chart',
+        props: { chart_type: 'bar', title: '柱状图', max_rows: 12 },
+        binding: {
+          dataset_id: 'main',
+          category_column: '',
+          value_column: '',
+        },
+        visible: true,
+      }
+    case 'ChartPie':
+      return {
+        id,
+        type: 'Chart',
+        props: { chart_type: 'pie', title: '饼图', max_rows: 12 },
+        binding: {
+          dataset_id: 'main',
+          category_column: '',
+          value_column: '',
+        },
+        visible: true,
+      }
     case 'Divider':
       return { id, type: 'Divider', props: {}, binding: {}, visible: true }
     case 'Container':
@@ -239,6 +308,40 @@ export function newComponent(type: string): StudioNode {
     default:
       return { id, type, props: {}, binding: {}, visible: true }
   }
+}
+
+/** Apply a column chip click to the selected node in a smart way. */
+export function applyColumnToNode(
+  node: StudioNode,
+  column: string,
+  role?: 'category' | 'value' | 'auto',
+): Partial<StudioNode> {
+  const t = String(node.type)
+  const mode = role || 'auto'
+  if (t === 'Text') {
+    const prev = String(node.props?.text || '')
+    const token = `{{${column}}}`
+    return { props: { ...node.props, text: prev ? `${prev} ${token}` : token } }
+  }
+  if (t === 'Kpi') {
+    return {
+      props: { ...node.props, label: column },
+      binding: { ...node.binding, value_column: column, label: column, dataset_id: 'main' },
+    }
+  }
+  if (t === 'Chart') {
+    const b: Record<string, unknown> = { ...node.binding, dataset_id: 'main' }
+    if (mode === 'category' || (mode === 'auto' && !b.category_column)) {
+      b.category_column = column
+    } else if (mode === 'value' || mode === 'auto') {
+      b.value_column = column
+    }
+    return { binding: b }
+  }
+  if (t === 'Table') {
+    return { binding: { ...node.binding, dataset_id: 'main' } }
+  }
+  return {}
 }
 
 export function extractArtboardFromJob(renderSpec: unknown): ArtboardDoc | null {

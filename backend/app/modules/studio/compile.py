@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import html
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -80,6 +81,16 @@ table.comp-table tr:nth-child(even) td { background: #fafbfc; }
 .r-neg { color: #FF0000; font-weight: 600; }
 .r-neg-strong { color: #900000; font-weight: 600; }
 .comp-empty { color: var(--muted); font-size: 13px; }
+.comp-chart { width: 100%; }
+.comp-chart-title { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--fg); }
+.comp-chart-wrap { display: flex; justify-content: center; align-items: center; }
+.comp-chart-legend {
+  display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; font-size: 12px; color: var(--muted);
+}
+.comp-chart-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.comp-chart-swatch {
+  width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+}
 """
 
 
@@ -287,6 +298,208 @@ def _render_table_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
     return render_markdown_table(trimmed, title=None)
 
 
+# Palette for multi-series charts (print-friendly)
+_CHART_COLORS = [
+    "#1677ff",
+    "#52c41a",
+    "#faad14",
+    "#ff4d4f",
+    "#722ed1",
+    "#13c2c2",
+    "#eb2f96",
+    "#2f54eb",
+    "#a0d911",
+    "#fa8c16",
+]
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    s = str(value).strip().replace(",", "").replace("%", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _chart_series(
+    node: dict[str, Any], data_ctx: dict[str, QueryResult]
+) -> tuple[list[str], list[float], str]:
+    """Return (labels, values, chart_type) from binding + props."""
+    props = dict(node.get("props") or {})
+    binding = dict(node.get("binding") or {})
+    result = _get_dataset(data_ctx, binding)
+    chart_type = str(props.get("chart_type") or binding.get("chart_type") or "bar").lower()
+    if chart_type not in ("bar", "pie"):
+        chart_type = "bar"
+
+    if result is None or not result.columns or not result.rows:
+        return [], [], chart_type
+
+    columns = list(result.columns)
+    label_col = str(binding.get("category_column") or binding.get("label_column") or "")
+    value_col = str(binding.get("value_column") or "")
+
+    # Auto-pick: first non-numeric-looking as category, first numeric as value
+    if not label_col and columns:
+        label_col = columns[0]
+    if not value_col:
+        for c in columns:
+            if c == label_col:
+                continue
+            # probe first row
+            idx = columns.index(c)
+            sample = result.rows[0][idx] if result.rows and idx < len(result.rows[0]) else None
+            if _to_float(sample) is not None:
+                value_col = c
+                break
+        if not value_col and len(columns) > 1:
+            value_col = columns[1]
+        elif not value_col:
+            value_col = columns[0]
+
+    li = columns.index(label_col) if label_col in columns else 0
+    vi = columns.index(value_col) if value_col in columns else min(1, len(columns) - 1)
+    max_rows = int(props.get("max_rows") or 12)
+
+    labels: list[str] = []
+    values: list[float] = []
+    for row in list(result.rows)[:max_rows]:
+        lab = row[li] if li < len(row) else ""
+        val = _to_float(row[vi] if vi < len(row) else None)
+        if val is None:
+            continue
+        labels.append("" if lab is None else str(lab))
+        values.append(val)
+    return labels, values, chart_type
+
+
+def _render_bar_svg(labels: list[str], values: list[float], *, width: int = 680, height: int = 260) -> str:
+    if not values:
+        return "<p class='comp-empty'>（图表无有效数值）</p>"
+    max_v = max(values) or 1.0
+    pad_l, pad_r, pad_t, pad_b = 40, 16, 16, 48
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    n = len(values)
+    gap = 8
+    bar_w = max(8.0, (plot_w - gap * (n + 1)) / n)
+    parts = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>",
+        f"<line x1='{pad_l}' y1='{pad_t}' x2='{pad_l}' y2='{pad_t + plot_h}' stroke='#d9d9d9' stroke-width='1'/>",
+        f"<line x1='{pad_l}' y1='{pad_t + plot_h}' x2='{pad_l + plot_w}' y2='{pad_t + plot_h}' stroke='#d9d9d9' stroke-width='1'/>",
+    ]
+    for i, (lab, val) in enumerate(zip(labels, values, strict=False)):
+        bh = (val / max_v) * plot_h if max_v else 0
+        x = pad_l + gap + i * (bar_w + gap)
+        y = pad_t + plot_h - bh
+        color = _CHART_COLORS[i % len(_CHART_COLORS)]
+        parts.append(
+            f"<rect x='{x:.1f}' y='{y:.1f}' width='{bar_w:.1f}' height='{bh:.1f}' "
+            f"fill='{color}' rx='3'/>"
+        )
+        # value label
+        parts.append(
+            f"<text x='{x + bar_w / 2:.1f}' y='{y - 4:.1f}' text-anchor='middle' "
+            f"font-size='11' fill='#666'>{_esc(_fmt_num(val))}</text>"
+        )
+        # category under axis
+        short = lab if len(lab) <= 8 else lab[:7] + "…"
+        parts.append(
+            f"<text x='{x + bar_w / 2:.1f}' y='{pad_t + plot_h + 16}' text-anchor='middle' "
+            f"font-size='11' fill='#666'>{_esc(short)}</text>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _fmt_num(v: float) -> str:
+    if abs(v - round(v)) < 1e-9:
+        return str(int(round(v)))
+    return f"{v:.1f}"
+
+
+def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) -> str:
+    if not values:
+        return "<p class='comp-empty'>（图表无有效数值）</p>"
+    total = sum(values)
+    if total <= 0:
+        return "<p class='comp-empty'>（数值合计为 0）</p>"
+    cx = cy = size / 2
+    r = size / 2 - 8
+    parts = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{size}' height='{size}' viewBox='0 0 {size} {size}'>"
+    ]
+    angle = -math.pi / 2  # start at top
+    for i, val in enumerate(values):
+        sweep = (val / total) * 2 * math.pi
+        if sweep <= 0:
+            continue
+        x1 = cx + r * math.cos(angle)
+        y1 = cy + r * math.sin(angle)
+        angle2 = angle + sweep
+        x2 = cx + r * math.cos(angle2)
+        y2 = cy + r * math.sin(angle2)
+        large = 1 if sweep > math.pi else 0
+        color = _CHART_COLORS[i % len(_CHART_COLORS)]
+        # full circle special case
+        if abs(sweep - 2 * math.pi) < 1e-9:
+            parts.append(f"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{color}'/>")
+        else:
+            parts.append(
+                f"<path d='M {cx} {cy} L {x1:.2f} {y1:.2f} "
+                f"A {r} {r} 0 {large} 1 {x2:.2f} {y2:.2f} Z' fill='{color}'/>"
+            )
+        angle = angle2
+    parts.append("</svg>")
+    legend_items = []
+    for i, (lab, val) in enumerate(zip(labels, values, strict=False)):
+        color = _CHART_COLORS[i % len(_CHART_COLORS)]
+        pct = val / total * 100
+        legend_items.append(
+            f"<span><i class='comp-chart-swatch' style='background:{color}'></i>"
+            f"{_esc(lab)} {_esc(_fmt_num(val))} ({pct:.0f}%)</span>"
+        )
+    return (
+        "<div class='comp-chart-wrap'>"
+        + "".join(parts)
+        + "</div><div class='comp-chart-legend'>"
+        + "".join(legend_items)
+        + "</div>"
+    )
+
+
+def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    props = dict(node.get("props") or {})
+    labels, values, chart_type = _chart_series(node, data_ctx)
+    title = str(props.get("title") or "")
+    title_html = f"<div class='comp-chart-title'>{_esc(title)}</div>" if title else ""
+    if not values:
+        return f"<div class='comp-chart'>{title_html}<p class='comp-empty'>（请绑定分类列与数值列，并先取数）</p></div>"
+    if chart_type == "pie":
+        body = _render_pie_svg(labels, values)
+    else:
+        body = _render_bar_svg(labels, values)
+    return f"<div class='comp-chart'>{title_html}{body}</div>"
+
+
+def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    props = dict(node.get("props") or {})
+    labels, values, chart_type = _chart_series(node, data_ctx)
+    title = str(props.get("title") or ("饼图" if chart_type == "pie" else "柱状图"))
+    if not values:
+        return f"**{title}**（无数据）"
+    lines = [f"**{title}**（{chart_type}）"]
+    for lab, val in zip(labels, values, strict=False):
+        lines.append(f"- {lab}: {_fmt_num(val)}")
+    return "\n".join(lines)
+
+
 def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     if not _visible(node):
         return ""
@@ -309,6 +522,8 @@ def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
         return _render_kpi_html(node, data_ctx)
     if ntype == "Table":
         return _render_table_html(node, data_ctx)
+    if ntype == "Chart":
+        return _render_chart_html(node, data_ctx)
     if ntype == "Divider":
         return "<hr style='border:none;border-top:1px solid #e5e5e5;margin:4px 0'/>"
     return ""
@@ -331,6 +546,9 @@ def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str
         return [_render_kpi_md(node, data_ctx)]
     if ntype == "Table":
         t = _render_table_md(node, data_ctx)
+        return [t] if t else []
+    if ntype == "Chart":
+        t = _render_chart_md(node, data_ctx)
         return [t] if t else []
     return []
 
