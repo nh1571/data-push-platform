@@ -2,6 +2,11 @@
 
 给 **任意 Agent / 任意会话** 用。按顺序勾选。
 
+## 0. 加载技能（推荐）
+
+- [ ] 使用项目技能 **`continue-data-push-dev`**（`.grok/skills/continue-data-push-dev/`）
+- [ ] 或用户已说「继续开发 / 启动继续开发」时 Agent 应自动匹配该技能
+
 ## 1. 读文档（必做）
 
 - [ ] 阅读 `docs/DEVELOPMENT_HANDOFF.md` 全文

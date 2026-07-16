@@ -31,16 +31,34 @@
 
 ## 1. 下次会话怎么无缝衔接
 
+### 1.0 推荐：触发技能（任意 Agent）
+
+仓库技能：**`continue-data-push-dev`**
+
+| 位置 | 路径 |
+|------|------|
+| 项目内 | `.grok/skills/continue-data-push-dev/SKILL.md` |
+| 用户级（Grok） | `~/.grok/skills/continue-data-push-dev/SKILL.md` |
+| 用户级（agents） | `~/.agents/skills/continue-data-push-dev/SKILL.md` |
+
+**触发方式：**
+
+- 说：`继续开发推送中台` / `启动继续开发` / `接着做 data-push`
+- 斜杠：`/continue-data-push-dev`（若环境支持）
+- 或贴下面开场白（技能会强制先读本文件）
+
+技能职责：读交接 → 查 git/环境 → 按需起服务 → 对齐 §6/§7 优先级 → 开发 → **收工更新 §7**。
+
 ### 1.1 给任意 Agent 的开场白（复制即用）
 
 ```text
-继续开发「数据推送中台」项目。
+继续开发「数据推送中台」项目。请使用技能 continue-data-push-dev。
 仓库：/Users/hello/grok/data-push-platform
 分支：feature/m0-scaffold
 请先完整阅读：
 1) docs/DEVELOPMENT_HANDOFF.md（本文件）
 2) docs/CONTINUE_CHECKLIST.md
-3) Obsidian 笔记目录 20_项目/企业数据推送中台/ 中的 00 索引与 07/08/09
+3) Obsidian 笔记目录 20_项目/企业数据推送中台/ 中的 00 索引与 07/08/09/10
 不要推翻已确认的架构原则；优先做「下一优先级」清单中的项。
 ```
 

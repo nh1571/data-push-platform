@@ -5,6 +5,7 @@
 Data push middleware for configuring sources, SQL/templates, delivery channels (e.g. DingTalk), and triggers (manual / cron / HTTP for DS orchestrators), with full job-run observability.
 
 > **多 Agent / 跨会话继续开发（必读）**  
+> 0. **技能** `continue-data-push-dev` — 启动/继续开发工作流（说「继续开发推送中台」或 `/continue-data-push-dev`）  
 > 1. [`docs/DEVELOPMENT_HANDOFF.md`](docs/DEVELOPMENT_HANDOFF.md) — 进度、架构、下一优先级、开场白  
 > 2. [`docs/CONTINUE_CHECKLIST.md`](docs/CONTINUE_CHECKLIST.md) — 下次开工 5 分钟清单  
 > 3. Obsidian：`20_项目/企业数据推送中台/`（尤其 `00` 索引与 `10-开发进度与交接`）
