@@ -420,10 +420,10 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：无（本段已提交：协作约定 + openapi_oto + 编辑器发图提示）
+进行中：无（本轮内容管线增强已提交）
 阻塞：无
-上次完成：用户授权路径把控；dingtalk.openapi_oto_robot；通道/编辑器 UX 提示
-建议下一动作：真机联调 OpenAPI 单/群发图；内容模板样式增强（HTML+CSS 方向）；SQL Server 数据源
+上次完成：百分比着色成图、SQL Server 插件、编辑器字段插入与取数后自动预览
+建议下一动作：HTML+CSS 成图管线；OpenAPI 真机联调；任务列表最近运行状态
 参考：Obsidian 12–14；技能 continue-data-push-dev
 ```
 
