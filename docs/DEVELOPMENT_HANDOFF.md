@@ -424,12 +424,18 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：无（里程碑 Phase S3 可验收）
+进行中：无（已收工 2026-07-16）
 阻塞：无
-上次完成：S3 — 拖拽排序/入容器、条件显隐 visible_when、组件复制、studio_templates 入库+模板库抽屉
-建议下一动作：用户里程碑验收 S1–S3；S4 可选：版本预览图、图表增强、半绝对布局
+用户结论：画板方向对，但「还不完善」——明日继续讨论：设计理念、落地效果、使用反馈（先讨论再大改）
+上次完成：内容优先 IA；S1 组件画板；S2 主题/多数据集/图表；S3 拖拽/条件显隐/模板库
+  commits: a01c874, 3d83895, 3d7e016, b49ee6f, 6fd9fdd（branch feature/m0-scaffold）
+建议下一动作：
+  1. 读 Obsidian 16–17 + 本文 §0/§6
+  2. 与用户对齐：设计理念 / 体验缺口 / 验收标准（勿默认继续 S4 堆功能）
+  3. 按对齐结果改交互或补能力
 
-参考：Obsidian 16–17；技能 continue-data-push-dev
+停工环境：docker compose down（卷保留）；API 8000 / 前端 5173 已停
+参考：Obsidian 12–17；技能 continue-data-push-dev
 ```
 
 
