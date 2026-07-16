@@ -22,12 +22,17 @@ class ChannelType(StrEnum):
 
 
 class JobRunStatus(StrEnum):
-    """Lifecycle status of a push job run."""
+    """Lifecycle status of a push job run.
+
+    Terminal states: ``succeeded`` | ``failed`` | ``partial``
+    (plus optional ``cancelled`` / ``skipped`` for future use).
+    """
 
     PENDING = "pending"
     RUNNING = "running"
-    SUCCESS = "success"
+    SUCCEEDED = "succeeded"
     FAILED = "failed"
+    PARTIAL = "partial"
     CANCELLED = "cancelled"
     SKIPPED = "skipped"
 

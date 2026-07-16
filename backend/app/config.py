@@ -22,5 +22,9 @@ class Settings(BaseSettings):
     # JWT access tokens for operators
     access_token_expire_minutes: int = 60 * 24
 
+    # When True, job runs execute in-process (sync) instead of Celery.
+    # Preferred for tests and local dev without a worker.
+    execution_sync: bool = True
+
 
 settings = Settings()

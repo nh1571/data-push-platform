@@ -6,7 +6,7 @@ All routes require :func:`~app.deps.get_current_principal` except
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import api_tokens, auth, channels, data_sources, push_jobs
+from app.api.v1 import api_tokens, auth, channels, data_sources, job_runs, push_jobs
 from app.deps import get_current_principal
 
 api_router = APIRouter(prefix="/api/v1")
@@ -37,6 +37,12 @@ api_router.include_router(
     push_jobs.router,
     prefix="/push-jobs",
     tags=["push-jobs"],
+    dependencies=_protected,
+)
+api_router.include_router(
+    job_runs.router,
+    prefix="/job-runs",
+    tags=["job-runs"],
     dependencies=_protected,
 )
 api_router.include_router(

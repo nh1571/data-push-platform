@@ -10,6 +10,7 @@ from app.modules.identity.bootstrap import ensure_bootstrap_admin
 from app.plugins.channel import register_builtin_channels
 from app.plugins.datasource import register_builtin_datasources
 from app.plugins.registry import plugin_registry
+from app.plugins.renderer import register_builtin_renderers
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.add_middleware(
 
 # Built-in plugins (idempotent re-register is fine for the process-wide registry)
 register_builtin_datasources(plugin_registry)
+register_builtin_renderers(plugin_registry)
 register_builtin_channels(plugin_registry)
 
 app.include_router(api_router)

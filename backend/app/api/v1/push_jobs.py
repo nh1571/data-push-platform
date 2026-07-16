@@ -1,17 +1,21 @@
-"""PushJob CRUD endpoints (auth via router dependencies)."""
+"""PushJob CRUD + manual run endpoints (auth via router dependencies)."""
 
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Channel, DataSource, PushJob
+from app.config import settings
+from app.db.models import Channel, DataSource, JobRun, JobRunStatus, PushJob
 from app.db.session import get_db
 from app.modules.config_svc.schemas import PushJobCreate, PushJobOut, PushJobUpdate
+from app.modules.execution.pipeline import run_job_run
+from app.modules.execution.schemas import JobRunOut, PushJobRunRequest
 
 router = APIRouter()
 
@@ -142,3 +146,42 @@ def delete_push_job(job_id: UUID, db: Session = Depends(get_db)) -> None:
     row = _get_or_404(db, job_id)
     db.delete(row)
     db.commit()
+
+
+@router.post("/{job_id}/run", response_model=JobRunOut, status_code=status.HTTP_201_CREATED)
+def run_push_job(
+    job_id: UUID,
+    body: PushJobRunRequest | None = None,
+    db: Session = Depends(get_db),
+) -> JobRunOut:
+    """Create a JobRun and execute it (sync) or enqueue via Celery.
+
+    When ``settings.execution_sync`` is True (default), the pipeline runs
+    in-process before the response is returned. Otherwise a Celery task is
+    enqueued and the response reflects the initial ``pending`` status.
+    """
+    job = _get_or_404(db, job_id)
+    req = body or PushJobRunRequest()
+    params: dict[str, Any] | None = req.params
+    trigger_type = req.trigger_type or "manual"
+
+    run = JobRun(
+        push_job_id=job.id,
+        status=JobRunStatus.PENDING,
+        trigger_type=trigger_type,
+        params=params,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    if settings.execution_sync:
+        run_job_run(db, run.id)
+        db.refresh(run)
+    else:
+        # Lazy import so API tests without Celery broker stay lightweight.
+        from app.worker.tasks import run_job_run_task
+
+        run_job_run_task.delay(str(run.id))
+
+    return JobRunOut.model_validate(run)
