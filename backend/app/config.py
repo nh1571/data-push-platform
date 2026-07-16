@@ -8,7 +8,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "postgresql+psycopg://push:push@localhost:5432/push"
+    # System metadata DB (not business Doris). MySQL 8+.
+    database_url: str = "mysql+pymysql://push:push@localhost:3306/push"
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "change-me-in-production"
     token_fernet_key: str = "change-me-fernet-key-32bytes-base64!!"

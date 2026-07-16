@@ -2,8 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid, false, func, true
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Uuid, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -38,8 +37,8 @@ class PushJob(Base):
         nullable=False,
     )
     query_sql: Mapped[str] = mapped_column(Text, nullable=False)
-    render_spec: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    channel_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+    render_spec: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    channel_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(128), nullable=True)
     schedule_enabled: Mapped[bool] = mapped_column(
         Boolean,

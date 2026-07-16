@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '0e6a8b1c437e'
@@ -25,7 +24,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('token_hash', sa.String(length=255), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -34,8 +33,8 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('type', sa.String(length=64), nullable=False),
     sa.Column('config_enc', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('data_sources',
@@ -43,31 +42,31 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('type', sa.String(length=64), nullable=False),
     sa.Column('config_enc', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('operators',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('username', sa.String(length=64), nullable=False),
     sa.Column('password_hash', sa.String(length=255), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('username')
     )
     op.create_table('push_jobs',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('enabled', sa.Boolean(), server_default=sa.text('true'), nullable=False),
-    sa.Column('skip_if_empty', sa.Boolean(), server_default=sa.text('false'), nullable=False),
+    sa.Column('enabled', sa.Boolean(), server_default=sa.text('1'), nullable=False),
+    sa.Column('skip_if_empty', sa.Boolean(), server_default=sa.text('0'), nullable=False),
     sa.Column('data_source_id', sa.Uuid(), nullable=False),
     sa.Column('query_sql', sa.Text(), nullable=False),
-    sa.Column('render_spec', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.Column('channel_ids', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('render_spec', sa.JSON(), nullable=False),
+    sa.Column('channel_ids', sa.JSON(), nullable=False),
     sa.Column('schedule_cron', sa.String(length=128), nullable=True),
-    sa.Column('schedule_enabled', sa.Boolean(), server_default=sa.text('false'), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('schedule_enabled', sa.Boolean(), server_default=sa.text('0'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.ForeignKeyConstraint(['data_source_id'], ['data_sources.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -76,14 +75,14 @@ def upgrade() -> None:
     sa.Column('push_job_id', sa.Uuid(), nullable=False),
     sa.Column('status', sa.String(length=32), nullable=False),
     sa.Column('trigger_type', sa.String(length=32), nullable=False),
-    sa.Column('trigger_meta', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('params', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('config_snapshot', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('trigger_meta', sa.JSON(), nullable=True),
+    sa.Column('params', sa.JSON(), nullable=True),
+    sa.Column('config_snapshot', sa.JSON(), nullable=True),
     sa.Column('parent_run_id', sa.Uuid(), nullable=True),
-    sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('error_message', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.ForeignKeyConstraint(['parent_run_id'], ['job_runs.id'], ),
     sa.ForeignKeyConstraint(['push_job_id'], ['push_jobs.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -95,7 +94,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=32), nullable=False),
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('provider_msg_id', sa.String(length=255), nullable=True),
-    sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['channel_id'], ['channels.id'], ),
     sa.ForeignKeyConstraint(['job_run_id'], ['job_runs.id'], ),
@@ -107,7 +106,7 @@ def upgrade() -> None:
     sa.Column('step', sa.String(length=64), nullable=False),
     sa.Column('level', sa.String(length=16), nullable=False),
     sa.Column('message', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     sa.ForeignKeyConstraint(['job_run_id'], ['job_runs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

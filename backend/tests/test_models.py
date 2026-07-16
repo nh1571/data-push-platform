@@ -1,4 +1,4 @@
-"""ORM model smoke tests against Postgres (or create_all fallback)."""
+"""ORM model smoke tests against MySQL (or create_all fallback)."""
 
 from collections.abc import Generator
 
@@ -43,8 +43,8 @@ def test_create_operator(db_session: Session) -> None:
     assert loaded.password_hash == "hashed-secret"
 
 
-def test_postgres_reachable() -> None:
-    """Sanity: application engine can talk to the configured database."""
+def test_mysql_reachable() -> None:
+    """Sanity: application engine can talk to the configured metadata MySQL."""
     with engine.connect() as conn:
         result = conn.execute(text("SELECT 1"))
         assert result.scalar_one() == 1

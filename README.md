@@ -73,7 +73,7 @@ Compose 中已内置**仅供本地演示**的密钥；上线前务必替换 `SEC
 
 ### 一键启动后端栈
 
-默认服务：`postgres` + `redis` + `api` + `scheduler`（`EXECUTION_SYNC=true`，无需 worker）。
+默认服务：`mysql` + `redis` + `api` + `scheduler`（`EXECUTION_SYNC=true`，无需 worker）。
 
 ```bash
 # 在仓库根目录
@@ -92,7 +92,7 @@ API 首次启动会执行 `alembic upgrade head` 并 bootstrap 管理员。
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | api | 8000 | FastAPI + OpenAPI `/docs` |
-| postgres | 5432 | 用户/库/密码均为 `push` |
+| mysql | 3306 | 用户/库/密码均为 `push`（元数据库） |
 | redis | 6379 | Celery broker（同步模式可闲置） |
 | scheduler | — | 约每 20s tick 一次 Cron 任务 |
 
@@ -121,7 +121,7 @@ npm run dev
 
 | 变量 | 含义 | 默认（compose） |
 |------|------|-----------------|
-| `DATABASE_URL` | SQLAlchemy URL | `postgresql+psycopg://push:push@postgres:5432/push` |
+| `DATABASE_URL` | SQLAlchemy URL | `mysql+pymysql://push:push@mysql:3306/push` |
 | `REDIS_URL` | Redis / Celery | `redis://redis:6379/0` |
 | `SECRET_KEY` | JWT 签名 | `change-me-in-production` |
 | `TOKEN_FERNET_KEY` | 配置加密 Fernet 密钥 | 见 compose 内演示值 |
@@ -140,7 +140,7 @@ npm run dev
 ### 仅基础设施
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d mysql redis
 ```
 
 ### Backend
@@ -151,7 +151,7 @@ python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\acti
 pip install -e ".[dev]"
 
 # 配置环境（可复制 ../.env.example → .env）
-export DATABASE_URL=postgresql+psycopg://push:push@localhost:5432/push
+export DATABASE_URL=mysql+pymysql://push:push@localhost:3306/push
 export REDIS_URL=redis://localhost:6379/0
 export TOKEN_FERNET_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 export SECRET_KEY=dev-secret
@@ -310,7 +310,7 @@ Webhook 配置字段：`webhook_url` **或** `access_token`（组装官方 robot
 
 ```
 data-push-platform/
-├── docker-compose.yml      # postgres / redis / api / scheduler [/ worker]
+├── docker-compose.yml      # mysql / redis / api / scheduler [/ worker]
 ├── .env.example
 ├── backend/
 │   ├── Dockerfile

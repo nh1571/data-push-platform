@@ -9,21 +9,27 @@
 # Frontend: run separately with `cd frontend && npm run dev` (proxies /api → :8000)
 
 services:
-  postgres:
-    image: postgres:16
+  mysql:
+    image: mysql:8.0
     environment:
-      POSTGRES_USER: push
-      POSTGRES_PASSWORD: push
-      POSTGRES_DB: push
+      MYSQL_USER: push
+      MYSQL_PASSWORD: push
+      MYSQL_DATABASE: push
+      MYSQL_ROOT_PASSWORD: rootpush
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U push -d push"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-upush", "-ppush"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
+      start_period: 20s
 
   redis:
     image: redis:7
@@ -45,7 +51,7 @@ services:
     ports:
       - "8000:8000"
     environment: &backend_env
-      DATABASE_URL: postgresql+psycopg://push:push@postgres:5432/push
+      DATABASE_URL: mysql+pymysql://push:push@mysql:3306/push
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: change-me-in-production
       # Dev-only Fernet key — generate your own for real deployments:
@@ -60,7 +66,7 @@ services:
     volumes:
       - storage_data:/app/storage
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -69,7 +75,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 40s
 
   scheduler:
     build:
@@ -82,7 +88,7 @@ services:
     volumes:
       - storage_data:/app/storage
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -104,7 +110,7 @@ services:
     volumes:
       - storage_data:/app/storage
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -112,6 +118,6 @@ services:
         condition: service_healthy
 
 volumes:
-  postgres_data:
+  mysql_data:
   redis_data:
   storage_data:
