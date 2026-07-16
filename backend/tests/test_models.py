@@ -28,16 +28,18 @@ def db_session() -> Generator[Session, None, None]:
 
 
 def test_create_operator(db_session: Session) -> None:
-    op = Operator(username="admin", password_hash="hashed-secret")
+    op = Operator(username="model-smoke-admin", password_hash="hashed-secret")
     db_session.add(op)
     db_session.flush()
 
     assert op.id is not None
     assert op.created_at is not None
 
-    loaded = db_session.scalar(select(Operator).where(Operator.username == "admin"))
+    loaded = db_session.scalar(
+        select(Operator).where(Operator.username == "model-smoke-admin")
+    )
     assert loaded is not None
-    assert loaded.username == "admin"
+    assert loaded.username == "model-smoke-admin"
     assert loaded.password_hash == "hashed-secret"
 
 

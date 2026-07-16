@@ -15,5 +15,12 @@ class Settings(BaseSettings):
     storage_root: str = "./storage"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    # Bootstrap admin (created on startup when operators table is empty)
+    admin_username: str = "admin"
+    admin_password: str = "admin123"
+
+    # JWT access tokens for operators
+    access_token_expire_minutes: int = 60 * 24
+
 
 settings = Settings()

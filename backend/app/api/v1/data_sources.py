@@ -1,7 +1,5 @@
-"""DataSource CRUD + connection test endpoints.
+"""DataSource CRUD + connection test endpoints (auth via router dependencies)."""
 
-TODO(auth): protect with operator auth when Task 6 lands; open for now.
-"""
 
 from __future__ import annotations
 
