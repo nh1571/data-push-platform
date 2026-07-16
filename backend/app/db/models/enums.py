@@ -44,6 +44,7 @@ class TriggerType(StrEnum):
     SCHEDULE = "schedule"
     API = "api"
     RETRY = "retry"
+    RERUN = "rerun"
 
 
 class DeliveryStatus(StrEnum):

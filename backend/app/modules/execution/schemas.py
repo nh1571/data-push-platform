@@ -33,3 +33,38 @@ class JobRunOut(BaseModel):
     finished_at: datetime | None = None
     error_message: str | None = None
     created_at: datetime
+
+
+class DeliveryOut(BaseModel):
+    """Per-channel delivery attempt within a job run."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_run_id: UUID
+    channel_id: UUID | None = None
+    status: str
+    error_message: str | None = None
+    provider_msg_id: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class JobRunLogOut(BaseModel):
+    """Structured log line for a job run."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_run_id: UUID
+    step: str
+    level: str
+    message: str
+    created_at: datetime
+
+
+class JobRunDetailOut(JobRunOut):
+    """Job run with nested deliveries and logs (detail endpoint)."""
+
+    deliveries: list[DeliveryOut] = Field(default_factory=list)
+    logs: list[JobRunLogOut] = Field(default_factory=list)

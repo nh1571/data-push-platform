@@ -124,6 +124,10 @@ def test_run_push_job_creates_job_run_and_executes_sync(
     assert detail["status"] == "succeeded"
     assert detail["config_snapshot"] is not None
     assert detail["config_snapshot"]["name"] == "runnable"
+    assert isinstance(detail.get("deliveries"), list)
+    assert isinstance(detail.get("logs"), list)
+    assert len(detail["deliveries"]) >= 1
+    assert len(detail["logs"]) >= 1
 
 
 def test_run_push_job_empty_body(client: TestClient, monkeypatch: Any) -> None:
@@ -152,4 +156,109 @@ def test_run_push_job_empty_body(client: TestClient, monkeypatch: Any) -> None:
 
 def test_get_job_run_not_found(client: TestClient) -> None:
     resp = client.get(f"/api/v1/job-runs/{uuid4()}")
+    assert resp.status_code == 404
+
+
+def _install_fake_plugins(monkeypatch: Any) -> None:
+    fake_ds = _FakeDS()
+    fake_ch = _FakeChannel()
+    real_get = plugin_registry.get
+
+    def _get(kind: str, type_name: str) -> Any:
+        if kind == "datasource":
+            return fake_ds
+        if kind == "channel":
+            return fake_ch
+        return real_get(kind, type_name)
+
+    monkeypatch.setattr(plugin_registry, "get", _get)
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "execution_sync", True)
+
+
+def test_list_job_runs_filters(client: TestClient, monkeypatch: Any) -> None:
+    """GET /job-runs supports status, push_job_id, trigger_type, limit, offset."""
+    _install_fake_plugins(monkeypatch)
+    ds_id = _create_source(client)
+    ch_id = _create_channel(client)
+    job_a = _create_job(client, ds_id, [ch_id])
+    # second job for push_job_id filter isolation
+    resp_b = client.post(
+        "/api/v1/push-jobs",
+        json={
+            "name": "other-job",
+            "data_source_id": ds_id,
+            "query_sql": "SELECT 2 AS n",
+            "render_spec": {"type": "text_md"},
+            "channel_ids": [ch_id],
+        },
+    )
+    assert resp_b.status_code == 201
+    job_b = resp_b.json()["id"]
+
+    r1 = client.post(f"/api/v1/push-jobs/{job_a}/run", json={"trigger_type": "manual"})
+    r2 = client.post(f"/api/v1/push-jobs/{job_b}/run", json={"trigger_type": "api"})
+    assert r1.status_code == 201
+    assert r2.status_code == 201
+
+    all_runs = client.get("/api/v1/job-runs")
+    assert all_runs.status_code == 200
+    assert len(all_runs.json()) >= 2
+
+    by_job = client.get(f"/api/v1/job-runs?push_job_id={job_a}")
+    assert by_job.status_code == 200
+    body = by_job.json()
+    assert len(body) == 1
+    assert body[0]["push_job_id"] == job_a
+    assert body[0]["trigger_type"] == "manual"
+
+    by_trigger = client.get("/api/v1/job-runs?trigger_type=api")
+    assert by_trigger.status_code == 200
+    assert all(x["trigger_type"] == "api" for x in by_trigger.json())
+    assert any(x["push_job_id"] == job_b for x in by_trigger.json())
+
+    by_status = client.get("/api/v1/job-runs?status=succeeded")
+    assert by_status.status_code == 200
+    assert all(x["status"] == "succeeded" for x in by_status.json())
+
+    limited = client.get("/api/v1/job-runs?limit=1&offset=0")
+    assert limited.status_code == 200
+    assert len(limited.json()) == 1
+
+
+def test_rerun_creates_new_run_with_parent(
+    client: TestClient,
+    monkeypatch: Any,
+) -> None:
+    """POST /job-runs/{id}/rerun creates a new run with parent_run_id and trigger_type=rerun."""
+    _install_fake_plugins(monkeypatch)
+    ds_id = _create_source(client)
+    ch_id = _create_channel(client)
+    job_id = _create_job(client, ds_id, [ch_id])
+
+    parent_resp = client.post(
+        f"/api/v1/push-jobs/{job_id}/run",
+        json={"params": {"biz_date": "2024-06-01"}, "trigger_type": "manual"},
+    )
+    assert parent_resp.status_code == 201
+    parent = parent_resp.json()
+    parent_id = parent["id"]
+
+    rerun_resp = client.post(f"/api/v1/job-runs/{parent_id}/rerun")
+    assert rerun_resp.status_code == 201, rerun_resp.text
+    child = rerun_resp.json()
+    assert child["id"] != parent_id
+    assert child["parent_run_id"] == parent_id
+    assert child["trigger_type"] == "rerun"
+    assert child["push_job_id"] == job_id
+    assert child["params"] == {"biz_date": "2024-06-01"}
+    assert child["status"] == "succeeded"
+    # pipeline snapshots latest job config
+    assert child["config_snapshot"] is not None
+    assert child["config_snapshot"]["name"] == "runnable"
+
+
+def test_rerun_not_found(client: TestClient) -> None:
+    resp = client.post(f"/api/v1/job-runs/{uuid4()}/rerun")
     assert resp.status_code == 404
