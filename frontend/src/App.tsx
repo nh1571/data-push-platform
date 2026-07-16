@@ -9,6 +9,7 @@ import { ChannelListPage } from './pages/channels/List'
 import { DashboardPage } from './pages/Dashboard'
 import { DataSourceFormPage } from './pages/data-sources/Form'
 import { DataSourceListPage } from './pages/data-sources/List'
+import { EditorPage } from './pages/editor/EditorPage'
 import { JobRunDetailPage } from './pages/job-runs/Detail'
 import { JobRunListPage } from './pages/job-runs/List'
 import { LoginPage } from './pages/Login'
@@ -39,6 +40,8 @@ export default function App() {
               }
             >
               <Route path="/" element={<DashboardPage />} />
+              <Route path="/editor" element={<EditorPage />} />
+              <Route path="/editor/:jobId" element={<EditorPage />} />
               <Route path="/data-sources" element={<DataSourceListPage />} />
               <Route path="/data-sources/new" element={<DataSourceFormPage />} />
               <Route path="/data-sources/:id" element={<DataSourceFormPage />} />
@@ -46,7 +49,7 @@ export default function App() {
               <Route path="/channels/new" element={<ChannelFormPage />} />
               <Route path="/channels/:id" element={<ChannelFormPage />} />
               <Route path="/push-jobs" element={<PushJobListPage />} />
-              <Route path="/push-jobs/new" element={<PushJobFormPage />} />
+              <Route path="/push-jobs/new" element={<Navigate to="/editor" replace />} />
               <Route path="/push-jobs/:id" element={<PushJobFormPage />} />
               <Route path="/job-runs" element={<JobRunListPage />} />
               <Route path="/job-runs/:id" element={<JobRunDetailPage />} />

@@ -64,7 +64,7 @@ export function PushJobListPage() {
     {
       title: '名称',
       dataIndex: 'name',
-      render: (name: string, row) => <Link to={`/push-jobs/${row.id}`}>{name}</Link>,
+      render: (name: string, row) => <Link to={`/editor/${row.id}`}>{name}</Link>,
     },
     {
       title: '启用',
@@ -114,7 +114,7 @@ export function PushJobListPage() {
           <Button
             size="small"
             icon={<EditOutlined />}
-            onClick={() => navigate(`/push-jobs/${row.id}`)}
+            onClick={() => navigate(`/editor/${row.id}`)}
           >
             编辑
           </Button>
@@ -134,8 +134,8 @@ export function PushJobListPage() {
         <Typography.Title level={4} style={{ margin: 0 }}>
           推送任务
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/push-jobs/new')}>
-          新建任务
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/editor')}>
+          新建推送
         </Button>
       </Space>
       <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />

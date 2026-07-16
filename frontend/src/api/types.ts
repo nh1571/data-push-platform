@@ -152,3 +152,84 @@ export interface ApiTokenCreated {
   name: string
   token: string
 }
+
+// ---------------------------------------------------------------------------
+// Editor
+// ---------------------------------------------------------------------------
+
+export interface DesignSpec {
+  header_text?: string | null
+  footer_text?: string | null
+  include_markdown_table?: boolean
+  extra_parts?: string[]
+  title?: string | null
+}
+
+export interface QueryPreviewRequest {
+  data_source_id: string
+  sql: string
+  params?: Record<string, unknown> | null
+  max_rows?: number
+}
+
+export interface QueryPreviewResponse {
+  columns: string[]
+  rows: unknown[][]
+  row_count: number
+}
+
+export interface MessagePreviewRequest {
+  data_source_id: string
+  sql: string
+  params?: Record<string, unknown> | null
+  design?: DesignSpec | Record<string, unknown>
+  max_rows?: number
+}
+
+export interface MessagePartPreview {
+  kind: string
+  content_preview: string
+}
+
+export interface MessagePreviewResponse {
+  parts: MessagePartPreview[]
+  markdown_text: string
+}
+
+export interface TestPushRequest {
+  data_source_id: string
+  sql: string
+  params?: Record<string, unknown> | null
+  design?: DesignSpec | Record<string, unknown>
+  channel_ids: string[]
+  max_rows?: number
+  push_job_id?: string | null
+}
+
+export interface ChannelSendResult {
+  channel_id: string
+  success: boolean
+  provider_msg_id?: string | null
+  error?: string | null
+}
+
+export interface TestPushResponse {
+  row_count: number
+  markdown_text: string
+  deliveries: ChannelSendResult[]
+  job_run_id?: string | null
+  success: boolean
+}
+
+export interface SaveJobRequest {
+  id?: string | null
+  name: string
+  data_source_id: string
+  query_sql: string
+  design?: DesignSpec | Record<string, unknown>
+  channel_ids: string[]
+  skip_if_empty?: boolean
+  schedule_cron?: string | null
+  schedule_enabled?: boolean
+  enabled?: boolean
+}

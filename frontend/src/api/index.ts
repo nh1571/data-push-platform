@@ -11,10 +11,17 @@ import type {
   JobRun,
   JobRunDetail,
   JobRunListParams,
+  MessagePreviewRequest,
+  MessagePreviewResponse,
   PushJob,
   PushJobCreate,
   PushJobUpdate,
+  QueryPreviewRequest,
+  QueryPreviewResponse,
+  SaveJobRequest,
   TestConnectionResult,
+  TestPushRequest,
+  TestPushResponse,
   TokenResponse,
 } from './types'
 
@@ -164,4 +171,30 @@ export async function createApiToken(name: string): Promise<ApiTokenCreated> {
 
 export async function revokeApiToken(id: string): Promise<void> {
   await api.delete(`/v1/api-tokens/${id}`)
+}
+
+// ---------------------------------------------------------------------------
+// Editor
+// ---------------------------------------------------------------------------
+
+export async function queryPreview(body: QueryPreviewRequest): Promise<QueryPreviewResponse> {
+  const { data } = await api.post<QueryPreviewResponse>('/v1/editor/query-preview', body)
+  return data
+}
+
+export async function messagePreview(
+  body: MessagePreviewRequest,
+): Promise<MessagePreviewResponse> {
+  const { data } = await api.post<MessagePreviewResponse>('/v1/editor/message-preview', body)
+  return data
+}
+
+export async function testPush(body: TestPushRequest): Promise<TestPushResponse> {
+  const { data } = await api.post<TestPushResponse>('/v1/editor/test-push', body)
+  return data
+}
+
+export async function saveJob(body: SaveJobRequest): Promise<PushJob> {
+  const { data } = await api.post<PushJob>('/v1/editor/save-job', body)
+  return data
 }

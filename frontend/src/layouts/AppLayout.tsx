@@ -2,6 +2,7 @@ import {
   ApiOutlined,
   CloudServerOutlined,
   DashboardOutlined,
+  FormOutlined,
   HistoryOutlined,
   LogoutOutlined,
   SendOutlined,
@@ -16,6 +17,7 @@ const { Header, Sider, Content } = Layout
 
 const MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: '工作台' },
+  { key: '/editor', icon: <FormOutlined />, label: '推送编辑' },
   { key: '/data-sources', icon: <CloudServerOutlined />, label: '数据源' },
   { key: '/channels', icon: <ApiOutlined />, label: '通道' },
   { key: '/push-jobs', icon: <SendOutlined />, label: '推送任务' },
