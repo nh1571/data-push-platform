@@ -343,38 +343,44 @@ data-push-platform/
 
 ### P0（下一迭代必须）
 
+> 已对照存量系统 pythonProject4（见 Obsidian `12-存量系统参考与通道对照`）：旧系统用 **single / orggroupsend / webhook** × **simple|image|file|care…** 满足业务；新系统对齐能力、避开脚本化。
+
 1. **验收并修 IA**  
    - 推送任务「新建」= 弹窗（名称+数据源）→ draft → `/editor/:id`  
    - 无 jobId 的 `/editor` 应引导去任务列表  
-   - 回归测一遍是否符合预期  
 
-2. **模板成图体验打磨**  
-   - 编辑器默认 `output_mode=image`  
-   - 三套模板可选、预览大图清晰  
-   - 试推时通道能力提示（Webhook 不能发真图）  
+2. **钉钉 Mode 与旧工厂对齐**  
+   - ✅ webhook ≈ masstexting  
+   - ✅ openapi_group ≈ orggroupsend（真机联调）  
+   - ⬜ openapi_oto ≈ **single（BatchSendOTO）——旧系统主力单发，优先补齐**  
+   - ✅ work_notice（完善选人）  
+   - 消息形态：simple/image/file 与 Mode 正交；单发 >20 人要拆批（旧 split_userid）
 
-3. **OpenAPI 群机器人真机联调**  
-   - 上传图片 media + 发群消息  
-   - 文档写清所需权限与配置字段  
+3. **成图管线向旧业务对齐**  
+   - 短期：打磨 Pillow/模板预览  
+   - 中期：**HTML + CSS + 截图（wkhtmltoimage/Playwright）** 复刻旧「好看表」（css 独立、条件着色）  
+   - 发图走 OpenAPI 单/群，**不**依赖 Webhook  
 
 ### P1
 
-4. 工作通知：选人/部门体验、图片类型  
-5. 大结果集限流、预览分页、错误文案中文化  
-6. 任务列表：最近运行状态、启用开关  
+4. **数据源插件：SQL Server**（旧系统 20+ 院区主力）  
+5. processQueryKey 类追踪钩子（为已读/撤回/退订留扩展）  
+6. Token 共享缓存（对齐旧 refresh_token 逻辑，避免每实例乱刷）  
+7. 大结果集限流、任务列表最近运行状态  
 
 ### P2
 
-7. 画布式拖拽设计器  
-8. 单聊机器人 / 场景群 / 互动卡片  
-9. 企微通道  
-10. RBAC  
+8. 互动卡片 care/un、已读、撤回、退订回调  
+9. 场景群 / 内部中转 API  
+10. 画布拖拽、企微、RBAC  
 
 ### 明确不要做（除非用户改口）
 
 - 换回 PostgreSQL 元库  
 - 把业务 SQL 执行逻辑塞进 DS 而绕过中台  
 - 为「好看」重写无关模块  
+- 把 150 个旧脚本平移成 150 个硬编码任务（用编辑器+配置覆盖）  
+- 复制旧系统明文密码进仓库  
 
 ---
 
@@ -391,10 +397,11 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：无（等待用户下一轮需求或验收）
+进行中：无（已吸收存量 pythonProject4 参考）
 阻塞：无
-上次用户反馈：钉钉 mode 不全、要模板成图、任务/编辑 IA（见 09）；已有 ba8d336 实现需验收
-建议下一动作：用户验收 UI；或 P0 打磨模板成图 + OpenAPI 真机
+上次完成：通道对照文档 Obsidian 12；HANDOFF 优先级按旧系统对齐
+建议下一动作：实现 openapi_oto（单发 BatchSendOTO）+ 验收 IA + 成图打磨
+参考笔记：现有钉钉推送系统-pythonProject4分析.md ；对照 12-存量系统参考与通道对照.md
 ```
 
 ---
