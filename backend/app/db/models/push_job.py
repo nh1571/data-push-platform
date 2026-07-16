@@ -47,6 +47,9 @@ class PushJob(Base):
         default=False,
         server_default=false(),
     )
+    # Minute slot last fired by the scheduler, e.g. "2024-01-01T12:00" (UTC).
+    # Prevents double-fire when the tick loop runs more than once per minute.
+    last_schedule_slot: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
