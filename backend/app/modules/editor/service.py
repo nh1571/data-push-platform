@@ -1,0 +1,353 @@
+"""Editor service: query preview, message preview, test push, save job."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.common.crypto import decrypt_dict
+from app.db.models import (
+    Channel,
+    DataSource,
+    Delivery,
+    DeliveryStatus,
+    JobRun,
+    JobRunStatus,
+    PushJob,
+)
+from app.modules.editor.design import build_message_from_design, design_to_parts
+from app.modules.editor.schemas import (
+    ChannelSendResult,
+    MessagePartPreview,
+    MessagePreviewResponse,
+    QueryPreviewResponse,
+    SaveJobRequest,
+    TestPushResponse,
+)
+from app.plugins.base import Message, MessagePart, QueryResult
+from app.plugins.registry import plugin_registry
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_design(design: Any) -> dict[str, Any]:
+    if design is None:
+        return {}
+    if hasattr(design, "model_dump"):
+        return dict(design.model_dump())
+    if isinstance(design, dict):
+        return dict(design)
+    raise ValueError(f"design must be a dict, got {type(design)!r}")
+
+
+def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
+    return [str(i) for i in ids]
+
+
+def _get_data_source(db: Session, data_source_id: UUID) -> DataSource:
+    ds = db.get(DataSource, data_source_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"data_source_id not found: {data_source_id}",
+        )
+    return ds
+
+
+def _ensure_channels(db: Session, channel_ids: list[UUID]) -> list[Channel]:
+    if not channel_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="channel_ids must not be empty",
+        )
+    found = {
+        row.id: row
+        for row in db.scalars(select(Channel).where(Channel.id.in_(channel_ids))).all()
+    }
+    missing = [str(cid) for cid in channel_ids if cid not in found]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"channel_ids not found: {missing}",
+        )
+    # Preserve request order
+    return [found[cid] for cid in channel_ids]
+
+
+def _content_preview(part: MessagePart, *, max_len: int = 2000) -> str:
+    content = part.content
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, dict):
+        # Prefer textual fields for preview
+        for key in ("text", "path", "url", "filename", "title"):
+            if content.get(key):
+                text = str(content[key])
+                break
+        else:
+            text = str(content)
+    elif content is None:
+        text = ""
+    else:
+        text = str(content)
+    if len(text) > max_len:
+        return text[: max_len - 1] + "…"
+    return text
+
+
+def _markdown_from_message(message: Message) -> str:
+    texts: list[str] = []
+    for part in message.parts:
+        if part.kind == "text" and part.content is not None:
+            texts.append(str(part.content))
+    return "\n\n".join(texts)
+
+
+def execute_query(
+    db: Session,
+    data_source_id: UUID,
+    sql: str,
+    params: dict[str, Any] | None = None,
+    *,
+    max_rows: int = 200,
+) -> QueryResult:
+    """Load data source, decrypt config, execute SQL, enforce max_rows."""
+    ds = _get_data_source(db, data_source_id)
+    try:
+        plugin = plugin_registry.get("datasource", ds.type)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown data source type: {ds.type!r}",
+        ) from exc
+
+    config = decrypt_dict(ds.config_enc)
+    result: QueryResult = plugin.execute(config, sql, dict(params or {}))
+    rows = list(result.rows or [])
+    if max_rows is not None and max_rows >= 0 and len(rows) > max_rows:
+        rows = rows[:max_rows]
+    return QueryResult(columns=list(result.columns or []), rows=rows)
+
+
+def query_preview(
+    db: Session,
+    data_source_id: UUID,
+    sql: str,
+    params: dict[str, Any] | None = None,
+    *,
+    max_rows: int = 200,
+) -> QueryPreviewResponse:
+    result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
+    return QueryPreviewResponse(
+        columns=result.columns,
+        rows=result.rows,
+        row_count=len(result.rows),
+    )
+
+
+def message_preview(
+    db: Session,
+    data_source_id: UUID,
+    sql: str,
+    design: Any,
+    params: dict[str, Any] | None = None,
+    *,
+    max_rows: int = 200,
+) -> MessagePreviewResponse:
+    result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
+    design_dict = _as_design(design)
+    message = build_message_from_design(result, design_dict, params=params)
+    parts = [
+        MessagePartPreview(kind=p.kind, content_preview=_content_preview(p))
+        for p in message.parts
+    ]
+    return MessagePreviewResponse(
+        parts=parts,
+        markdown_text=_markdown_from_message(message),
+    )
+
+
+def test_push(
+    db: Session,
+    *,
+    data_source_id: UUID,
+    sql: str,
+    design: Any,
+    channel_ids: list[UUID],
+    params: dict[str, Any] | None = None,
+    max_rows: int = 200,
+    push_job_id: UUID | None = None,
+) -> TestPushResponse:
+    """Query + build message + send to each channel; optionally audit as JobRun."""
+    result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
+    design_dict = _as_design(design)
+    message = build_message_from_design(result, design_dict, params=params)
+    markdown_text = _markdown_from_message(message)
+    channels = _ensure_channels(db, channel_ids)
+
+    job_run: JobRun | None = None
+    if push_job_id is not None:
+        job = db.get(PushJob, push_job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"push_job_id not found: {push_job_id}",
+            )
+        job_run = JobRun(
+            push_job_id=job.id,
+            status=JobRunStatus.RUNNING,
+            trigger_type="editor_test",
+            params=params,
+            config_snapshot={
+                "source": "editor_test",
+                "design": design_dict,
+                "data_source_id": str(data_source_id),
+                "query_sql": sql,
+                "channel_ids": _channel_ids_as_str(channel_ids),
+            },
+            started_at=_utcnow(),
+        )
+        db.add(job_run)
+        db.flush()
+
+    deliveries_out: list[ChannelSendResult] = []
+    successes = 0
+    failures = 0
+
+    for channel in channels:
+        delivery_row: Delivery | None = None
+        if job_run is not None:
+            delivery_row = Delivery(
+                job_run_id=job_run.id,
+                channel_id=channel.id,
+                status=DeliveryStatus.RUNNING,
+            )
+            db.add(delivery_row)
+            db.flush()
+
+        try:
+            ch_plugin = plugin_registry.get("channel", channel.type)
+            ch_config = decrypt_dict(channel.config_enc)
+            dr = ch_plugin.send(ch_config, message)
+            if dr.success:
+                successes += 1
+                if delivery_row is not None:
+                    delivery_row.status = DeliveryStatus.SUCCESS
+                    delivery_row.provider_msg_id = dr.provider_msg_id
+                    delivery_row.finished_at = _utcnow()
+                deliveries_out.append(
+                    ChannelSendResult(
+                        channel_id=channel.id,
+                        success=True,
+                        provider_msg_id=dr.provider_msg_id,
+                    )
+                )
+            else:
+                failures += 1
+                if delivery_row is not None:
+                    delivery_row.status = DeliveryStatus.FAILED
+                    delivery_row.error_message = dr.error or "channel send failed"
+                    delivery_row.finished_at = _utcnow()
+                deliveries_out.append(
+                    ChannelSendResult(
+                        channel_id=channel.id,
+                        success=False,
+                        error=dr.error or "channel send failed",
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 — isolate per channel
+            failures += 1
+            if delivery_row is not None:
+                delivery_row.status = DeliveryStatus.FAILED
+                delivery_row.error_message = str(exc)
+                delivery_row.finished_at = _utcnow()
+            deliveries_out.append(
+                ChannelSendResult(
+                    channel_id=channel.id,
+                    success=False,
+                    error=str(exc),
+                )
+            )
+
+    if job_run is not None:
+        if failures == 0:
+            job_run.status = JobRunStatus.SUCCEEDED
+            job_run.error_message = None
+        elif successes == 0:
+            job_run.status = JobRunStatus.FAILED
+            job_run.error_message = f"all {failures} channel delivery(ies) failed"
+        else:
+            job_run.status = JobRunStatus.PARTIAL
+            job_run.error_message = (
+                f"{failures} of {successes + failures} channel delivery(ies) failed"
+            )
+        job_run.finished_at = _utcnow()
+
+    db.commit()
+    if job_run is not None:
+        db.refresh(job_run)
+
+    return TestPushResponse(
+        row_count=len(result.rows),
+        markdown_text=markdown_text,
+        deliveries=deliveries_out,
+        job_run_id=job_run.id if job_run is not None else None,
+        success=failures == 0,
+    )
+
+
+def save_job(db: Session, payload: SaveJobRequest) -> PushJob:
+    """Create or update a PushJob; store design inside render_spec."""
+    design_dict = _as_design(payload.design)
+    parts = design_to_parts(design_dict)
+    render_spec: dict[str, Any] = {
+        "design": design_dict,
+        "parts": parts,
+    }
+
+    _get_data_source(db, payload.data_source_id)
+    _ensure_channels(db, payload.channel_ids)
+
+    if payload.id is not None:
+        row = db.get(PushJob, payload.id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="push job not found",
+            )
+        row.name = payload.name
+        row.enabled = payload.enabled
+        row.skip_if_empty = payload.skip_if_empty
+        row.data_source_id = payload.data_source_id
+        row.query_sql = payload.query_sql
+        row.render_spec = render_spec
+        row.channel_ids = _channel_ids_as_str(payload.channel_ids)
+        row.schedule_cron = payload.schedule_cron
+        row.schedule_enabled = payload.schedule_enabled
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    row = PushJob(
+        name=payload.name,
+        enabled=payload.enabled,
+        skip_if_empty=payload.skip_if_empty,
+        data_source_id=payload.data_source_id,
+        query_sql=payload.query_sql,
+        render_spec=render_spec,
+        channel_ids=_channel_ids_as_str(payload.channel_ids),
+        schedule_cron=payload.schedule_cron,
+        schedule_enabled=payload.schedule_enabled,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

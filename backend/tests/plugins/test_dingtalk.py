@@ -8,17 +8,22 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.plugins.base import Message, MessagePart
-from app.plugins.channel.dingtalk import DingTalkChannelPlugin
+from app.plugins.channel.dingtalk import DingTalkChannelPlugin, DingTalkWebhookRobotPlugin
+
+
+def test_types_webhook_and_legacy_alias() -> None:
+    assert DingTalkWebhookRobotPlugin().type == "dingtalk.webhook_robot"
+    assert DingTalkChannelPlugin().type == "dingtalk"
 
 
 def test_validate_requires_webhook_or_token() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     with pytest.raises(ValueError, match="webhook_url"):
         plugin.validate_config({})
 
 
 def test_send_posts_markdown_to_webhook() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     message = Message(parts=[MessagePart(kind="text", content="| a |\n| --- |\n| 1 |")])
 
     mock_resp = MagicMock()
@@ -44,7 +49,7 @@ def test_send_posts_markdown_to_webhook() -> None:
 
 
 def test_send_handles_dingtalk_errcode() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     message = Message(parts=[MessagePart(kind="text", content="hi")])
 
     mock_resp = MagicMock()
@@ -61,7 +66,7 @@ def test_send_handles_dingtalk_errcode() -> None:
 
 
 def test_send_pure_card_uses_action_card() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     message = Message(
         parts=[
             MessagePart(
@@ -91,7 +96,7 @@ def test_send_pure_card_uses_action_card() -> None:
 
 
 def test_send_file_part_appends_path_text() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     message = Message(
         parts=[
             MessagePart(kind="text", content="see file"),
@@ -121,7 +126,7 @@ def test_send_file_part_appends_path_text() -> None:
 
 
 def test_card_with_text_falls_back_to_markdown() -> None:
-    plugin = DingTalkChannelPlugin()
+    plugin = DingTalkWebhookRobotPlugin()
     message = Message(
         parts=[
             MessagePart(kind="text", content="intro"),

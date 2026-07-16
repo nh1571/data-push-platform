@@ -92,6 +92,10 @@ def normalize_render_parts(render_spec: Any) -> list[dict[str, Any]]:
     """Normalize ``render_spec`` into a list of ``{type, config}`` parts.
 
     Defaults to a single ``text_md`` part when empty / missing.
+
+    When *render_spec* embeds an editor ``design`` key, convert the design
+    into parts (unless an explicit ``parts`` list is also present and preferred
+    via the usual branch order).
     """
     if render_spec is None or render_spec == {} or render_spec == []:
         return [{"type": "text_md", "config": {}}]
@@ -110,12 +114,26 @@ def normalize_render_parts(render_spec: Any) -> list[dict[str, Any]]:
         return parts or [{"type": "text_md", "config": {}}]
 
     if isinstance(render_spec, dict):
+        # Editor design takes priority for part list when no explicit parts.
+        if "design" in render_spec and "parts" not in render_spec:
+            from app.modules.editor.design import design_to_parts
+
+            return design_to_parts(render_spec["design"] or {})
         if "parts" in render_spec and isinstance(render_spec["parts"], list):
             return normalize_render_parts(render_spec["parts"])
+        # design + parts: prefer explicit parts (already handled above).
+        if "design" in render_spec:
+            from app.modules.editor.design import design_to_parts
+
+            return design_to_parts(render_spec["design"] or {})
         rtype = render_spec.get("type") or "text_md"
         cfg = render_spec.get("config")
         if cfg is None:
-            cfg = {k: v for k, v in render_spec.items() if k not in ("type", "config", "parts")}
+            cfg = {
+                k: v
+                for k, v in render_spec.items()
+                if k not in ("type", "config", "parts", "design")
+            }
         return [{"type": str(rtype), "config": dict(cfg or {})}]
 
     raise ValueError(f"unsupported render_spec type: {type(render_spec)!r}")
@@ -126,7 +144,21 @@ def render_message(
     render_spec: Any,
     params: dict[str, Any],
 ) -> Message:
-    """Apply renderers from *render_spec* and return a composed :class:`Message`."""
+    """Apply renderers from *render_spec* and return a composed :class:`Message`.
+
+    When *render_spec* contains an editor ``design`` key, build the message via
+    :func:`~app.modules.editor.design.build_message_from_design` so header/footer
+    placeholders and table flags are applied against live query data.
+    """
+    if isinstance(render_spec, dict) and render_spec.get("design") is not None:
+        from app.modules.editor.design import build_message_from_design
+
+        return build_message_from_design(
+            result,
+            render_spec["design"] or {},
+            params=params,
+        )
+
     parts_out: list[MessagePart] = []
     for part_spec in normalize_render_parts(render_spec):
         renderer = plugin_registry.get("renderer", part_spec["type"])

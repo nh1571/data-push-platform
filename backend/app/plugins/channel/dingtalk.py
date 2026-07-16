@@ -1,4 +1,10 @@
-"""DingTalk robot channel plugin (webhook text / markdown / actionCard)."""
+"""DingTalk robot channel plugins (webhook text / markdown / actionCard).
+
+Registered types:
+
+- ``dingtalk.webhook_robot`` — primary webhook robot plugin
+- ``dingtalk`` — backward-compatible alias of the same implementation
+"""
 
 from __future__ import annotations
 
@@ -12,8 +18,8 @@ _DEFAULT_TIMEOUT = 30.0
 _DINGTALK_ROBOT_BASE = "https://oapi.dingtalk.com/robot/send"
 
 
-class DingTalkChannelPlugin:
-    """ChannelPlugin for DingTalk robots (``type="dingtalk"``).
+class DingTalkWebhookRobotPlugin:
+    """ChannelPlugin for DingTalk custom robots (``type="dingtalk.webhook_robot"``).
 
     Config:
 
@@ -32,7 +38,7 @@ class DingTalkChannelPlugin:
 
     @property
     def type(self) -> str:
-        return "dingtalk"
+        return "dingtalk.webhook_robot"
 
     def validate_config(self, config: dict[str, Any]) -> None:
         """Require ``webhook_url`` or ``access_token`` (DingTalk robot auth)."""
@@ -187,3 +193,11 @@ class DingTalkChannelPlugin:
             )
 
         return DeliveryResult(success=True, provider_msg_id=None)
+
+
+class DingTalkChannelPlugin(DingTalkWebhookRobotPlugin):
+    """Backward-compatible alias registered as ``type="dingtalk"``."""
+
+    @property
+    def type(self) -> str:
+        return "dingtalk"
