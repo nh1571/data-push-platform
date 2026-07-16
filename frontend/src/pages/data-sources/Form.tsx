@@ -13,8 +13,7 @@ import { getErrorMessage } from '../../api/client'
 const SOURCE_TYPES = [
   { value: 'mysql', label: 'MySQL' },
   { value: 'doris', label: 'Doris' },
-  { value: 'postgres', label: 'PostgreSQL' },
-  { value: 'http', label: 'HTTP' },
+  { value: 'sqlserver', label: 'SQL Server（院区 HIS）' },
 ]
 
 interface FormValues {

@@ -173,6 +173,8 @@ export interface DesignSpec {
   template_id?: 'report_v1' | 'alert_v1' | 'kpi_v1' | string | null
   theme_color?: string | null
   show_table?: boolean
+  /** Color percentage-like cells (legacy report style). */
+  color_ratios?: boolean
   kpi_columns?: string[]
 }
 

@@ -34,6 +34,9 @@ dev = [
     "pytest-asyncio",
     "ruff",
 ]
+sqlserver = [
+    "pymssql",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

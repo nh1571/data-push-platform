@@ -23,8 +23,17 @@ _MUTED = (100, 100, 100)
 _HEADER_BG = (245, 247, 250)
 _GRID = (210, 210, 210)
 _WHITE = (255, 255, 255)
+# Ratio colors aligned with legacy pythonProject4 table styling
+_RATIO_STRONG_POS = (0, 87, 55)  # #005737 >= 20%
+_RATIO_POS = (0, 176, 80)  # #00B050 0~20%
+_RATIO_NEG = (255, 0, 0)  # #FF0000 < 0
+_RATIO_STRONG_NEG = (144, 0, 0)  # #900000 <= -20%
 
 TEMPLATE_IDS = frozenset({"report_v1", "alert_v1", "kpi_v1"})
+
+_PERCENT_RE = __import__("re").compile(
+    r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$"
+)
 
 
 def _font(size: int = 14) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -55,6 +64,36 @@ def _cell_text(value: Any) -> str:
     if len(text) > _MAX_CELL_CHARS:
         return text[: _MAX_CELL_CHARS - 1] + "…"
     return text
+
+
+def _ratio_text_color(cell: str, *, enabled: bool) -> tuple[int, int, int]:
+    """Return text color for percentage-like cells (legacy red/green rules)."""
+    if not enabled:
+        return _FG
+    m = _PERCENT_RE.match(cell)
+    if not m:
+        # Also accept bare floats that look like ratios already scaled 0-100
+        try:
+            if cell.strip().endswith("%"):
+                return _FG
+            val = float(cell.replace(",", ""))
+            # only color if value looks like a percentage number in common ranges
+            if abs(val) > 200:
+                return _FG
+            pct = val
+        except ValueError:
+            return _FG
+    else:
+        pct = float(m.group(1))
+    if pct >= 20:
+        return _RATIO_STRONG_POS
+    if pct > 0:
+        return _RATIO_POS
+    if pct <= -20:
+        return _RATIO_STRONG_NEG
+    if pct < 0:
+        return _RATIO_NEG
+    return _FG
 
 
 def _parse_hex_color(value: str | None, default: tuple[int, int, int] = (22, 119, 255)) -> tuple[int, int, int]:
@@ -109,8 +148,13 @@ def _draw_table(
     rows: list[list[str]],
     font: ImageFont.ImageFont,
     max_width: int,
+    color_ratios: bool = True,
 ) -> int:
-    """Draw a simple table; return height consumed."""
+    """Draw a simple table; return height consumed.
+
+    When *color_ratios* is true, cells that look like percentages use
+    legacy red/green text colors (pythonProject4 table styling).
+    """
     probe = draw
     col_n = len(header)
     if col_n == 0:
@@ -146,7 +190,12 @@ def _draw_table(
                 outline=_GRID,
                 fill=fill,
             )
-            draw.text((x + 8, y + 6), cell, fill=_FG, font=font)
+            text_fill = (
+                _FG
+                if r_i == 0
+                else _ratio_text_color(cell, enabled=color_ratios)
+            )
+            draw.text((x + 8, y + 6), cell, fill=text_fill, font=font)
             x += col_widths[c_i]
 
     return row_h * len(all_rows) + 1
@@ -172,6 +221,9 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
     show_table = design.get("show_table", True)
     if show_table is None:
         show_table = True
+    color_ratios = design.get("color_ratios", True)
+    if color_ratios is None:
+        color_ratios = True
 
     title_font = _font(22)
     body_font = _font(14)
@@ -261,6 +313,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
                 rows=display_rows,
                 font=body_font,
                 max_width=content_w,
+                color_ratios=bool(color_ratios),
             )
             y += th + 8
     else:
@@ -281,6 +334,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
                 rows=display_rows,
                 font=body_font,
                 max_width=content_w,
+                color_ratios=bool(color_ratios),
             )
             y += th + 8
 

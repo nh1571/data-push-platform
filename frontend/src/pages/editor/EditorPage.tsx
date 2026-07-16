@@ -17,6 +17,7 @@ import {
   Space,
   Switch,
   Table,
+  Tag,
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -72,6 +73,7 @@ function extractDesign(renderSpec: PushJob['render_spec']): DesignSpec {
         include_markdown_table:
           typeof d.include_markdown_table === 'boolean' ? d.include_markdown_table : true,
         show_table: typeof d.show_table === 'boolean' ? d.show_table : true,
+        color_ratios: typeof d.color_ratios === 'boolean' ? d.color_ratios : true,
         extra_parts: Array.isArray(d.extra_parts)
           ? d.extra_parts.filter((x): x is string => typeof x === 'string')
           : [],
@@ -112,6 +114,7 @@ export function EditorPage() {
   const [themeColor, setThemeColor] = useState('#1677ff')
   const [includeMarkdownTable, setIncludeMarkdownTable] = useState(true)
   const [showTable, setShowTable] = useState(true)
+  const [colorRatios, setColorRatios] = useState(true)
   const [channelIds, setChannelIds] = useState<string[]>([])
   const [skipIfEmpty, setSkipIfEmpty] = useState(false)
   const [enabled, setEnabled] = useState(true)
@@ -138,6 +141,7 @@ export function EditorPage() {
       footer_text: footerText || null,
       include_markdown_table: includeMarkdownTable,
       show_table: showTable,
+      color_ratios: colorRatios,
       extra_parts: [],
       kpi_columns: [],
     }),
@@ -150,8 +154,15 @@ export function EditorPage() {
       footerText,
       includeMarkdownTable,
       showTable,
+      colorRatios,
     ],
   )
+
+  const insertColumnToken = (col: string) => {
+    const token = `{{${col}}}`
+    setHeaderText((prev) => (prev ? `${prev} ${token}` : token))
+    message.success(`已插入 ${token} 到副标题`)
+  }
 
   const loadMeta = useCallback(async () => {
     const [ds, ch] = await Promise.all([listDataSources(), listChannels()])
@@ -180,6 +191,7 @@ export function EditorPage() {
         setTitle(d.title ?? '')
         setIncludeMarkdownTable(d.include_markdown_table ?? true)
         setShowTable(d.show_table ?? true)
+        setColorRatios(d.color_ratios !== false)
         setOutputMode(d.output_mode === 'markdown' ? 'markdown' : 'image')
         setTemplateId(d.template_id || 'report_v1')
         setThemeColor(d.theme_color || '#1677ff')
@@ -236,6 +248,30 @@ export function EditorPage() {
       setPreviewRows(res.rows)
       setPreviewRowCount(res.row_count)
       message.success(`取数成功：${res.row_count} 行（预览最多 200）`)
+      // Content pipeline: auto-refresh carrier preview after data load
+      try {
+        if (outputMode === 'image') {
+          const img = await imagePreview({
+            data_source_id: dataSourceId!,
+            sql,
+            design: {
+              ...design,
+              // design state may lag; build inline from latest fields via design memo on next tick
+            },
+            max_rows: 200,
+          })
+          setImageBase64(img.image_base64)
+        }
+        const mdRes = await messagePreview({
+          data_source_id: dataSourceId!,
+          sql,
+          design: { ...design, output_mode: outputMode === 'image' ? 'markdown' : outputMode },
+          max_rows: 200,
+        })
+        setMarkdownText(mdRes.markdown_text)
+      } catch {
+        // preview optional after query
+      }
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -472,6 +508,26 @@ export function EditorPage() {
               }}
             />
 
+            {previewColumns.length > 0 ? (
+              <div style={{ marginBottom: 8 }}>
+                <Typography.Text type="secondary" style={{ marginRight: 8 }}>
+                  插入字段到副标题：
+                </Typography.Text>
+                <Space size={[4, 4]} wrap>
+                  {previewColumns.map((col) => (
+                    <Tag
+                      key={col}
+                      color="blue"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => insertColumnToken(col)}
+                    >
+                      {`{{${col}}}`}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            ) : null}
+
             <Typography.Title level={5}>
               数据表格
               {previewRowCount > 0 ? (
@@ -572,9 +628,11 @@ export function EditorPage() {
                     placeholder="数据来源 · 推送平台"
                   />
                 </div>
-                <Space style={{ marginBottom: 12 }}>
+                <Space style={{ marginBottom: 12 }} wrap>
                   <Typography.Text>显示表格</Typography.Text>
                   <Switch checked={showTable} onChange={setShowTable} disabled={loading} />
+                  <Typography.Text>百分比着色</Typography.Text>
+                  <Switch checked={colorRatios} onChange={setColorRatios} disabled={loading} />
                 </Space>
               </>
             ) : (
