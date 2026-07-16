@@ -8,14 +8,10 @@ import { getErrorMessage } from '../../api/client'
 const PROVIDERS = [{ value: 'dingtalk', label: '钉钉' }]
 
 const MODE_OPTIONS = [
-  { value: 'dingtalk.webhook_robot', label: '群自定义机器人 Webhook' },
+  { value: 'dingtalk.webhook_robot', label: '群自定义机器人 Webhook（纯文/MD，不宜真图）' },
   { value: 'dingtalk.work_notice', label: '工作通知' },
   { value: 'dingtalk.openapi_group_robot', label: '应用机器人·发群(OpenAPI，支持图片)' },
-  {
-    value: 'dingtalk.openapi_oto_robot',
-    label: '应用机器人·单聊（即将支持）',
-    disabled: true,
-  },
+  { value: 'dingtalk.openapi_oto_robot', label: '应用机器人·单聊/单发(OpenAPI，支持图片)' },
   {
     value: 'dingtalk.scene_group_helper',
     label: '场景群/群助手（即将支持）',
@@ -59,6 +55,7 @@ interface FormValues {
   dept_id_list?: string
   robot_code?: string
   open_conversation_id?: string
+  user_ids?: string
 }
 
 export function ChannelFormPage() {
@@ -76,6 +73,7 @@ export function ChannelFormPage() {
     channelType === 'dingtalk'
   const isWorkNotice = channelType === 'dingtalk.work_notice'
   const isOpenApiGroup = channelType === 'dingtalk.openapi_group_robot'
+  const isOpenApiOto = channelType === 'dingtalk.openapi_oto_robot'
 
   useEffect(() => {
     if (isNew) {
@@ -109,6 +107,13 @@ export function ChannelFormPage() {
           open_conversation_id: cfg.open_conversation_id
             ? String(cfg.open_conversation_id)
             : undefined,
+          user_ids: cfg.user_ids
+            ? Array.isArray(cfg.user_ids)
+              ? (cfg.user_ids as string[]).join(',')
+              : String(cfg.user_ids)
+            : cfg.userid_list
+              ? String(cfg.userid_list)
+              : undefined,
         })
       })
       .catch((err) => message.error(getErrorMessage(err)))
@@ -143,6 +148,17 @@ export function ChannelFormPage() {
       if (values.title) config.title = values.title
       return config
     }
+    if (type === 'dingtalk.openapi_oto_robot') {
+      const config: Record<string, unknown> = {}
+      if (values.app_key) config.app_key = values.app_key
+      if (values.app_secret && values.app_secret !== MASK) {
+        config.app_secret = values.app_secret
+      }
+      if (values.robot_code) config.robot_code = values.robot_code
+      if (values.user_ids) config.user_ids = values.user_ids
+      if (values.title) config.title = values.title
+      return config
+    }
     // webhook robot (default)
     const config: Record<string, unknown> = {}
     if (values.webhook_url) config.webhook_url = values.webhook_url
@@ -174,6 +190,15 @@ export function ChannelFormPage() {
       }
       if (!values.robot_code) return '请填写 robot_code'
       if (!values.open_conversation_id) return '请填写 open_conversation_id'
+      return null
+    }
+    if (type === 'dingtalk.openapi_oto_robot') {
+      if (!values.app_key) return '请填写 app_key'
+      if (isNew && (!values.app_secret || values.app_secret === MASK)) {
+        return '请填写 app_secret'
+      }
+      if (!values.robot_code) return '请填写 robot_code'
+      if (!values.user_ids) return '请填写 user_ids（钉钉 userid，逗号分隔）'
       return null
     }
     if (!values.webhook_url && (!values.access_token || values.access_token === MASK)) {
@@ -230,6 +255,18 @@ export function ChannelFormPage() {
               open_conversation_id: values.open_conversation_id,
             }
             if (values.webhook_url) body.config.webhook_url = values.webhook_url
+            if (values.title) body.config.title = values.title
+          } else {
+            body.config = config
+          }
+        } else if (type === 'dingtalk.openapi_oto_robot') {
+          const secretMasked = values.app_secret === MASK || !values.app_secret
+          if (secretMasked) {
+            body.config = {
+              app_key: values.app_key,
+              robot_code: values.robot_code,
+              user_ids: values.user_ids,
+            }
             if (values.title) body.config.title = values.title
           } else {
             body.config = config
@@ -293,7 +330,7 @@ export function ChannelFormPage() {
         showIcon
         style={{ marginBottom: 16, maxWidth: 560 }}
         message="图片推送说明"
-        description="Webhook 群机器人通常无法上传图片文件。如需发送图片模板，请选择「应用机器人·发群(OpenAPI)」或「工作通知」。"
+        description="Webhook 群机器人通常无法上传图片文件。发图片模板请选「应用机器人·发群/单发(OpenAPI)」；工作通知视消息类型支持图文。"
       />
 
       <Form form={form} layout="vertical" style={{ maxWidth: 560 }} disabled={loading}>
@@ -432,6 +469,45 @@ export function ChannelFormPage() {
               extra="OpenAPI 文本失败时可选回退到群 Webhook"
             >
               <Input placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
+            </Form.Item>
+            <Form.Item name="title" label="消息标题">
+              <Input placeholder="数据推送" />
+            </Form.Item>
+          </>
+        ) : null}
+
+        {isOpenApiOto ? (
+          <>
+            <Form.Item
+              name="app_key"
+              label="App Key"
+              rules={[{ required: true, message: '请填写 app_key' }]}
+            >
+              <Input placeholder="钉钉应用 AppKey" />
+            </Form.Item>
+            <Form.Item
+              name="app_secret"
+              label="App Secret"
+              extra={!isNew ? '已脱敏；留空则不修改' : undefined}
+              rules={isNew ? [{ required: true, message: '请填写 app_secret' }] : undefined}
+            >
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+            <Form.Item
+              name="robot_code"
+              label="Robot Code"
+              rules={[{ required: true, message: '请填写 robot_code' }]}
+              extra="应用机器人编码（对齐旧系统 single 单发）"
+            >
+              <Input placeholder="dingxxxxxx" />
+            </Form.Item>
+            <Form.Item
+              name="user_ids"
+              label="用户 ID 列表"
+              rules={[{ required: true, message: '请填写 user_ids' }]}
+              extra="钉钉 userid，逗号分隔；超过 20 人自动拆批发送"
+            >
+              <Input.TextArea rows={3} placeholder="userid1,userid2,..." />
             </Form.Item>
             <Form.Item name="title" label="消息标题">
               <Input placeholder="数据推送" />

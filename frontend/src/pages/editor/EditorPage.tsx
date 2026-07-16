@@ -686,6 +686,19 @@ export function EditorPage() {
             marginTop: 16,
             paddingTop: 16,
             borderTop: '1px solid #f0f0f0',
+          }}
+        >
+          {outputMode === 'image' ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="图片推送通道提示"
+              description="当前为「图片模板」输出。请选择支持发图的通道：应用机器人·发群 / 单发 (OpenAPI)。Webhook 群机器人通常无法发送真图。"
+            />
+          ) : null}
+        <div
+          style={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: 16,
@@ -718,6 +731,7 @@ export function EditorPage() {
             <Typography.Text>结果为空时跳过</Typography.Text>
             <Switch checked={skipIfEmpty} onChange={setSkipIfEmpty} disabled={loading} />
           </Space>
+        </div>
         </div>
       </div>
     </div>
