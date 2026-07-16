@@ -424,10 +424,10 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：Phase S1 组件画板已落地（可验收）
+进行中：画板绑定说明 + 柱状图/饼图已加（可再验收）
 阻塞：无
-上次完成：studio 模块 compile/templates/API；EditorPage 三栏设计器；日报模板；保存/试推/任务运行走 artboard
-建议下一动作：用户打开内容工作台验收（选元库→取数→编译预览→保存）；S2 美观/HStack 打磨
+上次完成：Chart 组件 SVG 成图；绑定引导（Text/KPI/表/图）；列芯片；属性面板分类/数值列
+建议下一动作：用户试「柱状图/饼图」绑列+编译；后续可加折线/双轴或样式主题
 
 参考：Obsidian 16–17；技能 continue-data-push-dev
 ```
