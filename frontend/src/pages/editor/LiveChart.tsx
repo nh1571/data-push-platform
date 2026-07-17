@@ -24,14 +24,19 @@ export function LiveChart({ labels, series, style, height = 360, width = '100%' 
     const chart = chartRef.current
     const option: EChartsOption = buildEchartsOption(labels, series, style || {})
     chart.setOption(option, true)
-    const onResize = () => chart.resize()
-    window.addEventListener('resize', onResize)
-    // ensure size after layout
     requestAnimationFrame(() => chart.resize())
-    return () => {
-      window.removeEventListener('resize', onResize)
-    }
   }, [labels, series, style, height])
+
+  // Reflow when parent box is resized (compose canvas drag-resize)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      chartRef.current?.resize()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -58,5 +63,14 @@ export function LiveChart({ labels, series, style, height = 360, width = '100%' 
     )
   }
 
-  return <div ref={ref} style={{ width, height, minHeight: height }} />
+  return (
+    <div
+      ref={ref}
+      style={{
+        width,
+        height,
+        minHeight: typeof height === 'number' ? height : undefined,
+      }}
+    />
+  )
 }

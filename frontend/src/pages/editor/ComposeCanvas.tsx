@@ -1,9 +1,18 @@
 /**
  * Free-form compose canvas: drag position, resize, style presets.
+ * Renders live components (not screenshots) so resize reflows charts/tables.
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { Empty, Typography } from 'antd'
 import type { StudioNode } from '../../api/types'
+import { LiveComponent, type DatasetMaps } from './LiveComponent'
 
 export type ComposeLayout = {
   compose_x: number
@@ -18,13 +27,16 @@ export type ComposeLayout = {
   compose_opacity?: number
 }
 
+const HANDLE_H = 26
+
 type Props = {
   canvasWidth: number
   canvasMinHeight: number
   chrome?: { show: boolean; title: string; color: string }
   nodes: StudioNode[]
   selectedId: string | null
-  thumbs: Record<string, string>
+  data: DatasetMaps
+  themeColor?: string
   onSelect: (id: string | null) => void
   onChangeLayout: (id: string, layout: Partial<ComposeLayout>) => void
   typeLabel: (type: string, chart?: string) => string
@@ -65,6 +77,8 @@ function shellStyle(layout: ComposeLayout, selected: boolean): CSSProperties {
     borderRadius: layout.compose_radius ?? 8,
     padding: layout.compose_padding ?? 0,
     background: layout.compose_bg || '#fff',
+    display: 'flex',
+    flexDirection: 'column',
   }
   if (preset === 'plain') {
     base.border = selected ? '2px solid #1677ff' : '1px dashed #d9d9d9'
@@ -95,7 +109,8 @@ export function ComposeCanvas({
   chrome,
   nodes,
   selectedId,
-  thumbs,
+  data,
+  themeColor,
   onSelect,
   onChangeLayout,
   typeLabel,
@@ -224,8 +239,7 @@ export function ComposeCanvas({
           ) : (
             layouts.map(({ node, layout }, index) => {
               const selected = selectedId === node.id
-              const thumb = thumbs[node.id] || String(node.props?.preview_image || '')
-              const topOffset = chrome?.show ? 0 : 0
+              const contentH = Math.max(40, layout.compose_h - HANDLE_H - (layout.compose_padding || 0) * 2)
               return (
                 <div
                   key={node.id}
@@ -236,17 +250,20 @@ export function ComposeCanvas({
                   style={{
                     position: 'absolute',
                     left: layout.compose_x,
-                    top: layout.compose_y + topOffset,
+                    top: layout.compose_y,
                     width: layout.compose_w,
                     height: layout.compose_h,
                     zIndex: selected ? 20 : 10 + index,
-                    cursor: drag?.id === node.id && drag.mode === 'move' ? 'grabbing' : 'grab',
+                    cursor: drag?.id === node.id && drag.mode === 'move' ? 'grabbing' : 'default',
                   }}
                 >
                   <div style={shellStyle(layout, selected)}>
+                    {/* editor-only handle — not part of final push image */}
                     <div
                       onPointerDown={(e) => startDrag(e, node.id, 'move', layout)}
                       style={{
+                        height: HANDLE_H,
+                        flexShrink: 0,
                         fontSize: 11,
                         padding: '3px 8px',
                         background: selected ? '#e6f4ff' : 'rgba(0,0,0,0.04)',
@@ -255,6 +272,7 @@ export function ComposeCanvas({
                         gap: 6,
                         borderBottom: '1px solid rgba(0,0,0,0.06)',
                         cursor: 'grab',
+                        boxSizing: 'border-box',
                       }}
                     >
                       <span style={{ opacity: 0.55 }}>⠿</span>
@@ -270,34 +288,21 @@ export function ComposeCanvas({
                     </div>
                     <div
                       style={{
-                        height: `calc(100% - 26px)`,
+                        flex: 1,
+                        minHeight: 0,
                         overflow: 'hidden',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: layout.compose_bg || '#fafafa',
+                        position: 'relative',
+                        background: layout.compose_bg || '#fff',
                       }}
                     >
-                      {thumb ? (
-                        <img
-                          src={thumb}
-                          alt=""
-                          draggable={false}
-                          style={{
-                            maxWidth: '100%',
-                            maxHeight: '100%',
-                            objectFit: 'contain',
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      ) : (
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          无预览 · 点「刷新组件图」
-                        </Typography.Text>
-                      )}
+                      <LiveComponent
+                        node={node}
+                        data={data}
+                        height={contentH}
+                        themeColor={layout.compose_color || themeColor || '#1677ff'}
+                      />
                     </div>
                   </div>
-                  {/* resize handle */}
                   {selected ? (
                     <div
                       onPointerDown={(e) => startDrag(e, node.id, 'resize', layout)}
@@ -312,8 +317,9 @@ export function ComposeCanvas({
                         cursor: 'nwse-resize',
                         border: '2px solid #fff',
                         boxShadow: '0 0 2px rgba(0,0,0,0.3)',
+                        zIndex: 5,
                       }}
-                      title="拖拽调整大小"
+                      title="拖拽调整组件区域大小"
                     />
                   ) : null}
                 </div>
@@ -343,7 +349,13 @@ export function ensureComposeLayouts(
       continue
     }
     const w = canvasWidth - 24
-    const h = 200
+    // default height by type
+    let h = 200
+    if (n.type === 'Kpi') h = 120
+    else if (n.type === 'Text' || n.type === 'Alert') h = 140
+    else if (n.type === 'Divider') h = 40
+    else if (n.type === 'Table') h = 240
+    else if (n.type === 'Chart') h = 280
     patches.push({
       id: n.id,
       patch: {
@@ -351,7 +363,7 @@ export function ensureComposeLayouts(
         compose_y: y,
         compose_w: w,
         compose_h: h,
-        compose_style: 'card',
+        compose_style: n.type === 'Divider' ? 'plain' : 'card',
       },
     })
     y += h + 12

@@ -386,40 +386,6 @@ function readyDatasets(
     }))
 }
 
-/** Artboard with a single component for maker preview (no page chrome). */
-function singleComponentArtboard(
-  base: ArtboardDoc,
-  node: StudioNode,
-  dataSourceId?: string,
-  sql?: string,
-): ArtboardDoc {
-  const theme = base.artboard?.theme || { pack: 'business', color: '#1677ff' }
-  const datasets = (base.datasets || []).map((d) => ({
-    ...d,
-    data_source_id: d.data_source_id || dataSourceId || null,
-    sql: d.id === 'main' ? sql || d.sql : d.sql,
-  }))
-  return {
-    version: 3,
-    kind: 'artboard',
-    artboard: {
-      width: 720,
-      show_chrome: false,
-      theme,
-      layout_default: 'flow',
-    },
-    datasets,
-    tree: {
-      id: 'root',
-      type: 'Container',
-      props: { direction: 'column', gap: 8 },
-      binding: {},
-      children: [{ ...node, children: undefined }],
-    },
-    compose: { mode: 'image_primary', markdown_caption: false },
-  }
-}
-
 function RenderPreview({
   image,
   html,
@@ -534,9 +500,6 @@ export function EditorPage() {
   const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
   const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
   const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
-
-  // Per-component thumbnail cache for canvas (optional server snap)
-  const [thumbById, setThumbById] = useState<Record<string, string>>({})
 
   const tree = artboard.tree
   const datasets = artboard.datasets || []
@@ -904,26 +867,6 @@ export function EditorPage() {
     return { kind: 'empty' as const }
   }, [draft, fieldsByDataset, rowsByDataset])
 
-  const refreshThumb = async (node: StudioNode) => {
-    if (!dataSourceId) return
-    try {
-      const doc = singleComponentArtboard(buildDoc(), node, dataSourceId, sql)
-      const res = await runCompile(doc)
-      if (res.image_base64) {
-        setThumbById((p) => ({ ...p, [node.id]: res.image_base64! }))
-        if (tree) {
-          setTree(
-            updateNode(tree, node.id, {
-              props: { ...node.props, preview_image: res.image_base64 },
-            }),
-          )
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
   const onSave = async () => {
     if (!name.trim() || !dataSourceId) {
       message.error('请填写名称并选择数据源')
@@ -1046,7 +989,6 @@ export function EditorPage() {
       }
     }
     setArtboard(next)
-    setThumbById({})
     setDraft(null)
     setStep('data')
     message.info('模板已载入，请取数后在「做组件」中检查预览')
@@ -1998,9 +1940,7 @@ export function EditorPage() {
               {cart.length === 0 ? (
                 <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>暂无</div>
               ) : (
-                cart.map((n, i) => {
-                  const thumb = thumbById[n.id] || String(n.props?.preview_image || '')
-                  return (
+                cart.map((n, i) => (
                     <div
                       key={n.id}
                       style={{
@@ -2025,13 +1965,6 @@ export function EditorPage() {
                       <div style={{ marginTop: 4 }}>
                         {typeLabel(String(n.type), String(n.props?.chart_type || ''))}
                       </div>
-                      {thumb ? (
-                        <img
-                          src={thumb}
-                          alt=""
-                          style={{ width: '100%', marginTop: 4, borderRadius: 4 }}
-                        />
-                      ) : null}
                       <Button
                         type="link"
                         size="small"
@@ -2044,8 +1977,7 @@ export function EditorPage() {
                         编辑
                       </Button>
                     </div>
-                  )
-                })
+                  ))
               )}
             </div>
           </div>
@@ -2060,18 +1992,9 @@ export function EditorPage() {
                 <Button type="primary" disabled={!cart.length} onClick={() => setStep('preview')}>
                   预览最终推送 →
                 </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    cart.forEach((n) => void refreshThumb(n))
-                    message.info('正在刷新组件缩略图…')
-                  }}
-                >
-                  刷新组件图
-                </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                自由拖拽定位 · 右下角拖柄改大小 · 右侧选风格与精确数值
+                画布内是真实组件（图表/表/KPI 等会随缩放重排），不是截图。顶栏把手拖动 · 右下角改区域大小 · 右侧选风格
               </Typography.Paragraph>
               <ComposeCanvas
                 canvasWidth={canvasWidth}
@@ -2083,7 +2006,8 @@ export function EditorPage() {
                 }}
                 nodes={cart}
                 selectedId={selectedComposeId}
-                thumbs={thumbById}
+                data={{ fieldsByDataset, rowsByDataset }}
+                themeColor={String(artboard.artboard?.theme?.color || '#1677ff')}
                 onSelect={setSelectedComposeId}
                 onChangeLayout={patchComposeLayout}
                 typeLabel={typeLabel}
