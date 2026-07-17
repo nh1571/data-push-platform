@@ -1,1 +1,1 @@
-"""Database package: engine, session, and declarative base."""
+"""数据库子包：引擎、Session 与声明式 ORM Base。"""

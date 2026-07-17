@@ -1,3 +1,5 @@
+"""外部数据源配置模型：连接信息加密存于 config_enc。"""
+
 import uuid
 from datetime import datetime
 
@@ -8,7 +10,11 @@ from app.db.base import Base
 
 
 class DataSource(Base):
-    """Configured external data source (credentials encrypted in config_enc)."""
+    """已配置的外部数据源（MySQL / Doris / SQLite / SQL Server 等）。
+
+    - ``type``: 对应 DataSourcePlugin 注册名（如 ``mysql``、``sqlite``）
+    - ``config_enc``: Fernet 加密 JSON（host/user/password 或 sqlite path 等）
+    """
 
     __tablename__ = "data_sources"
 

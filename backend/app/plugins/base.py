@@ -1,4 +1,14 @@
-"""Plugin protocol / data contracts for datasources, renderers, and channels."""
+"""插件协议与数据契约：数据源、渲染器、通道三层。
+
+数据流概览::
+
+    DataSourcePlugin.execute  → QueryResult
+    RendererPlugin.render     → list[MessagePart] → Message
+    ChannelPlugin.send        → DeliveryResult
+
+实现类无需继承 ABC，只需满足对应 Protocol 的结构（duck typing），
+注册表通过 ``execute`` / ``render`` / ``send`` 方法推断插件种类。
+"""
 
 from __future__ import annotations
 
@@ -8,7 +18,15 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class QueryResult:
-    """Tabular result from a data source query."""
+    """数据源查询返回的表格结果。
+
+    Attributes
+    ----------
+    columns:
+        列名列表。
+    rows:
+        二维行数据，每行与 columns 对齐的单元格值列表。
+    """
 
     columns: list[str]
     rows: list[list[Any]]
@@ -16,7 +34,15 @@ class QueryResult:
 
 @dataclass
 class MessagePart:
-    """One piece of a push message (text, image, file, etc.)."""
+    """推送消息的一个片段（文本、图片、文件、卡片等）。
+
+    Attributes
+    ----------
+    kind:
+        片段类型：``text`` | ``image`` | ``file`` | ``card`` 等。
+    content:
+        载荷：字符串、dict（含 path/url）或路径类对象，依 kind 而定。
+    """
 
     kind: str
     content: Any  # dict | str | path-like
@@ -24,14 +50,24 @@ class MessagePart:
 
 @dataclass
 class Message:
-    """Outbound message composed of one or more parts."""
+    """由一个或多个 MessagePart 组成的出站消息。"""
 
     parts: list[MessagePart] = field(default_factory=list)
 
 
 @dataclass
 class DeliveryResult:
-    """Outcome of sending a message via a channel plugin."""
+    """通道插件发送结果。
+
+    Attributes
+    ----------
+    success:
+        是否投递成功。
+    provider_msg_id:
+        上游消息/任务 id（可选，用于对账）。
+    error:
+        失败时的错误说明（可选）。
+    """
 
     success: bool
     provider_msg_id: str | None = None
@@ -40,15 +76,15 @@ class DeliveryResult:
 
 @runtime_checkable
 class DataSourcePlugin(Protocol):
-    """Query backend (MySQL, HTTP API, etc.)."""
+    """查询后端协议（MySQL、HTTP API、SQLite 等）。"""
 
     @property
     def type(self) -> str:
-        """Unique type id, e.g. ``mysql``."""
+        """唯一类型 id，例如 ``mysql``。"""
         ...
 
     def validate_config(self, config: dict[str, Any]) -> None:
-        """Raise if config is invalid."""
+        """配置非法时抛出异常。"""
         ...
 
     def execute(
@@ -57,17 +93,17 @@ class DataSourcePlugin(Protocol):
         sql: str,
         params: dict[str, Any],
     ) -> QueryResult:
-        """Run a parameterized query and return tabular rows."""
+        """执行参数化查询并返回表格行。"""
         ...
 
 
 @runtime_checkable
 class RendererPlugin(Protocol):
-    """Turn a QueryResult into message parts (markdown table, image chart, …)."""
+    """将 QueryResult 转为消息片段（Markdown 表、图片表、导出文件等）。"""
 
     @property
     def type(self) -> str:
-        """Unique type id, e.g. ``markdown_table``."""
+        """唯一类型 id，例如 ``markdown_table`` / ``text_md``。"""
         ...
 
     def render(
@@ -76,21 +112,23 @@ class RendererPlugin(Protocol):
         config: dict[str, Any],
         params: dict[str, Any],
     ) -> list[MessagePart]:
+        """渲染查询结果为 MessagePart 列表。"""
         ...
 
 
 @runtime_checkable
 class ChannelPlugin(Protocol):
-    """Deliver a Message to an external channel (DingTalk, email, …)."""
+    """将 Message 投递到外部通道（钉钉、邮件等）。"""
 
     @property
     def type(self) -> str:
-        """Unique type id, e.g. ``dingtalk``."""
+        """唯一类型 id，例如 ``dingtalk``。"""
         ...
 
     def validate_config(self, config: dict[str, Any]) -> None:
-        """Raise if config is invalid."""
+        """配置非法时抛出异常。"""
         ...
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
+        """发送消息并返回投递结果。"""
         ...

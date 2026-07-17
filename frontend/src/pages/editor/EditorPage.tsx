@@ -1,12 +1,24 @@
 /**
- * Content workbench = push **template** authoring (not a static one-off image).
- * Runtime JobRun re-queries with resolved params and re-renders every push.
+ * 内容工作台（Studio 编辑器）主页面 — 推送「模板」编排，而非一次性静态图。
  *
- * 1 数据（SQL + 参数定义，样例取数）
- * 2 做组件（字段绑定）
- * 3 组装画布（推送图版式模板）
- * 4 组装推送（图外文案模板）
- * 5 预览 / 试推（样例预演；正式推送动态渲染）
+ * 正式 JobRun 每次推送会重新取数、解析参数并按本页保存的 artboard 重渲染。
+ *
+ * ## 五步向导（StepKey）
+ * 1. **data**   数据：多数据集 SQL / 参数定义 / 样例取数
+ * 2. **make**   做组件：字段绑定 + 本地 Live 预览 + 组件清单
+ * 3. **compose** 组装画布：自由布局 ComposeCanvas（位置/大小/风格模板）
+ * 4. **message** 组装推送：图外 text_before/after 富文本外壳
+ * 5. **preview** 预览推送：服务端 studioCompile 成图 + 试推 / 保存任务
+ *
+ * ## 状态要点
+ * - `artboard`：完整 ArtboardDoc（datasets + tree + compose）
+ * - `fieldsByDataset` / `rowsByDataset`：各数据集 queryPreview 缓存
+ * - `draft`：做组件步骤当前编辑中的表单；确认后写入 tree
+ * - 服务端 compile 仅在 message/preview 步骤触发（见下方 useEffect）
+ *
+ * 路由：`/editor` | `/editor/:jobId`
+ *
+ * 依赖：ComposeCanvas / LiveChart / LiveComponent / RichTextEditor / studioUtils / chartOption
  */
 import {
   ArrowLeftOutlined,
@@ -135,8 +147,10 @@ const CHART_TYPES = [
   { value: 'pie', label: '饼图' },
 ]
 
+/** 五步向导的步骤键 */
 type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
 
+/** Steps 组件展示用元数据 */
 const STEPS = [
   { key: 'data' as const, title: '1. 数据', desc: 'SQL/参数模板' },
   { key: 'make' as const, title: '2. 做组件', desc: '绑定字段' },
@@ -145,6 +159,7 @@ const STEPS = [
   { key: 'preview' as const, title: '5. 预览推送', desc: '样例预演' },
 ]
 
+/** 「做组件」步骤中的临时表单（确认前未写入 tree） */
 type DraftForm = {
   type: string
   dataset_id: string
@@ -174,6 +189,7 @@ type DraftForm = {
   area_opacity?: number
 }
 
+/** 按组件类型生成空 draft 表单默认值 */
 function emptyDraft(type: string, datasetId: string): DraftForm {
   const chartBase: DraftForm = {
     type: 'Chart',
@@ -218,6 +234,7 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
   return base
 }
 
+/** 已有节点 → draft（编辑清单项时回填） */
 function nodeToDraft(node: StudioNode): DraftForm {
   const b = node.binding || {}
   const p = node.props || {}
@@ -256,6 +273,7 @@ function nodeToDraft(node: StudioNode): DraftForm {
   }
 }
 
+/** draft → StudioNode（新建或覆盖 existingId） */
 function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
   const id = existingId || nid()
   const ds = draft.dataset_id || 'main'
@@ -358,10 +376,12 @@ function findNode(root: StudioNode, id: string): StudioNode | null {
   return null
 }
 
+/** 清单：root 下直接子节点（可推送内容组件） */
 function cartItems(tree?: StudioNode): StudioNode[] {
   return [...(tree?.children || [])]
 }
 
+/** 组件类型中文标签 */
 function typeLabel(t: string, chart?: string): string {
   if (t === 'Chart') {
     const m: Record<string, string> = {
@@ -383,6 +403,7 @@ function typeLabel(t: string, chart?: string): string {
   return m[t] || t
 }
 
+/** 已取数（有字段缓存）的数据集选项，供绑定下拉 */
 function readyDatasets(
   datasets: { id: string; name?: string }[],
   fieldsByDataset: Record<string, string[]>,
@@ -395,6 +416,9 @@ function readyDatasets(
     }))
 }
 
+/**
+ * 最终预览区：优先展示服务端 PNG；失败时回退 HTML iframe。
+ */
 function RenderPreview({
   image,
   html,
@@ -472,6 +496,10 @@ function RenderPreview({
   )
 }
 
+/**
+ * 内容工作台页面组件。
+ * 管理五步状态机、artboard 文档、取数缓存、保存与试推。
+ */
 export function EditorPage() {
   const { jobId } = useParams<{ jobId?: string }>()
   const navigate = useNavigate()
@@ -498,7 +526,7 @@ export function EditorPage() {
   const [rowsByDataset, setRowsByDataset] = useState<Record<string, unknown[][]>>({})
   const [activeDatasetId, setActiveDatasetId] = useState('main')
 
-  // Final preview (server compile — only here)
+  // 最终预览：服务端 compile 结果（主要在 preview / message 步骤使用）
   const [finalPreview, setFinalPreview] = useState<StudioCompileResponse | null>(null)
   const [finalLoading, setFinalLoading] = useState(false)
   const [finalError, setFinalError] = useState<string | null>(null)
@@ -588,7 +616,7 @@ export function EditorPage() {
     }))
   }, [])
 
-  // Compile when entering message (shell) or final preview
+  // 进入「组装推送」或「预览」时触发服务端 compile
   useEffect(() => {
     if (step !== 'preview' && step !== 'message') return
     if (!dataSourceId) {
@@ -997,7 +1025,7 @@ export function EditorPage() {
     })
   }, [])
 
-  // Init free-layout coords when entering assemble step
+  // 进入组装画布时为缺失 compose 坐标的节点补默认布局
   useEffect(() => {
     if (step !== 'compose') return
     setArtboard((prev) => {
@@ -1099,7 +1127,12 @@ export function EditorPage() {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#eef0f3' }}>
-        {/* ========== 1 数据：多数据集预生成 ========== */}
+        {/* ============================================================
+            步骤 1 · 数据（data）
+            - 多数据集 SQL / 参数模板
+            - 样例取数 → 填充 fieldsByDataset / rowsByDataset
+            - 主数据集与任务级 dataSourceId、sql 同步
+            ============================================================ */}
         {step === 'data' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
             <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -1482,7 +1515,12 @@ export function EditorPage() {
           </div>
         )}
 
-        {/* ========== 2 做组件：配置 + 大预览 + 小清单 ========== */}
+        {/* ============================================================
+            步骤 2 · 做组件（make）
+            - 左：组件类型与字段绑定表单（draft）
+            - 中：本地即时预览（LiveChart / KPI / 表 / 文案，无服务端）
+            - 右/底：组件清单 cart，确认后写入 artboard.tree
+            ============================================================ */}
         {step === 'make' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             {/* 配置 */}
@@ -2044,7 +2082,12 @@ export function EditorPage() {
           </div>
         )}
 
-        {/* ========== 3 组装画布 ========== */}
+        {/* ============================================================
+            步骤 3 · 组装画布（compose）
+            - ComposeCanvas 自由布局（拖拽/缩放/风格）
+            - 排版的是「推送图模板」；业务数字仍来自字段绑定
+            - 进入时 ensureComposeLayouts 补默认坐标
+            ============================================================ */}
         {step === 'compose' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
@@ -2313,7 +2356,12 @@ export function EditorPage() {
           </div>
         )}
 
-        {/* ========== 4 组装推送（图 + 外层文案） ========== */}
+        {/* ============================================================
+            步骤 4 · 组装推送（message）
+            - 编辑 compose.title / text_before / text_after（RichText）
+            - 图外文案 + 画布图共同构成钉钉消息 parts
+            - 可触发 studioCompile 做外壳预览
+            ============================================================ */}
         {step === 'message' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div style={{ flex: '1 1 52%', overflow: 'auto', padding: 16, minWidth: 360 }}>
@@ -2619,7 +2667,12 @@ export function EditorPage() {
           </div>
         )}
 
-        {/* ========== 5 最终预览 ========== */}
+        {/* ============================================================
+            步骤 5 · 预览推送（preview）
+            - 服务端 studioCompile：HTML / PNG / Markdown / 解析参数
+            - 试推 studioTestPush、保存 studioSaveJob
+            - 样例预演；正式推送仍按当时数据动态渲染
+            ============================================================ */}
         {step === 'preview' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
             <div style={{ maxWidth: 900, margin: '0 auto' }}>

@@ -1,4 +1,4 @@
-"""Built-in renderer plugins (text_md, image_table, card, file_export)."""
+"""内置渲染器插件：text_md、image_table、card、file_export。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ __all__ = [
 
 
 def register_builtin_renderers(registry: PluginRegistry) -> None:
-    """Register built-in renderer plugins on *registry*."""
+    """将内置渲染器注册到 *registry*。"""
     registry.register(TextMarkdownRenderer())
     registry.register(ImageTableRenderer())
     registry.register(CardRenderer())

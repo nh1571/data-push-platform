@@ -1,3 +1,5 @@
+"""投递记录模型：某次 JobRun 对单个通道的一次发送尝试。"""
+
 import uuid
 from datetime import datetime
 
@@ -8,7 +10,12 @@ from app.db.base import Base
 
 
 class Delivery(Base):
-    """Per-channel delivery attempt within a job run."""
+    """JobRun 内按通道维度的投递结果。
+
+    - ``status``: 见 DeliveryStatus（pending/running/success/failed/skipped）
+    - ``provider_msg_id``: 上游（如钉钉 task_id / processQueryKey）回执 id
+    - ``channel_id`` 可空：通道被删除后仍保留历史投递记录
+    """
 
     __tablename__ = "deliveries"
 

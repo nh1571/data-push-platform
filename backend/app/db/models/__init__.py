@@ -1,4 +1,7 @@
-"""ORM models package. Import all models so metadata is registered."""
+"""ORM 模型包：导入全部模型以使 metadata 完成注册。
+
+``create_all`` / Alembic 依赖此包的副作用导入，确保各表定义已挂到 Base.metadata。
+"""
 
 from app.db.models.api_token import ApiToken
 from app.db.models.channel import Channel

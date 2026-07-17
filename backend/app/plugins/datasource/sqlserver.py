@@ -1,4 +1,7 @@
-"""SQL Server data-source plugin (legacy hospital HIS / ODS sources)."""
+"""SQL Server 数据源插件（医院 HIS / ODS 等遗留源）。
+
+依赖可选包 ``pymssql``；未安装时在 execute 阶段给出明确 RuntimeError 提示。
+"""
 
 from __future__ import annotations
 
@@ -12,13 +15,20 @@ _DEFAULT_MAX_ROWS = 10_000
 
 
 class SQLServerDataSourcePlugin:
-    """DataSourcePlugin type=``sqlserver`` via pymssql."""
+    """DataSourcePlugin，``type=sqlserver``，经 pymssql 连接。
+
+    配置键：
+    - 必填：host, port, user, password, database
+    - 可选：max_rows、login_timeout、query_timeout、charset
+    """
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "sqlserver"
 
     def validate_config(self, config: dict[str, Any]) -> None:
+        """校验必填连接字段（空字符串视为缺失）。"""
         missing = [k for k in _REQUIRED if k not in config or config[k] is None or config[k] == ""]
         if missing:
             raise ValueError(f"missing required config keys: {', '.join(missing)}")
@@ -29,6 +39,7 @@ class SQLServerDataSourcePlugin:
         sql: str,
         params: dict[str, Any],
     ) -> QueryResult:
+        """连接 SQL Server、替换占位符、分批 fetch 至 max_rows。"""
         self.validate_config(config)
         try:
             import pymssql

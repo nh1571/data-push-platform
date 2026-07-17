@@ -1,3 +1,9 @@
+/**
+ * 执行记录列表页。
+ *
+ * 筛选条件（状态 / 任务 / 触发方式）同步到 URL searchParams，
+ * 支持从工作台「失败记录」等入口带参跳入。
+ */
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { Button, Form, Select, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -8,6 +14,7 @@ import { getErrorMessage } from '../../api/client'
 import type { JobRun, PushJob } from '../../api/types'
 import { formatDateTime, RunStatusTag } from '../../utils/status'
 
+/** 运行状态筛选项 */
 const STATUS_OPTIONS = [
   { value: 'pending', label: '等待中' },
   { value: 'running', label: '运行中' },
@@ -18,6 +25,7 @@ const STATUS_OPTIONS = [
   { value: 'skipped', label: '已跳过' },
 ]
 
+/** 触发方式筛选项 */
 const TRIGGER_OPTIONS = [
   { value: 'manual', label: '手动' },
   { value: 'schedule', label: '调度' },
@@ -26,12 +34,14 @@ const TRIGGER_OPTIONS = [
   { value: 'rerun', label: '重跑' },
 ]
 
+/** 筛选表单字段 */
 interface FilterValues {
   status?: string
   push_job_id?: string
   trigger_type?: string
 }
 
+/** 执行记录列表：筛选 + 表格 */
 export function JobRunListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [form] = Form.useForm<FilterValues>()
@@ -76,6 +86,7 @@ export function JobRunListPage() {
     void load()
   }, [load])
 
+  /** 写入 URL 参数，触发 load 依赖 searchParams 重新请求 */
   const onSearch = (values: FilterValues) => {
     const next = new URLSearchParams()
     if (values.status) next.set('status', values.status)
@@ -84,6 +95,7 @@ export function JobRunListPage() {
     setSearchParams(next)
   }
 
+  /** 任务 id → 名称展示（列表未加载时回退截断 id） */
   const jobName = (id: string) => jobs.find((j) => j.id === id)?.name || id.slice(0, 8) + '…'
 
   const columns: ColumnsType<JobRun> = [

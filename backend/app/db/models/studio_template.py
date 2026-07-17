@@ -1,4 +1,4 @@
-"""User/system artboard templates stored in meta DB."""
+"""内容工作台画板模板：用户/系统模板存储于元数据库。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,13 @@ from app.db.base import Base
 
 
 class StudioTemplate(Base):
-    """Reusable artboard document for the content workbench."""
+    """可复用的画板（artboard）文档，供内容工作室 / 模板库使用。
+
+    - ``artboard``: 前端画板 JSON 文档（节点、样式、数据绑定等）
+    - ``scene_id``: 可选场景分类标识
+    - ``is_system``: 系统内置模板（通常不可删除）
+    - ``enabled``: 是否对用户可见/可选
+    """
 
     __tablename__ = "studio_templates"
 

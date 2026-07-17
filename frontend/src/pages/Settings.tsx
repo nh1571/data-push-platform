@@ -1,3 +1,9 @@
+/**
+ * 系统设置页：机器 API Token 管理。
+ *
+ * 创建 Token 时明文只展示一次，关闭后无法再查看；
+ * 列表可查看名称/时间/撤销状态，并对有效 Token 执行撤销。
+ */
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -18,11 +24,13 @@ import { getErrorMessage } from '../api/client'
 import type { ApiToken } from '../api/types'
 import { formatDateTime } from '../utils/status'
 
+/** 系统设置：API Token 列表与创建弹窗 */
 export function SettingsPage() {
   const [data, setData] = useState<ApiToken[]>([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  /** 创建成功后的一次性明文 token；非空时弹窗切换为「复制」视图 */
   const [createdToken, setCreatedToken] = useState<string | null>(null)
   const [form] = Form.useForm<{ name: string }>()
 
@@ -51,6 +59,7 @@ export function SettingsPage() {
       message.success('Token 已创建，请立即复制保存')
       await load()
     } catch (err) {
+      // 表单校验失败不弹 toast
       if (err && typeof err === 'object' && 'errorFields' in err) return
       message.error(getErrorMessage(err))
     } finally {

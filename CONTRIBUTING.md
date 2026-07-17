@@ -78,6 +78,7 @@ git push -u origin HEAD
 - 勿提交密钥、`.env`、`backend/data/`、真实钉钉凭证  
 - 大改 `pipeline.py` / `compile.py` / `EditorPage.tsx` 先开 Issue  
 - PR 写清改动与验证方式  
+- 代码注释会被作为 PR review 的**评估维度之一**：关键 / 非显然逻辑建议写清 why、边界与坑（不足会被建议补，但不会因此单独打回）  
 
 ## 行为准则
 

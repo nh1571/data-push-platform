@@ -1,4 +1,4 @@
-"""Built-in data-source plugins (SQLite demo, MySQL, Doris, SQL Server, …)."""
+"""内置数据源插件：SQLite 演示、MySQL、Doris、SQL Server 等。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ __all__ = [
 
 
 def register_builtin_datasources(registry: PluginRegistry) -> None:
-    """Register built-in datasource plugins on *registry*."""
+    """将内置数据源插件注册到 *registry*。"""
     registry.register(SQLiteDataSourcePlugin())
     registry.register(MySQLDataSourcePlugin())
     registry.register(DorisDataSourcePlugin())

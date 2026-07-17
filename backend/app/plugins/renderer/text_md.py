@@ -1,8 +1,8 @@
-"""Markdown text renderer (``type="text_md"``).
+"""Markdown 文本渲染器（``type="text_md"``）。
 
-Renders a :class:`~app.plugins.base.QueryResult` into a single text
-:class:`~app.plugins.base.MessagePart` containing a GitHub-flavored
-markdown table (or a simple bullet list when there is a single column).
+将 :class:`~app.plugins.base.QueryResult` 渲染为单个 text 类型
+:class:`~app.plugins.base.MessagePart`，内容为 GitHub 风格 Markdown 表格
+（单列时改用更易读的无序列表）。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from app.plugins.base import MessagePart, QueryResult
 
 
 def _cell(value: Any) -> str:
-    """Stringify a cell value and escape pipe characters for markdown tables."""
+    """单元格转义：None→空串，换行压空格，管道符转义以适配 markdown 表。"""
     if value is None:
         return ""
     text = str(value).replace("\n", " ").replace("|", "\\|")
@@ -21,7 +21,7 @@ def _cell(value: Any) -> str:
 
 
 def render_markdown_table(result: QueryResult, *, title: str | None = None) -> str:
-    """Build a markdown representation of *result*."""
+    """将 *result* 构建为 Markdown 字符串（可选三级标题）。"""
     lines: list[str] = []
     if title:
         lines.append(f"### {title}")
@@ -34,11 +34,11 @@ def render_markdown_table(result: QueryResult, *, title: str | None = None) -> s
         lines.append("_(empty result)_")
         return "\n".join(lines)
 
-    # Infer column count from first row if headers missing.
+    # 缺表头时按首行推断列数
     if not columns and rows:
         columns = [f"col_{i}" for i in range(len(rows[0]))]
 
-    # Single-column results: bullet list is more readable than a 1-wide table.
+    # 单列结果：无序列表比 1 列宽的表格更易读
     if len(columns) == 1:
         col = columns[0]
         lines.append(f"**{col}**")
@@ -50,13 +50,13 @@ def render_markdown_table(result: QueryResult, *, title: str | None = None) -> s
                 lines.append(f"- {cell}")
         return "\n".join(lines)
 
-    # Multi-column markdown table
+    # 多列 markdown 表
     header = "| " + " | ".join(_cell(c) for c in columns) + " |"
     sep = "| " + " | ".join("---" for _ in columns) + " |"
     lines.append(header)
     lines.append(sep)
     if not rows:
-        # Keep table structure even when empty so consumers still see columns.
+        # 空数据仍保留表头结构，便于消费方看到列定义
         pass
     else:
         for row in rows:
@@ -66,15 +66,16 @@ def render_markdown_table(result: QueryResult, *, title: str | None = None) -> s
 
 
 class TextMarkdownRenderer:
-    """RendererPlugin that produces markdown text (``type="text_md"``).
+    """产出 Markdown 文本的渲染器（``type="text_md"``）。
 
-    Config keys (all optional):
+    配置键（均可选）：
 
-    - ``title``: optional heading prepended to the markdown body
+    - ``title``: 可选，作为 markdown 正文前的标题
     """
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "text_md"
 
     def render(
@@ -83,7 +84,8 @@ class TextMarkdownRenderer:
         config: dict[str, Any],
         params: dict[str, Any],
     ) -> list[MessagePart]:
-        del params  # reserved for future template substitution
+        """渲染为单个 kind=text 的 MessagePart。"""
+        del params  # 预留给未来模板替换
         title = config.get("title")
         if title is not None:
             title = str(title)
