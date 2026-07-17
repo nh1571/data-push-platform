@@ -1,4 +1,4 @@
-"""JobRun list / detail / rerun endpoints (auth via router dependencies)."""
+"""JobRun 列表 / 详情 / 重跑端点（鉴权由路由 dependencies 注入）。"""
 
 from __future__ import annotations
 
@@ -24,10 +24,12 @@ router = APIRouter()
 
 
 def _to_out(row: JobRun) -> JobRunOut:
+    """JobRun ORM → JobRunOut。"""
     return JobRunOut.model_validate(row)
 
 
 def _to_detail(row: JobRun, deliveries: list[Delivery], logs: list[JobRunLog]) -> JobRunDetailOut:
+    """组装含 deliveries/logs 的详情响应。"""
     base = JobRunOut.model_validate(row)
     return JobRunDetailOut(
         **base.model_dump(),
@@ -45,7 +47,7 @@ def list_job_runs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[JobRunOut]:
-    """List job runs with optional filters (status, push_job_id, trigger_type)."""
+    """分页列出 JobRun，可按 status / push_job_id / trigger_type 过滤。"""
     stmt = select(JobRun).order_by(JobRun.created_at.desc())
     if status_filter is not None:
         stmt = stmt.where(JobRun.status == status_filter)
@@ -60,7 +62,7 @@ def list_job_runs(
 
 @router.get("/{run_id}", response_model=JobRunDetailOut)
 def get_job_run(run_id: UUID, db: Session = Depends(get_db)) -> JobRunDetailOut:
-    """Return a single job run including deliveries and logs."""
+    """返回单次 JobRun 详情（含 deliveries 与 logs）。"""
     row = db.get(JobRun, run_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job run not found")
@@ -84,11 +86,10 @@ def get_job_run(run_id: UUID, db: Session = Depends(get_db)) -> JobRunDetailOut:
 
 @router.post("/{run_id}/rerun", response_model=JobRunOut, status_code=status.HTTP_201_CREATED)
 def rerun_job_run(run_id: UUID, db: Session = Depends(get_db)) -> JobRunOut:
-    """Create a NEW JobRun linked via ``parent_run_id`` with ``trigger_type=rerun``.
+    """创建新 JobRun，经 ``parent_run_id`` 关联，``trigger_type=rerun``。
 
-    Execution uses the **latest** PushJob config (pipeline loads the current
-    job by ``push_job_id``), not the parent run's ``config_snapshot``.
-    Parent ``params`` are copied onto the new run.
+    执行使用**最新** PushJob 配置（管线按 push_job_id 加载当前任务），
+    而非父 run 的 config_snapshot；父级 params 会复制到新 run。
     """
     parent = db.get(JobRun, run_id)
     if parent is None:

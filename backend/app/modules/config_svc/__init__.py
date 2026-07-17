@@ -1,1 +1,1 @@
-"""Configuration service (data sources, channels, push jobs)."""
+"""配置服务：数据源 / 渠道 / 推送任务的 schema 与敏感字段脱敏。"""

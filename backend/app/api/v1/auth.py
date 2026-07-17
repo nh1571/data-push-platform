@@ -1,4 +1,4 @@
-"""Operator authentication endpoints (login → JWT)."""
+"""操作员认证端点（登录 → JWT）。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    """Authenticate an operator and return a bearer access token."""
+    """校验操作员账号密码，返回 bearer access token。"""
     operator = db.scalar(select(Operator).where(Operator.username == body.username))
     if operator is None or not verify_password(body.password, operator.password_hash):
         raise HTTPException(

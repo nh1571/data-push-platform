@@ -1,17 +1,16 @@
-"""Editor design model: convert a lightweight design dict into Message / render parts.
+"""编辑器 design 模型：轻量 design 字典 → Message / render parts。
 
-Design keys (all optional unless noted)::
+Design 字段（除特别说明外均可选）::
 
-    output_mode: "markdown" | "image"   # default image when template_id set
+    output_mode: "markdown" | "image"   # 有 template_id 时默认 image
     template_id: "report_v1" | "alert_v1" | "kpi_v1"
-    title: str                # supports {{col}} from first query row
-    theme_color: str          # hex color for image templates
-    header_text: str          # supports {{col}} from first query row
-    footer_text: str
-    include_markdown_table: bool  # default True (markdown mode)
-    show_table: bool          # default True (image templates)
-    kpi_columns: list[str]    # for kpi_v1
-    extra_parts: list[str]    # e.g. ["image_table"] (legacy)
+    title: str                # 支持首行 {{列名}}
+    theme_color: str          # 图片模板主题色
+    header_text / footer_text
+    include_markdown_table: bool  # markdown 模式默认 True
+    show_table: bool          # 图片模板默认 True
+    kpi_columns: list[str]    # kpi_v1
+    extra_parts: list[str]    # 如 ["image_table"]（遗留）
 """
 
 from __future__ import annotations
@@ -28,11 +27,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
 
 def substitute_first_row(template: str, result: QueryResult) -> str:
-    """Replace ``{{column_name}}`` placeholders with values from the first row.
-
-    Unknown columns are left as empty strings. When there are no rows, all
-    placeholders become empty.
-    """
+    """用查询结果首行替换 ``{{列名}}``；未知列或无行 → 空串。"""
     if not template:
         return template
 
@@ -54,27 +49,26 @@ def substitute_first_row(template: str, result: QueryResult) -> str:
 
 
 def result_to_markdown_table(result: QueryResult) -> str:
-    """Build a GitHub-flavored markdown table from *result* (no title)."""
+    """由 *result* 生成 GitHub 风格 Markdown 表（无标题）。"""
     return render_markdown_table(result, title=None)
 
 
 def _wants_image_output(design: dict[str, Any]) -> bool:
+    """design 是否应按图片模式输出。"""
     mode = design.get("output_mode")
     if mode is not None:
         return str(mode).lower() == "image"
-    # Legacy: template_id alone implies image; pure markdown designs omit it.
+    # 兼容：仅有 template_id 即视为图片；纯 markdown design 不带该字段
     if design.get("template_id"):
         return True
     return False
 
 
 def design_to_parts(design: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Convert a design dict into a list of ``{type, config}`` render parts.
+    """design 字典 → ``{type, config}`` 渲染 part 列表。
 
-    Used when normalizing ``render_spec`` that embeds a design key, and when
-    persisting parts alongside the design on save. Runtime rendering prefers
-    :func:`build_message_from_design` so placeholders can be resolved against
-    live query data.
+    用于归一含 design 的 render_spec，以及保存时旁路持久化 parts。
+    运行时渲染优先 :func:`build_message_from_design`，以便对活数据解析占位符。
     """
     design = dict(design or {})
     parts: list[dict[str, Any]] = []
@@ -90,7 +84,7 @@ def design_to_parts(design: dict[str, Any] | None) -> list[dict[str, Any]]:
         parts.append({"type": "template_image", "config": cfg})
         return parts
 
-    # Primary text part — title from header when present.
+    # 主文本 part — 有 header 时作 title
     text_config: dict[str, Any] = {}
     header = design.get("header_text")
     if header:
@@ -116,7 +110,7 @@ def design_to_parts(design: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def design_to_render_spec(design: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Alias for :func:`design_to_parts` (pipeline / save-job storage helper)."""
+    """ :func:`design_to_parts` 别名（管线 / 保存任务存储辅助）。"""
     return design_to_parts(design)
 
 
@@ -126,6 +120,7 @@ def _build_markdown_message(
     *,
     params: dict[str, Any] | None = None,
 ) -> Message:
+    """markdown 模式：header + 表 + footer + extra_parts。"""
     params = dict(params or {})
     sections: list[str] = []
 
@@ -173,16 +168,17 @@ def _build_image_message(
     result: QueryResult,
     design: dict[str, Any],
 ) -> Message:
+    """image 模式：HTML/Pillow 成图 + 标题文本 part。"""
     title = design.get("title") or design.get("header_text") or "数据推送"
     title_resolved = substitute_first_row(str(title), result) if title else "数据推送"
-    # Prefer HTML+CSS screenshot (legacy-style tables); falls back to Pillow.
+    # 优先 HTML+CSS 截图（旧版表样式）；失败回退 Pillow
     try:
         from app.modules.editor.html_table import render_and_save_html
 
         png, path = render_and_save_html(result, design, filename="push_template.png")
     except Exception:
         png, path = render_and_save_template(result, design, filename="push_template.png")
-    del png  # saved to path; channel plugins read from filesystem
+    del png  # 已落盘 path；渠道插件从文件系统读图
     parts: list[MessagePart] = [
         MessagePart(
             kind="image",
@@ -199,17 +195,10 @@ def build_message_from_design(
     *,
     params: dict[str, Any] | None = None,
 ) -> Message:
-    """Build a :class:`Message` from a query result and an editor design.
+    """由查询结果与 editor design 构建 :class:`Message`。
 
-    When ``output_mode`` is ``image`` (or ``template_id`` is set without an
-    explicit markdown mode), generates a PNG via templates and returns an
-    image part (plus a short text caption).
-
-    Otherwise builds markdown body:
-
-    1. ``header_text`` with first-row ``{{col}}`` substitution
-    2. markdown table of rows when ``include_markdown_table`` is true (default)
-    3. ``footer_text`` with the same substitution
+    ``output_mode=image``（或仅设 template_id）时生成 PNG 图 + 短文案；
+    否则组装 Markdown：header → 表（可选）→ footer，均支持首行 ``{{col}}``。
     """
     design = dict(design or {})
     if _wants_image_output(design):

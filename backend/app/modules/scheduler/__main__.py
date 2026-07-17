@@ -1,7 +1,7 @@
-"""Entry point: ``python -m app.modules.scheduler``.
+"""入口：``python -m app.modules.scheduler``。
 
-Sleeps ~20s between ticks so a process restart or slow tick still hits each
-minute slot at least once (double-fire guarded by ``last_schedule_slot``).
+每轮 tick 间隔约 20s：进程重启或慢 tick 仍能命中每个分钟槽至少一次；
+同分钟防重依赖 ``PushJob.last_schedule_slot``。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ SLEEP_SECONDS = 20
 
 
 def main() -> None:
-    # Plugins needed when execution_sync=True runs the pipeline in-process.
+    # execution_sync=True 时管线在进程内执行，需注册数据源/渲染/渠道插件
     register_builtin_datasources(plugin_registry)
     register_builtin_renderers(plugin_registry)
     register_builtin_channels(plugin_registry)

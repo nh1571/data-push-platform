@@ -1,4 +1,4 @@
-"""FastAPI dependencies for operator JWT and machine API tokens."""
+"""FastAPI 依赖：解析操作员 JWT 或机器 API Token，产出 Principal。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.modules.identity.schemas import Principal
 from app.modules.identity.security import decode_access_token, hash_api_token
 
-# auto_error=False so we can return a consistent 401 for missing/invalid credentials
+# auto_error=False：自行返回统一 401，避免 Bearer 缺失时默认错误形态不一致
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -23,10 +23,10 @@ def get_current_principal(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> Principal:
-    """Accept Authorization Bearer JWT (operator) **or** machine API token.
+    """接受 Authorization Bearer：操作员 JWT **或** 机器 API Token。
 
-    JWT claims: ``sub`` = operator id, ``type`` = ``user``.
-    Machine tokens are looked up by SHA-256 hash of the bearer value.
+    JWT claims：``sub`` = 操作员 id，``type`` = ``user``。
+    机器 Token 按 bearer 明文的 SHA-256 哈希查库（且未撤销）。
     """
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
@@ -43,7 +43,7 @@ def get_current_principal(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 1) Try JWT (operator)
+    # 1) 优先尝试 JWT（操作员）
     try:
         payload = decode_access_token(token)
     except JWTError:
@@ -79,7 +79,7 @@ def get_current_principal(
             username=operator.username,
         )
 
-    # 2) Machine API token (SHA-256 hash lookup)
+    # 2) 机器 API Token（SHA-256 哈希查找）
     token_hash = hash_api_token(token)
     api_token = db.scalar(
         select(ApiToken).where(

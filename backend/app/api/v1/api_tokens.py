@@ -1,4 +1,4 @@
-"""Machine API token management (create / list / revoke)."""
+"""机器 API Token 管理（创建 / 列表 / 撤销）。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def create_api_token(
     body: ApiTokenCreate,
     db: Session = Depends(get_db),
 ) -> ApiTokenCreated:
-    """Create a machine token. Plaintext ``token`` is returned only once."""
+    """创建机器 Token；明文 ``token`` 仅此响应返回一次。"""
     plaintext = secrets.token_urlsafe(32)
     row = ApiToken(
         name=body.name,
@@ -37,13 +37,14 @@ def create_api_token(
 
 @router.get("", response_model=list[ApiTokenOut])
 def list_api_tokens(db: Session = Depends(get_db)) -> list[ApiTokenOut]:
+    """列出全部 API Token（新→旧）。"""
     rows = db.scalars(select(ApiToken).order_by(ApiToken.created_at.desc())).all()
     return [ApiTokenOut.model_validate(r) for r in rows]
 
 
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_api_token(token_id: UUID, db: Session = Depends(get_db)) -> None:
-    """Revoke a token by setting ``revoked_at`` (idempotent if already revoked)."""
+    """设置 ``revoked_at`` 撤销 Token（已撤销则幂等）。"""
     row = db.get(ApiToken, token_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="api token not found")

@@ -1,7 +1,6 @@
-"""PNG image templates for the push editor (report / alert / kpi).
+"""推送编辑器 PNG 图片模板（report / alert / kpi）。
 
-Renders a :class:`~app.plugins.base.QueryResult` plus design dict into PNG
-bytes using Pillow, then optionally saves via :class:`~app.storage.local.LocalStorage`.
+用 Pillow 将 QueryResult + design 渲成 PNG 字节，可选经 LocalStorage 落盘。
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ _MUTED = (100, 100, 100)
 _HEADER_BG = (245, 247, 250)
 _GRID = (210, 210, 210)
 _WHITE = (255, 255, 255)
-# Ratio colors aligned with legacy pythonProject4 table styling
+# 百分比着色与旧版 pythonProject4 表格样式对齐
 _RATIO_STRONG_POS = (0, 87, 55)  # #005737 >= 20%
 _RATIO_POS = (0, 176, 80)  # #00B050 0~20%
 _RATIO_NEG = (255, 0, 0)  # #FF0000 < 0
@@ -37,6 +36,7 @@ _PERCENT_RE = __import__("re").compile(
 
 
 def _font(size: int = 14) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
+    """按候选路径加载 TrueType 字体，失败则默认字体。"""
     candidates = (
         "DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -53,11 +53,13 @@ def _font(size: int = 14) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
 
 
 def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
+    """测量文本宽高。"""
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
 def _cell_text(value: Any) -> str:
+    """单元格展示文本（截断超长）。"""
     if value is None:
         return ""
     text = str(value).replace("\n", " ")
@@ -67,17 +69,17 @@ def _cell_text(value: Any) -> str:
 
 
 def _ratio_text_color(cell: str, *, enabled: bool) -> tuple[int, int, int]:
-    """Return text color for percentage-like cells (legacy red/green rules)."""
+    """百分比类单元格文字色（旧版红绿规则）。"""
     if not enabled:
         return _FG
     m = _PERCENT_RE.match(cell)
     if not m:
-        # Also accept bare floats that look like ratios already scaled 0-100
+        # 也接受已是 0–100 量级的裸浮点
         try:
             if cell.strip().endswith("%"):
                 return _FG
             val = float(cell.replace(",", ""))
-            # only color if value looks like a percentage number in common ranges
+            # 仅在常见百分比范围内着色
             if abs(val) > 200:
                 return _FG
             pct = val
@@ -97,6 +99,7 @@ def _ratio_text_color(cell: str, *, enabled: bool) -> tuple[int, int, int]:
 
 
 def _parse_hex_color(value: str | None, default: tuple[int, int, int] = (22, 119, 255)) -> tuple[int, int, int]:
+    """解析 #RGB/#RRGGBB 为 RGB 元组。"""
     if not value:
         return default
     s = str(value).strip().lstrip("#")
@@ -111,6 +114,7 @@ def _parse_hex_color(value: str | None, default: tuple[int, int, int] = (22, 119
 
 
 def _substitute_title(title: str | None, result: QueryResult) -> str:
+    """标题/页眉页脚做首行占位符替换。"""
     from app.modules.editor.design import substitute_first_row
 
     if not title:
@@ -123,6 +127,7 @@ def _display_table(
     *,
     max_rows: int = _MAX_ROWS,
 ) -> tuple[list[str], list[list[str]]]:
+    """准备表头与展示行（截断单元格与行数）。"""
     columns = list(result.columns or [])
     rows = list(result.rows or [])[: max(0, max_rows)]
     if not columns and rows:
@@ -150,10 +155,9 @@ def _draw_table(
     max_width: int,
     color_ratios: bool = True,
 ) -> int:
-    """Draw a simple table; return height consumed.
+    """绘制简易表格，返回占用高度。
 
-    When *color_ratios* is true, cells that look like percentages use
-    legacy red/green text colors (pythonProject4 table styling).
+    *color_ratios* 为真时，百分比单元格使用旧版红绿文字色。
     """
     probe = draw
     col_n = len(header)
@@ -202,7 +206,7 @@ def _draw_table(
 
 
 def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> bytes:
-    """Render *result* with *design* into PNG bytes."""
+    """将 *result* 按 *design* 渲成 PNG 字节。"""
     design = dict(design or {})
     template_id = str(design.get("template_id") or "report_v1")
     if template_id not in TEMPLATE_IDS:
@@ -210,7 +214,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
 
     theme = _parse_hex_color(design.get("theme_color") if isinstance(design.get("theme_color"), str) else None)
     if template_id == "alert_v1" and not design.get("theme_color"):
-        theme = (255, 77, 79)  # red default for alerts
+        theme = (255, 77, 79)  # 告警默认红色
 
     title = _substitute_title(design.get("title") or design.get("header_text"), result)
     header_text = _substitute_title(design.get("header_text"), result) if design.get("title") else ""
@@ -231,11 +235,11 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
     label_font = _font(13)
     footer_font = _font(12)
 
-    # Estimate size
+    # 预估画布尺寸
     img_w = 720
     content_w = img_w - 2 * _PAD
 
-    # Pre-measure table height
+    # 预测量表格高度
     header, display_rows = _display_table(result)
     probe_img = Image.new("RGB", (10, 10), _BG)
     probe_draw = ImageDraw.Draw(probe_img)
@@ -244,7 +248,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
     y_cursor = header_bar_h + _PAD
 
     if template_id == "kpi_v1":
-        y_cursor += 120  # kpi row
+        y_cursor += 120  # KPI 行高估算
         if header_text:
             _, hh = _text_size(probe_draw, header_text or " ", body_font)
             y_cursor += hh + 12
@@ -253,7 +257,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
             _, hh = _text_size(probe_draw, header_text or " ", body_font)
             y_cursor += hh + 12
         if show_table:
-            # Approximate table height
+            # 近似表高
             _, line_h = _text_size(probe_draw, "Ag", body_font)
             y_cursor += (line_h + 12) * (1 + len(display_rows)) + 8
 
@@ -267,7 +271,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
     img = Image.new("RGB", (img_w, img_h), _BG)
     draw = ImageDraw.Draw(img)
 
-    # Header bar
+    # 顶栏
     bar_label = title or ("告警" if template_id == "alert_v1" else "数据报告")
     if template_id == "alert_v1" and not design.get("title"):
         bar_label = title or "告警"
@@ -277,7 +281,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
     y = header_bar_h + _PAD
 
     if template_id == "kpi_v1":
-        # Pick up to 3 KPI columns from first row
+        # 从首行最多取 3 个 KPI 列
         cols = list(result.columns or [])
         kpi_cols = design.get("kpi_columns") or []
         if isinstance(kpi_cols, list) and kpi_cols:
@@ -317,7 +321,7 @@ def render_template_png(result: QueryResult, design: dict[str, Any] | None) -> b
             )
             y += th + 8
     else:
-        # report_v1 / alert_v1
+        # report_v1 / alert_v1 模板
         if template_id == "alert_v1" and not title:
             draw.text((_PAD, y), "告警通知", fill=_FG, font=body_font)
             y += 28
@@ -353,7 +357,7 @@ def render_and_save_template(
     filename: str = "push_template.png",
     storage_root: str | None = None,
 ) -> tuple[bytes, str]:
-    """Render template PNG and save to local storage. Returns (bytes, path)."""
+    """渲染模板 PNG 并写入本地存储。返回 (bytes, path)。"""
     png = render_template_png(result, design)
     if not filename.lower().endswith(".png"):
         filename = f"{filename}.png"

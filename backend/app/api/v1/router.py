@@ -1,7 +1,7 @@
-"""Aggregate API v1 router (prefix ``/api/v1``).
+"""聚合 API v1 路由（前缀 ``/api/v1``）。
 
-All routes require :func:`~app.deps.get_current_principal` except
-``POST /api/v1/auth/login``.
+除 ``POST /api/v1/auth/login`` 外，均依赖
+:func:`~app.deps.get_current_principal` 鉴权。
 """
 
 from fastapi import APIRouter, Depends
@@ -11,14 +11,14 @@ from app.deps import get_current_principal
 
 api_router = APIRouter(prefix="/api/v1")
 
-# Public auth routes (no principal required)
+# 公开鉴权路由（无需 Principal）
 api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["auth"],
 )
 
-# Protected resource routers
+# 受保护的资源路由
 _protected = [Depends(get_current_principal)]
 
 api_router.include_router(

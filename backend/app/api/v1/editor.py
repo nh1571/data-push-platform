@@ -1,4 +1,4 @@
-"""Editor APIs: query-preview, message-preview, test-push, save-job."""
+"""编辑器 / Studio 工作台 API：预览、试推、保存、模板与画板编译。"""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ router = APIRouter()
 
 
 def _job_to_out(row: PushJob) -> PushJobOut:
+    """PushJob ORM → PushJobOut。"""
     raw_ids = row.channel_ids or []
     return PushJobOut(
         id=row.id,
@@ -61,6 +62,7 @@ def query_preview(
     body: QueryPreviewRequest,
     db: Session = Depends(get_db),
 ) -> QueryPreviewResponse:
+    """执行 SQL 预览（含参数解析）。"""
     return editor_service.query_preview(
         db,
         body.data_source_id,
@@ -76,6 +78,7 @@ def message_preview(
     body: MessagePreviewRequest,
     db: Session = Depends(get_db),
 ) -> MessagePreviewResponse:
+    """design 模式消息预览。"""
     return editor_service.message_preview(
         db,
         body.data_source_id,
@@ -91,6 +94,7 @@ def image_preview(
     body: ImagePreviewRequest,
     db: Session = Depends(get_db),
 ) -> ImagePreviewResponse:
+    """design 模式图片预览。"""
     return editor_service.image_preview(
         db,
         body.data_source_id,
@@ -106,6 +110,7 @@ def test_push(
     body: TestPushRequest,
     db: Session = Depends(get_db),
 ) -> TestPushResponse:
+    """design 模式试推到指定渠道。"""
     return editor_service.test_push(
         db,
         data_source_id=body.data_source_id,
@@ -123,12 +128,14 @@ def save_job(
     body: SaveJobRequest,
     db: Session = Depends(get_db),
 ) -> PushJobOut:
+    """从编辑器保存（创建/更新）推送任务。"""
     row = editor_service.save_job(db, body)
     return _job_to_out(row)
 
 
 @router.get("/studio/templates", response_model=list[StudioTemplateResponse])
 def studio_templates(db: Session = Depends(get_db)) -> list[StudioTemplateResponse]:
+    """列出 Studio 模板。"""
     rows = templates_repo.list_templates(db)
     return [StudioTemplateResponse(**templates_repo.to_out(r)) for r in rows]
 
@@ -138,6 +145,7 @@ def studio_template_create(
     body: StudioTemplateCreateRequest,
     db: Session = Depends(get_db),
 ) -> StudioTemplateResponse:
+    """创建用户 Studio 模板。"""
     row = templates_repo.create_template(
         db,
         name=body.name,
@@ -155,6 +163,7 @@ def studio_template_update(
     body: StudioTemplateUpdateRequest,
     db: Session = Depends(get_db),
 ) -> StudioTemplateResponse:
+    """更新 Studio 模板。"""
     row = templates_repo.update_template(
         db,
         template_id,
@@ -171,12 +180,13 @@ def studio_template_delete(
     template_id: UUID,
     db: Session = Depends(get_db),
 ) -> None:
+    """删除非系统 Studio 模板。"""
     templates_repo.delete_template(db, template_id)
 
 
 @router.get("/studio/meta")
 def studio_meta() -> dict:
-    """Theme packs, table styles, component types for the designer."""
+    """设计器元数据：主题包、表格样式、组件类型、可见性预设等。"""
     return {
         "theme_packs": list_theme_packs(),
         "table_styles": list_table_styles(),
@@ -206,7 +216,7 @@ def studio_meta() -> dict:
 
 @router.post("/studio/resolve-params")
 def studio_resolve_params(body: dict) -> dict:
-    """Preview resolved SQL params (auto dates etc.) without executing SQL."""
+    """预览 SQL 参数解析结果（auto 日期等），不执行 SQL。"""
     sql = str(body.get("sql") or "")
     param_defs = body.get("param_defs") if isinstance(body.get("param_defs"), list) else []
     overrides = body.get("params") if isinstance(body.get("params"), dict) else {}
@@ -218,6 +228,7 @@ def studio_compile(
     body: StudioCompileRequest,
     db: Session = Depends(get_db),
 ) -> StudioCompileResponse:
+    """编译画板并返回 HTML/MD/图预览。"""
     data = studio_service.studio_compile(
         db,
         artboard=body.artboard,
@@ -235,6 +246,7 @@ def studio_save_job(
     body: StudioSaveJobRequest,
     db: Session = Depends(get_db),
 ) -> PushJobOut:
+    """以 artboard 保存推送任务。"""
     row = studio_service.save_job_with_artboard(
         db,
         job_id=body.id,
@@ -256,6 +268,7 @@ def studio_test_push(
     body: StudioTestPushRequest,
     db: Session = Depends(get_db),
 ) -> dict:
+    """Studio 画板试推。"""
     return studio_service.studio_test_push(
         db,
         artboard=body.artboard,
