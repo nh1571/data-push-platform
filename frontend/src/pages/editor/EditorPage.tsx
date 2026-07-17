@@ -22,7 +22,9 @@
  */
 import {
   ArrowLeftOutlined,
+  CopyOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   PlusOutlined,
   SaveOutlined,
   ShoppingCartOutlined,
@@ -87,6 +89,12 @@ import {
 } from './ComposeCanvas'
 import { DingTalkPhonePreview, type DingTalkPushContent } from './DingTalkPhonePreview'
 import { htmlToDingTalkMd, isEmptyRich } from './dingtalkMd'
+import {
+  buildExportMarkdown,
+  copyText,
+  downloadImageBase64,
+  downloadTextFile,
+} from './exportPushMarkdown'
 import { LiveChart } from './LiveChart'
 import {
   appendFieldToken,
@@ -562,6 +570,8 @@ export function EditorPage() {
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
   const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
+  /** 导出试推 Markdown 中的图片路径占位（用户可改成推送环境路径） */
+  const [exportImageRef, setExportImageRef] = useState('push-image.png')
 
   const canvases = useMemo(() => listCanvases(artboard), [artboard])
   const effectiveCanvasId =
@@ -3519,6 +3529,124 @@ export function EditorPage() {
                   </div>
                 </div>
               ) : null}
+
+              {/* 导出 Markdown：供本机/其他推送工具临时试推 */}
+              <div
+                style={{
+                  background: '#fff',
+                  borderRadius: 8,
+                  padding: 16,
+                  border: '1px solid #e8e8e8',
+                  marginBottom: 16,
+                }}
+              >
+                <Typography.Text strong>导出试推 Markdown</Typography.Text>
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6 }}>
+                  开发环境连不上正式推送时：复制下方钉钉 MD 文本，到其他机器人/工具试推。
+                  图片请用「下载 PNG」拿到本地，再挪到推送环境；MD 里图片路径可改成你那边的地址。
+                </Typography.Paragraph>
+                <div style={{ marginBottom: 10 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    图片路径（写入 MD 的 ![](…)）
+                  </Typography.Text>
+                  <Input
+                    style={{ marginTop: 4, maxWidth: 420 }}
+                    value={exportImageRef}
+                    onChange={(e) => setExportImageRef(e.target.value)}
+                    placeholder="push-image.png 或 https://…/xxx.png"
+                  />
+                </div>
+                <Space wrap style={{ marginBottom: 10 }}>
+                  <Button
+                    type="primary"
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      const mode = String(artboard.compose?.mode || 'image_primary')
+                      const md = buildExportMarkdown({
+                        title: shellPreview.title || name || '数据推送',
+                        textBefore: livePushContent.markdownBefore || shellPreview.before,
+                        textAfter: livePushContent.markdownAfter || shellPreview.after,
+                        includeImage: mode !== 'markdown_primary',
+                        imageRef: exportImageRef,
+                        imageAlt: name || '推送图',
+                        withGuide: true,
+                      })
+                      void copyText(md)
+                        .then(() => message.success('已复制 Markdown 到剪贴板'))
+                        .catch(() => message.error('复制失败，请手动全选下方文本框'))
+                    }}
+                  >
+                    复制 Markdown
+                  </Button>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={() => {
+                      const mode = String(artboard.compose?.mode || 'image_primary')
+                      const md = buildExportMarkdown({
+                        title: shellPreview.title || name || '数据推送',
+                        textBefore: livePushContent.markdownBefore || shellPreview.before,
+                        textAfter: livePushContent.markdownAfter || shellPreview.after,
+                        includeImage: mode !== 'markdown_primary',
+                        imageRef: exportImageRef,
+                        imageAlt: name || '推送图',
+                        withGuide: true,
+                      })
+                      const safe = (name || 'push').replace(/[^\w\u4e00-\u9fa5-]+/g, '_').slice(0, 40)
+                      downloadTextFile(`${safe || 'push'}-试推.md`, md)
+                      message.success('已下载 .md 文件')
+                    }}
+                  >
+                    下载 .md
+                  </Button>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    disabled={!finalPreview?.image_base64}
+                    onClick={() => {
+                      if (!finalPreview?.image_base64) {
+                        message.warning('请先「重新编译」生成图片')
+                        return
+                      }
+                      const file =
+                        exportImageRef.split(/[/\\]/).pop()?.trim() || 'push-image.png'
+                      const fname = file.endsWith('.png') || file.endsWith('.jpg')
+                        ? file
+                        : `${file}.png`
+                      downloadImageBase64(fname, finalPreview.image_base64)
+                      message.success(`已下载 ${fname}（请与 MD 中路径对应）`)
+                    }}
+                  >
+                    下载 PNG
+                  </Button>
+                </Space>
+                <Input.TextArea
+                  readOnly
+                  value={buildExportMarkdown({
+                    title: shellPreview.title || name || '数据推送',
+                    textBefore: livePushContent.markdownBefore || shellPreview.before,
+                    textAfter: livePushContent.markdownAfter || shellPreview.after,
+                    includeImage:
+                      String(artboard.compose?.mode || 'image_primary') !== 'markdown_primary',
+                    imageRef: exportImageRef,
+                    imageAlt: name || '推送图',
+                    withGuide: true,
+                  })}
+                  autoSize={{ minRows: 8, maxRows: 18 }}
+                  style={{
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontSize: 12,
+                    background: '#fafafa',
+                  }}
+                />
+                {!finalPreview?.image_base64 &&
+                String(artboard.compose?.mode || '') !== 'markdown_primary' ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginTop: 10 }}
+                    message="文案已可复制；图片请先点上方「重新编译」再「下载 PNG」"
+                  />
+                ) : null}
+              </div>
 
               <div
                 style={{
