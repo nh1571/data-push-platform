@@ -240,50 +240,34 @@ class DingTalkOpenAPIGroupRobotPlugin:
         return DeliveryResult(success=True, provider_msg_id=None)
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
-        """发送群 markdown（可回退 Webhook）与图片 sampleImageMsg。"""
+        """按 Message.parts 顺序发送（图前文案 → 图 → 图后文案）。
+
+        不可再「全文合并后先于全部图片发送」，否则图后文案会跑到图前。
+        """
         try:
             self.validate_config(config)
         except ValueError as exc:
             return DeliveryResult(success=False, error=str(exc))
 
         title = str(config.get("title") or "数据推送")
-        text = self._message_to_text(message)
-        images = self._image_parts(message)
         provider_ids: list[str] = []
+        sent_any = False
+
+        if not message.parts:
+            return DeliveryResult(success=False, error="empty message")
 
         try:
             with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
                 access_token = self._fetch_new_access_token(client, config)
+                oapi_token: str | None = None
 
-                # 先发文本 / markdown
-                if text and text != "(empty message)":
-                    try:
-                        data = self._send_group_msg(
-                            client,
-                            access_token,
-                            config,
-                            msg_key="sampleMarkdown",
-                            msg_param={"title": title, "text": text},
-                        )
-                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
-                        if pid is not None:
-                            provider_ids.append(str(pid))
-                    except RuntimeError as exc:
-                        # 可选 Webhook 回退文本
-                        fallback = self._send_webhook_fallback(client, config, text)
-                        if fallback is not None:
-                            if not fallback.success:
-                                return fallback
-                        else:
-                            return DeliveryResult(success=False, error=str(exc))
-
-                # 图片：先 media/upload 再 sampleImageMsg（photoURL = media_id）
-                if images:
-                    oapi_token = self._fetch_oapi_access_token(client, config)
-                    for part in images:
+                for part in message.parts:
+                    if part.kind == "image":
                         path = self._part_path(part)
                         if not path:
                             continue
+                        if oapi_token is None:
+                            oapi_token = self._fetch_oapi_access_token(client, config)
                         media_id = self._upload_image(client, oapi_token, path)
                         data = self._send_group_msg(
                             client,
@@ -295,8 +279,34 @@ class DingTalkOpenAPIGroupRobotPlugin:
                         pid = data.get("processQueryKey") or data.get("processQueryKeys")
                         if pid is not None:
                             provider_ids.append(str(pid))
+                        sent_any = True
+                        continue
 
-                if (not text or text == "(empty message)") and not images:
+                    text = self._part_to_text(part).strip()
+                    if not text:
+                        continue
+                    try:
+                        data = self._send_group_msg(
+                            client,
+                            access_token,
+                            config,
+                            msg_key="sampleMarkdown",
+                            msg_param={"title": title, "text": text},
+                        )
+                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
+                        if pid is not None:
+                            provider_ids.append(str(pid))
+                        sent_any = True
+                    except RuntimeError as exc:
+                        fallback = self._send_webhook_fallback(client, config, text)
+                        if fallback is not None:
+                            if not fallback.success:
+                                return fallback
+                            sent_any = True
+                        else:
+                            return DeliveryResult(success=False, error=str(exc))
+
+                if not sent_any:
                     return DeliveryResult(success=False, error="empty message")
 
         except httpx.HTTPError as exc:

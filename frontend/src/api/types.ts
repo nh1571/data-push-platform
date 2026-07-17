@@ -430,6 +430,11 @@ export interface ArtboardDoc {
     chrome_title?: string
   }
   datasets?: StudioDataset[]
+  /**
+   * 组件库（做组件步骤产出的库存）。
+   * 组装画布从中挑选放到画布，不自动全部铺上。
+   */
+  library?: StudioNode[]
   /** @deprecated 请用 canvases；保留以兼容旧任务 */
   tree?: StudioNode
   /** 多画布列表（推荐） */

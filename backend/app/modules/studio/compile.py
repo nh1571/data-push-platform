@@ -1362,11 +1362,12 @@ def artboard_to_message(
 ) -> Message:
     """画板 + 推送外壳 → 出站 :class:`Message`。
 
-    **产品约束：一次推送 = 钉钉上一条消息语义。**
+    **产品约束：**
 
-    - 多画布 **纵向合成一张 PNG**（不再按画布拆成多条 image）
-    - 全部文案段合并为 **一段** 钉钉 Markdown
-    - 出站 parts 最多为 ``[text?, image?]``，避免群里刷出 N 条机器人消息
+    - 多画布 **纵向合成一张 PNG**（不按画布拆多条 image）
+    - 文案按 segments 相对画布位置拆成 **图前 / 图后**，顺序：
+      ``text_before → image → text_after``
+    - 通道应按 parts 顺序投递，避免图后文案跑到图前
 
     compose 字段（``doc.compose``）::
 
@@ -1384,32 +1385,36 @@ def artboard_to_message(
     canvases = list_canvases(doc)
     segments = _compose_segments(compose, canvases)
 
-    # 全部文案段 → 一段 Markdown（钉钉 sampleMarkdown 一条消息）
-    text_chunks = [
-        _resolve_compose_text(s.get("html"), data_ctx)
-        for s in segments
-        if str(s.get("type")) == "text"
-    ]
-    shell_md = "\n\n".join(t for t in text_chunks if t)
-    has_shell = bool(shell_md)
-    if not has_shell:
-        # 兼容旧字段
-        legacy = "\n\n".join(
-            x
-            for x in (
-                _resolve_compose_text(compose.get("text_before"), data_ctx),
-                _resolve_compose_text(compose.get("text_after"), data_ctx),
-            )
-            if x
-        )
-        shell_md = legacy
-        has_shell = bool(shell_md)
+    # 图前文案 / 图后文案（按 segments 中画布出现位置切分）
+    before_chunks: list[str] = []
+    after_chunks: list[str] = []
+    seen_canvas = False
+    for s in segments:
+        st = str(s.get("type") or "")
+        if st == "canvas":
+            seen_canvas = True
+            continue
+        if st == "text":
+            t = _resolve_compose_text(s.get("html"), data_ctx)
+            if not t:
+                continue
+            if seen_canvas:
+                after_chunks.append(t)
+            else:
+                before_chunks.append(t)
+    text_before = "\n\n".join(before_chunks)
+    text_after = "\n\n".join(after_chunks)
+    # 兼容旧字段（无有效 segments 文案时）
+    if not text_before and not text_after:
+        text_before = _resolve_compose_text(compose.get("text_before"), data_ctx)
+        text_after = _resolve_compose_text(compose.get("text_after"), data_ctx)
 
+    has_shell = bool(text_before or text_after)
     include_auto = _compose_include_component_md(compose, has_shell_text=has_shell)
     auto_md = md_auto if include_auto else ""
     title = _resolve_compose_text(compose.get("title"), data_ctx)
     if not title:
-        title = (shell_md or auto_md or md_auto or "数据推送").split("\n")[0][:80]
+        title = (text_before or text_after or auto_md or md_auto or "数据推送").split("\n")[0][:80]
 
     parts: list[MessagePart] = []
 
@@ -1421,7 +1426,6 @@ def artboard_to_message(
         """多画布合成一张图，只产生一个 image part。"""
         html_doc = build_artboard_html(doc, data_ctx)
         width = int((doc.get("artboard") or {}).get("width") or 750)
-        # 取堆叠后最大宽
         for c in ordered_canvases_for_push(doc):
             width = max(width, int(c.get("width") or width))
         _png, path = _html_to_png(html_doc, width=width)
@@ -1433,7 +1437,9 @@ def artboard_to_message(
         return False
 
     if mode == "markdown_primary":
-        body = "\n\n".join(x for x in (shell_md, auto_md or md_auto) if x)
+        body = "\n\n".join(
+            x for x in (text_before, text_after, auto_md or md_auto) if x
+        )
         parts.append(MessagePart(kind="text", content=body or "（空内容）"))
         return Message(parts=parts)
 
@@ -1443,22 +1449,26 @@ def artboard_to_message(
         parts.append(MessagePart(kind="text", content="（成图失败）"))
         return Message(parts=parts)
 
-    # image_primary / mixed：一条文案 + 一张合成图
-    md_body = shell_md
-    if auto_md and (mode == "mixed" or include_auto):
-        md_body = "\n\n".join(x for x in (md_body, auto_md) if x)
-    _append_text(md_body)
+    # image_primary / mixed：图前 → 合成图 → 图后（顺序重要）
+    before_body = text_before
+    if auto_md and (mode == "mixed" or include_auto) and not text_after:
+        # 自动 MD 作为图注：放图后
+        pass
+    _append_text(before_body)
 
     image_added = False
     if with_image:
         image_added = _append_combined_image()
 
-    if not image_added and not md_body:
+    after_body = text_after
+    if auto_md and (mode == "mixed" or include_auto or (not image_added and not has_shell)):
+        after_body = "\n\n".join(x for x in (after_body, auto_md) if x)
+    _append_text(after_body)
+
+    if not parts:
         parts.append(
             MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）")
         )
-    elif not parts:
-        parts.append(MessagePart(kind="text", content="（空内容）"))
 
     return Message(parts=parts)
 

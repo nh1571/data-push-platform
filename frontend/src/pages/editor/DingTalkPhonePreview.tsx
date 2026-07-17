@@ -1,82 +1,71 @@
 /**
- * 钉钉手机端「一条推送消息」真实尺寸预览。
+ * 钉钉手机端「推送到达」预览（按真实逻辑尺寸与 Markdown 卡片样式打磨）。
  *
- * 调研结论（钉钉机器人群聊 / Markdown）：
- * - 一次推送应对应聊天里的 **一条** 机器人消息（markdown 卡片），不是 N 个气泡
- * - markdown.title 只在会话列表/通知透出，聊天气泡内主要是 text 正文
- * - 正文支持钉钉 MD 子集（# 标题、**加粗**、列表、链接、<font color>、![](url)）
- * - 成图以「整图」形式出现在消息流中，消息体 **高度随内容撑开，无内部滚动条**
- * - 仅会话列表区域可滚动；单条消息不会出现嵌套 scrollbar
- *
- * 尺寸参考：常见手机逻辑宽 375px（iPhone 标准），聊天气泡约屏宽 − 头像 − 边距。
+ * 顺序：图前文案 → 合成推送图 → 图后文案（不会把图后文案合到图前）。
+ * 消息体无内部滚动条；仅会话列表区域可滚。
  */
 import type { CSSProperties, ReactNode } from 'react'
 import { dingTalkToPreviewHtml, isEmptyRich } from './dingtalkMd'
 
 export type DingTalkPushContent = {
-  /** 会话列表/通知标题（markdown.title） */
   title?: string
-  /** 机器人显示名 */
   botName?: string
-  /**
-   * 钉钉 Markdown 正文（已做 {{字段}} 替换的 HTML 或 MD）。
-   * 多段文案应已合并为一段。
-   */
+  /** 图前 Markdown */
+  markdownBefore?: string
+  /** 图后 Markdown */
+  markdownAfter?: string
+  /** @deprecated 等价于 markdownBefore */
   markdown?: string
-  /**
-   * 合成后的推送图（多画布已纵向拼成一块）。
-   * 钉钉 OpenAPI 常为独立 image 消息；产品预览按「一条推送」叠在同一卡片内示意。
-   */
   image?: ReactNode
-  /** 空状态说明 */
   emptyHint?: string
 }
 
 type Props = {
   content: DingTalkPushContent
-  /** 设备逻辑宽度，默认 375（真实手机常见） */
   deviceWidth?: number
-  /** 屏幕高度，默认 720（可视聊天区） */
   deviceHeight?: number
 }
 
-/** 钉钉群聊常见灰底 */
 const CHAT_BG = '#EDEDED'
 const BUBBLE_BG = '#FFFFFF'
 const TEXT = '#171A1D'
-const MUTED = '#8A8A8A'
+const MUTED = '#8F959E'
+const LINK = '#0089FF'
 
 export function DingTalkPhonePreview({
   content,
   deviceWidth = 375,
-  deviceHeight = 720,
+  deviceHeight = 780,
 }: Props) {
-  // 外框：模拟真机边框 + 圆角；内容区严格 deviceWidth
-  const bezel = 10
+  const bezel = 12
   const outerW = deviceWidth + bezel * 2
-  const statusH = 44
-  const navH = 44
-  const homeH = 20
+  const statusH = 48
+  const navH = 48
+  const homeH = 22
   const chatH = deviceHeight - statusH - navH - homeH
 
-  // 气泡：左头像 36 + gap 8 + 右边距 12 → 内容约 deviceWidth - 68
-  const avatar = 36
-  const bubbleMax = deviceWidth - 12 - avatar - 8 - 12
-  // 图片在气泡内再减 padding
-  const imageInnerW = bubbleMax - 16
+  const avatar = 40
+  const sidePad = 12
+  const gap = 8
+  const bubbleMax = deviceWidth - sidePad * 2 - avatar - gap
+  const contentPadX = 12
+  const imageInnerW = bubbleMax - contentPadX * 2
 
-  const hasMd = content.markdown && !isEmptyRich(content.markdown)
+  const before = (content.markdownBefore ?? content.markdown ?? '').trim()
+  const after = (content.markdownAfter ?? '').trim()
+  const hasBefore = before && !isEmptyRich(before)
+  const hasAfter = after && !isEmptyRich(after)
   const hasImage = Boolean(content.image)
-  const empty = !hasMd && !hasImage
+  const empty = !hasBefore && !hasAfter && !hasImage
 
   const shell: CSSProperties = {
     width: outerW,
     maxWidth: '100%',
     margin: '0 auto',
-    background: '#1c1c1e',
-    borderRadius: 36,
+    background: 'linear-gradient(160deg,#2c2c2e 0%,#1c1c1e 100%)',
+    borderRadius: 40,
     padding: bezel,
-    boxShadow: '0 16px 48px rgba(0,0,0,0.28)',
+    boxShadow: '0 20px 50px rgba(0,0,0,0.32)',
     boxSizing: 'border-box',
   }
 
@@ -84,7 +73,7 @@ export function DingTalkPhonePreview({
     width: deviceWidth,
     height: deviceHeight,
     background: CHAT_BG,
-    borderRadius: 28,
+    borderRadius: 32,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
@@ -94,32 +83,58 @@ export function DingTalkPhonePreview({
   return (
     <div style={shell}>
       <div style={screen}>
-        {/* 状态栏 — 真机比例 */}
+        {/* 刘海/状态栏 */}
         <div
           style={{
             height: statusH,
             background: '#FFFFFF',
-            color: TEXT,
-            fontSize: 12,
-            fontWeight: 600,
             display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            padding: '0 20px 6px',
-            boxSizing: 'border-box',
-            borderBottom: 'none',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+            flexShrink: 0,
           }}
         >
-          <span>9:41</span>
-          <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.7 }}>████ ▄▄ 📶</span>
+          <div
+            style={{
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+            }}
+          >
+            <div
+              style={{
+                width: 96,
+                height: 22,
+                background: '#1c1c1e',
+                borderRadius: 12,
+              }}
+            />
+          </div>
+          <div
+            style={{
+              height: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0 18px 2px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: TEXT,
+            }}
+          >
+            <span>9:41</span>
+            <span style={{ fontSize: 10, letterSpacing: 1, opacity: 0.75 }}>●●● 5G ▮▮▮</span>
+          </div>
         </div>
 
-        {/* 群聊导航 — 钉钉白底顶栏 */}
+        {/* 导航 */}
         <div
           style={{
             height: navH,
             background: '#FFFFFF',
-            borderBottom: '1px solid #E7E7E7',
+            borderBottom: '0.5px solid #E5E5E5',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -127,14 +142,23 @@ export function DingTalkPhonePreview({
             flexShrink: 0,
           }}
         >
-          <span style={{ position: 'absolute', left: 12, fontSize: 20, color: TEXT, lineHeight: 1 }}>
+          <span
+            style={{
+              position: 'absolute',
+              left: 14,
+              fontSize: 22,
+              color: TEXT,
+              lineHeight: 1,
+              fontWeight: 300,
+            }}
+          >
             ‹
           </span>
-          <div style={{ textAlign: 'center', maxWidth: '70%' }}>
+          <div style={{ textAlign: 'center', maxWidth: '68%' }}>
             <div
               style={{
                 fontWeight: 600,
-                fontSize: 16,
+                fontSize: 17,
                 color: TEXT,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -143,11 +167,12 @@ export function DingTalkPhonePreview({
             >
               {content.title || '数据推送群'}
             </div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 1 }}>群聊</div>
           </div>
-          <span style={{ position: 'absolute', right: 14, fontSize: 18, color: TEXT }}>···</span>
+          <span style={{ position: 'absolute', right: 16, fontSize: 18, color: TEXT }}>···</span>
         </div>
 
-        {/* 会话区：仅此处可滚动；消息卡片本身不滚动 */}
+        {/* 会话列表：唯一可滚动区 */}
         <div
           style={{
             flex: 1,
@@ -155,7 +180,7 @@ export function DingTalkPhonePreview({
             overflowY: 'auto',
             overflowX: 'hidden',
             WebkitOverflowScrolling: 'touch',
-            padding: '12px 12px 24px',
+            padding: `${sidePad}px ${sidePad}px 28px`,
             boxSizing: 'border-box',
             background: CHAT_BG,
           }}
@@ -165,45 +190,53 @@ export function DingTalkPhonePreview({
               textAlign: 'center',
               fontSize: 11,
               color: MUTED,
-              margin: '4px 0 14px',
+              marginBottom: 14,
               lineHeight: 1.4,
             }}
           >
-            模拟手机 {deviceWidth}×{deviceHeight} · 一条机器人推送
+            今天 09:41
           </div>
 
-          {/* —— 唯一一条机器人消息 —— */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', gap, alignItems: 'flex-start' }}>
+            {/* 机器人头像 */}
             <div
               style={{
                 width: avatar,
                 height: avatar,
-                borderRadius: 6,
-                background: 'linear-gradient(145deg, #4da3ff, #0089ff)',
+                borderRadius: 8,
+                background: 'linear-gradient(145deg, #5eb1ff 0%, #0089ff 55%, #0066cc 100%)',
                 color: '#fff',
-                fontSize: 12,
-                fontWeight: 600,
+                fontSize: 13,
+                fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
               }}
             >
               推
             </div>
-            <div style={{ maxWidth: bubbleMax, minWidth: 0 }}>
-              <div style={{ fontSize: 12, color: MUTED, marginBottom: 4, lineHeight: 1.2 }}>
+
+            <div style={{ maxWidth: bubbleMax, minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: MUTED,
+                  marginBottom: 5,
+                  lineHeight: 1.2,
+                }}
+              >
                 {content.botName || '数据推送机器人'}
               </div>
 
-              {/* 钉钉 markdown 卡片：白底、圆角、无内部滚动 */}
+              {/* 钉钉 Markdown 消息卡片：一条推送视觉单元 */}
               <div
                 style={{
                   background: BUBBLE_BG,
-                  borderRadius: 8,
+                  borderRadius: 10,
                   overflow: 'hidden',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-                  // 关键：消息体随内容增高，禁止 overflow:auto
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
                   maxHeight: 'none',
                   overflowY: 'visible',
                 }}
@@ -211,56 +244,64 @@ export function DingTalkPhonePreview({
                 {empty ? (
                   <div
                     style={{
-                      padding: '16px 12px',
-                      fontSize: 13,
+                      padding: '18px 14px',
+                      fontSize: 14,
                       color: MUTED,
                       lineHeight: 1.5,
                     }}
                   >
-                    {content.emptyHint || '暂无推送内容：请编辑文案或组装画布'}
+                    {content.emptyHint || '暂无推送内容'}
                   </div>
                 ) : (
                   <>
-                    {hasMd ? (
-                      <div
-                        className="dingtalk-md-msg"
-                        style={{
-                          padding: '10px 12px',
-                          fontSize: 15,
-                          lineHeight: 1.55,
-                          color: TEXT,
-                          wordBreak: 'break-word',
-                          // 钉钉正文排版
-                        }}
-                        dangerouslySetInnerHTML={{
-                          __html: dingTalkToPreviewHtml(String(content.markdown)),
-                        }}
-                      />
+                    {hasBefore ? (
+                      <MdBlock htmlOrMd={before} padBottom={!hasImage && !hasAfter} />
                     ) : null}
+
                     {hasImage ? (
                       <div
                         style={{
-                          // 图与上文案之间细分割，贴近钉钉图文卡片
-                          borderTop: hasMd ? '1px solid #F0F0F0' : undefined,
-                          padding: hasMd ? '8px' : 0,
-                          // 整图展示，禁止裁切滚动
+                          borderTop: hasBefore ? '0.5px solid #F0F0F0' : undefined,
+                          borderBottom: hasAfter ? '0.5px solid #F0F0F0' : undefined,
+                          padding: hasBefore || hasAfter ? '8px' : 0,
+                          background: '#FAFAFA',
                           overflow: 'visible',
                         }}
                       >
-                        {/* 强制子图按气泡宽度展示 */}
-                        <div style={{ width: imageInnerW, maxWidth: '100%' }}>
+                        <div
+                          style={{
+                            width: imageInnerW,
+                            maxWidth: '100%',
+                            borderRadius: 6,
+                            overflow: 'hidden',
+                            background: '#fff',
+                            border: '0.5px solid #ECECEC',
+                          }}
+                        >
                           {content.image}
                         </div>
                       </div>
                     ) : null}
+
+                    {hasAfter ? <MdBlock htmlOrMd={after} padBottom /> : null}
                   </>
                 )}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 11,
+                  color: MUTED,
+                  marginTop: 6,
+                  lineHeight: 1.3,
+                }}
+              >
+                图前 / 图 / 图后顺序 · 多画布已合成一张图
               </div>
             </div>
           </div>
         </div>
 
-        {/* Home indicator */}
         <div
           style={{
             height: homeH,
@@ -273,10 +314,10 @@ export function DingTalkPhonePreview({
         >
           <div
             style={{
-              width: 120,
+              width: 118,
               height: 4,
               borderRadius: 2,
-              background: '#c4c4c4',
+              background: '#C8C8C8',
             }}
           />
         </div>
@@ -285,8 +326,30 @@ export function DingTalkPhonePreview({
   )
 }
 
-/** @deprecated 旧多气泡 API；请用 content 单消息 */
-export type DingTalkBubble =
-  | { kind: 'text'; htmlOrMd: string; label?: string }
-  | { kind: 'image'; node: ReactNode; label?: string }
-  | { kind: 'hint'; text: string }
+function MdBlock({
+  htmlOrMd,
+  padBottom = true,
+}: {
+  htmlOrMd: string
+  padBottom?: boolean
+}) {
+  return (
+    <div
+      className="dingtalk-md-msg"
+      style={{
+        padding: padBottom ? '11px 12px 12px' : '11px 12px 8px',
+        fontSize: 15,
+        lineHeight: 1.55,
+        color: TEXT,
+        wordBreak: 'break-word',
+        letterSpacing: 0.1,
+      }}
+      dangerouslySetInnerHTML={{
+        __html: dingTalkToPreviewHtml(htmlOrMd),
+      }}
+    />
+  )
+}
+
+// 预览用：链接色与钉钉一致（class 可选）
+void LINK

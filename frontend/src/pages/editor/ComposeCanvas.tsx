@@ -48,6 +48,8 @@ type Props = {
   themeColor?: string
   onSelect: (id: string | null) => void
   onChangeLayout: (id: string, layout: Partial<ComposeLayout>) => void
+  /** 从当前画布移除组件（不删组件库） */
+  onRemove?: (id: string) => void
   typeLabel: (type: string, chart?: string) => string
 }
 
@@ -132,6 +134,7 @@ export function ComposeCanvas({
   themeColor,
   onSelect,
   onChangeLayout,
+  onRemove,
   typeLabel,
 }: Props) {
   const boardRef = useRef<HTMLDivElement>(null)
@@ -256,7 +259,7 @@ export function ComposeCanvas({
           {nodes.length === 0 ? (
             <Empty
               style={{ paddingTop: 80 }}
-              description="清单为空，请回「做组件」添加"
+              description="画布为空：请从左侧组件库点「放到画布」"
             />
           ) : (
             layouts.map(({ node, layout }, index) => {
@@ -308,6 +311,28 @@ export function ComposeCanvas({
                       <span style={{ marginLeft: 'auto', opacity: 0.45, fontSize: 10 }}>
                         {layout.compose_w}×{layout.compose_h}
                       </span>
+                      {onRemove ? (
+                        <button
+                          type="button"
+                          title="从画布移除"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRemove(node.id)
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#ff4d4f',
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            padding: '0 4px',
+                            lineHeight: 1,
+                          }}
+                        >
+                          删除
+                        </button>
+                      ) : null}
                     </div>
                     <div
                       style={{

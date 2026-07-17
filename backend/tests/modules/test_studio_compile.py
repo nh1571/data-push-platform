@@ -249,12 +249,13 @@ def test_multi_canvas_segments_message_order() -> None:
 
     msg = artboard_to_message(doc, {"main": _sample_result()}, with_image=False)
     texts = [str(p.content) for p in msg.parts if p.kind == "text"]
-    # 多段文案合并为一段
-    assert len(texts) == 1
-    assert "演示院区" in texts[0]
-    assert "中间说明" in texts[0]
-    assert "结尾" in texts[0]
-    # 无多条 image（with_image=False 时甚至无 image）
+    # 图前 / 图后拆成独立 text parts（顺序：开场 → 中间+结尾 因无图时仍按 seen 切分）
+    # with_image=False 时仍保留 text 顺序：before chunks + after chunks
+    assert any("演示院区" in t for t in texts)
+    assert any("中间说明" in t or "结尾" in t for t in texts)
+    # 图前应在图后之前
+    joined = "\n".join(texts)
+    assert joined.index("演示院区") < joined.index("结尾")
     assert all(p.kind == "text" for p in msg.parts)
     image_parts = [p for p in msg.parts if p.kind == "image"]
     assert len(image_parts) == 0

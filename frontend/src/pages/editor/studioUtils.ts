@@ -241,6 +241,7 @@ export function emptyArtboard(): ArtboardDoc {
       chrome_title: '数据推送',
     },
     datasets: [{ id: 'main', name: '主查询', data_source_id: null, sql: 'SELECT 1 AS demo' }],
+    library: [],
     tree,
     canvases: [
       {

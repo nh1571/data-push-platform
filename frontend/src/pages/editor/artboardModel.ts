@@ -56,9 +56,47 @@ export function listCanvases(doc: ArtboardDoc): StudioCanvasBoard[] {
   ]
 }
 
-/** 归一化文档：补 canvases + segments，并回写 tree=第一画布（兼容旧后端读 tree） */
+/** 从各画布树收集组件实例，作为 library 缺省迁移源 */
+export function harvestLibrary(doc: ArtboardDoc): StudioNode[] {
+  if (doc.library && doc.library.length > 0) {
+    return doc.library.map((n) => ({ ...n }))
+  }
+  const seen = new Map<string, StudioNode>()
+  for (const c of listCanvases(doc)) {
+    for (const n of canvasChildren(c)) {
+      if (n?.id && !seen.has(n.id)) seen.set(n.id, { ...n })
+    }
+  }
+  // 兼容仅有 tree
+  if (seen.size === 0 && doc.tree?.children) {
+    for (const n of doc.tree.children) {
+      if (n?.id && !seen.has(n.id)) seen.set(n.id, { ...n })
+    }
+  }
+  return [...seen.values()]
+}
+
+/** 深拷贝节点（新 id），用于「放到画布」；保留 library_id 溯源 */
+export function cloneNodeForCanvas(src: StudioNode, layoutIndex = 0): StudioNode {
+  const raw = JSON.parse(JSON.stringify(src)) as StudioNode
+  const libId = String(src.props?.library_id || src.id)
+  raw.id = `n_${nid()}`
+  raw.props = {
+    ...(raw.props || {}),
+    library_id: libId,
+    // 清旧坐标，进入画布后由 ensureComposeLayouts 补
+    compose_x: 12,
+    compose_y: 12 + layoutIndex * 200,
+    compose_w: raw.props?.compose_w ?? 700,
+    compose_h: raw.props?.compose_h ?? 180,
+  }
+  return raw
+}
+
+/** 归一化文档：补 library + canvases + segments，并回写 tree=第一画布 */
 export function normalizeArtboardDoc(doc: ArtboardDoc): ArtboardDoc {
   const canvases = listCanvases(doc)
+  const library = harvestLibrary({ ...doc, canvases })
   const compose = { ...(doc.compose || {}) }
   let segments = compose.segments
   if (!segments || !segments.length) {
@@ -96,6 +134,7 @@ export function normalizeArtboardDoc(doc: ArtboardDoc): ArtboardDoc {
   }
   return {
     ...doc,
+    library,
     canvases,
     tree: canvases[0]?.tree || doc.tree,
     artboard: {
