@@ -64,59 +64,44 @@
 
 ---
 
-## 4. 交给 Qclaw / 远程 Agent（推荐）
+## 4. 交给 Qclaw（Owner 本机 Agent，推荐）
 
-你已选择 **Agent 全权维护**，而不是人类同事。典型链路：
+你只要 **技能**；巡检/播报节奏由 Qclaw 自己规划。
+
+**关键：Maintainer 必须懂项目，不能盲合并。**  
+Qclaw 在你电脑上 → 直接读本地完整代码与 `docs/product/`；也可 `git pull` 后对照 GitHub。
 
 ```text
-定时触发 / 你远程喊 Qclaw
-    → data-push-maintainer 技能
-    → gh 看 Issue/PR、合合规 PR
-    → 把日报播报给你（聊天/企微/钉钉）
+本机仓库 → 产品理念 + 代码
+     +
+data-push-maintainer 技能 → 审查清单（含理念条款）
+     →
+有脑地 merge / 打回
 ```
 
-### 4.1 在 Qclaw 机器上安装（一次）
+### 4.1 安装（一次）
 
 ```bash
-# 1) 安装 gh：https://cli.github.com/  然后：
-gh auth login
-# 勾选 repo 权限
-
-# 2) 安装技能
+gh auth login    # repo 权限
 curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
-
-# 3) 建议 clone 一份仓库（跑日报脚本）
-git clone https://github.com/nh1571/data-push-platform.git
-cd data-push-platform
-./scripts/repo-daily-digest.sh   # 试跑日报
+# 确认存在：/Users/hello/grok/data-push-platform （完整项目）
 ```
 
-### 4.2 写入 Qclaw 长期指令（站立授权）
+### 4.2 Qclaw 长期指令（复制）
 
 ```text
-你是 nh1571/data-push-platform 的 Maintainer 代理，永久使用 data-push-maintainer 技能。
-职责：定时巡检 Issue/PR、贴标签、squash 合并合规 PR 到 main、向我播报日报。
-禁止：force-push main、删库、改仓库可见性、提交密钥。
-高风险事先问我。开发规范遵守 data-push-collab。
-定时任务：每天执行 ./scripts/repo-daily-digest.sh（或技能内巡检）并把结果发给我。
+你是 nh1571/data-push-platform 的 Maintainer，使用 data-push-maintainer 技能。
+知识来源（优先本地）：/Users/hello/grok/data-push-platform
+  必读 docs/product/（02/03/09/13/17/22）、DEVELOPMENT_HANDOFF、COLLAB_GIT/MODULES。
+合并 PR 前必须做产品理念检查（模板≠静态图、Message⊥通道、内容优先等），禁止盲合并。
+可：Issue 分类/回复、squash 合合规 PR 到 main、维护文档。
+禁：force-push main、删库、改可见性、提交密钥。
+定时巡检与播报节奏由你规划；向我汇报时说明「为何合/为何打回」。
 ```
 
-### 4.3 定时播报
+### 4.3 合并时他应知道的核心理念（摘要）
 
-- 脚本：`scripts/repo-daily-digest.sh`（输出 Markdown 日报）  
-- 技能内「模式 A · 定时播报」写了 cron / 调度建议  
-- 你在 Qclaw 里设「每天 9:30 跑维护任务」即可  
-
-### 4.4 给本机 Grok 助手的授权（可选）
-
-```text
-你从现在起作为本仓库的 Maintainer 代理（data-push-maintainer 技能）。
-仓库：https://github.com/nh1571/data-push-platform
-每天可主动：查看 Issue/PR、分类标签、合并符合规范的 PR（squash 进 main）、
-维护协作文档与 HANDOFF。
-禁止：force-push main、删库、改可见性、提交密钥。
-有疑问或高风险操作先问我。
-```
+见技能内「产品理念速记」；完整在 `docs/product/`。
 
 ---
 
