@@ -71,6 +71,7 @@ import type {
 import { seriesFromTable, type ChartStyle } from './chartOption'
 import {
   canvasChildren,
+  canvasContentBottom,
   cloneNodeForCanvas,
   listCanvases,
   newCanvas,
@@ -1203,12 +1204,18 @@ export function EditorPage() {
         message.info('该组件已在当前画布上')
         return
       }
-      const clone = cloneNodeForCanvas(libNode, cart.length)
+      // 新组件接在当前画布内容底部下方，避免叠在已有图表上
+      const gap = 16
+      const nextY = cart.length === 0 ? 12 : canvasContentBottom(cart) + gap
+      const clone = cloneNodeForCanvas(libNode, {
+        nextY,
+        canvasWidth: Number(activeCanvas?.width) || canvasWidth,
+      })
       setTree(appendChild(tree, 'root', clone))
       setSelectedComposeId(clone.id)
-      message.success('已放到当前画布')
+      message.success('已放到画布下方（可再拖动编排）')
     },
-    [tree, effectiveCanvasId, cart, setTree],
+    [tree, effectiveCanvasId, cart, setTree, activeCanvas?.width, canvasWidth],
   )
 
   const removeFromCanvas = useCallback(
@@ -2482,8 +2489,8 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                从左侧<strong>挑选</strong>组件到当前画布；画布上手柄可<strong>删除</strong>。
-                多画布各自独立选件，下一步合成一条推送。
+                从左侧<strong>挑选</strong>组件（自动排在已有内容下方）；画布<strong>高度随内容自动伸长</strong>，
+                可向下拖放编排。成图截整页，长短不限。手柄可删除/缩放。
               </Typography.Paragraph>
               <Space wrap style={{ marginBottom: 10 }}>
                 {canvases.map((c) => (
@@ -2546,7 +2553,7 @@ export function EditorPage() {
               </Space>
               <ComposeCanvas
                 canvasWidth={Number(activeCanvas?.width) || canvasWidth}
-                canvasMinHeight={420}
+                canvasMinHeight={560}
                 chrome={{
                   show: activeCanvas?.show_chrome !== false,
                   title: String(

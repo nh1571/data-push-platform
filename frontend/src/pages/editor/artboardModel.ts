@@ -76,21 +76,54 @@ export function harvestLibrary(doc: ArtboardDoc): StudioNode[] {
   return [...seen.values()]
 }
 
-/** 深拷贝节点（新 id），用于「放到画布」；保留 library_id 溯源 */
-export function cloneNodeForCanvas(src: StudioNode, layoutIndex = 0): StudioNode {
+/** 按类型给默认高度（放到画布时用） */
+export function defaultComposeHeight(type: string): number {
+  if (type === 'Kpi') return 120
+  if (type === 'Text' || type === 'Alert') return 140
+  if (type === 'Divider') return 36
+  if (type === 'Table') return 260
+  if (type === 'Chart') return 300
+  return 200
+}
+
+/**
+ * 深拷贝节点（新 id），用于「放到画布」。
+ * @param opts.nextY 放在已有内容下方的 Y（避免叠在一起）；不传则 12
+ * @param opts.canvasWidth 画布宽，用于默认宽度
+ */
+export function cloneNodeForCanvas(
+  src: StudioNode,
+  opts?: { nextY?: number; canvasWidth?: number },
+): StudioNode {
   const raw = JSON.parse(JSON.stringify(src)) as StudioNode
   const libId = String(src.props?.library_id || src.id)
+  const cw = opts?.canvasWidth || 750
+  const h = defaultComposeHeight(String(src.type || ''))
   raw.id = `n_${nid()}`
   raw.props = {
     ...(raw.props || {}),
     library_id: libId,
-    // 清旧坐标，进入画布后由 ensureComposeLayouts 补
     compose_x: 12,
-    compose_y: 12 + layoutIndex * 200,
-    compose_w: raw.props?.compose_w ?? 700,
-    compose_h: raw.props?.compose_h ?? 180,
+    compose_y: opts?.nextY != null ? opts.nextY : 12,
+    compose_w: Math.min(cw - 24, Number(raw.props?.compose_w) || cw - 24),
+    compose_h: Number(raw.props?.compose_h) > 0 ? Number(raw.props?.compose_h) : h,
+    compose_style: src.type === 'Divider' ? 'plain' : raw.props?.compose_style || 'card',
   }
   return raw
+}
+
+/** 当前画布已放组件的底部 Y（用于新组件向下接排） */
+export function canvasContentBottom(nodes: StudioNode[]): number {
+  let bottom = 0
+  nodes.forEach((n, i) => {
+    const p = n.props || {}
+    const y = Number.isFinite(Number(p.compose_y)) ? Number(p.compose_y) : 12 + i * 200
+    const h = Number.isFinite(Number(p.compose_h)) && Number(p.compose_h) > 0
+      ? Number(p.compose_h)
+      : defaultComposeHeight(String(n.type || ''))
+    bottom = Math.max(bottom, y + h)
+  })
+  return bottom
 }
 
 /** 归一化文档：补 library + canvases + segments，并回写 tree=第一画布 */
