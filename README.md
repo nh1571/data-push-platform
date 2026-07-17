@@ -7,6 +7,12 @@ Data push middleware for configuring sources, SQL/templates, delivery channels (
 **GitHub（Public）:** https://github.com/nh1571/data-push-platform  
 欢迎 Star / Fork / PR · [贡献指南](CONTRIBUTING.md) · [GitHub 代管说明](docs/GITHUB_OPS.md)
 
+**同事安装协同技能（Agent 会按规范拉/推/PR）：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
+```
+
 > **多 Agent / 跨会话继续开发（必读）**  
 > 0. **技能** `continue-data-push-dev` — **启动/继续** 与 **停止/收工**（说「继续开发推送中台」或「停止开发/收工」）  
 > 1. [`docs/DEVELOPMENT_HANDOFF.md`](docs/DEVELOPMENT_HANDOFF.md) — 进度、架构、下一优先级、开场白  

@@ -2,6 +2,28 @@
 
 感谢关注 [data-push-platform](https://github.com/nh1571/data-push-platform)！
 
+## 给同事 / Agent：一键安装协同技能
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
+```
+
+或已 clone 仓库时：
+
+```bash
+./scripts/install-collab-skills.sh
+```
+
+装好后对 Agent 说（只改「任务」一行即可）：
+
+```text
+用 data-push-collab 技能。
+仓库：https://github.com/nh1571/data-push-platform
+从 main 拉最新，按 skill 建 feature/<lane>-* 分支。
+任务：<写要开发什么，如 studio：画布网格吸附>
+做完 push 并开 PR 到 main。
+```
+
 **完整命令（拉代码 / 建分支 / 推送 / PR）见：**
 
 - 给人读：[docs/COLLAB_GIT.md](docs/COLLAB_GIT.md)  
