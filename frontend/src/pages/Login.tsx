@@ -40,21 +40,12 @@ export function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #1677ff 0%, #69b1ff 100%)',
-        padding: 24,
-      }}
-    >
-      <Card style={{ width: 400, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-        <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 8 }}>
+    <div className="login-page">
+      <Card className="login-card">
+        <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
           数据推送
         </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
+        <Typography.Paragraph type="secondary" style={{ textAlign: 'center', marginBottom: 24 }}>
           运营管理后台
         </Typography.Paragraph>
         {error ? (
@@ -66,7 +57,7 @@ export function LoginPage() {
             label="用户名"
             rules={[{ required: true, message: '请输入用户名' }]}
           >
-            <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="username" />
+            <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="username" size="large" />
           </Form.Item>
           <Form.Item
             name="password"
@@ -77,10 +68,11 @@ export function LoginPage() {
               prefix={<LockOutlined />}
               placeholder="密码"
               autoComplete="current-password"
+              size="large"
             />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0 }}>
-            <Button type="primary" htmlType="submit" block loading={loading}>
+            <Button type="primary" htmlType="submit" block loading={loading} size="large">
               登录
             </Button>
           </Form.Item>

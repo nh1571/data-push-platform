@@ -36,10 +36,14 @@ const DELIVERY_STATUS_LABEL: Record<string, string> = {
   skipped: '已跳过',
 }
 
+export function runStatusLabel(status: string): string {
+  return RUN_STATUS_LABEL[status] ?? status
+}
+
 export function RunStatusTag({ status }: { status: string }) {
   return (
     <Tag color={RUN_STATUS_COLOR[status] ?? 'default'}>
-      {RUN_STATUS_LABEL[status] ?? status}
+      {runStatusLabel(status)}
     </Tag>
   )
 }

@@ -6,7 +6,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { createDraftPushJob, deletePushJob, listDataSources, listPushJobs, runPushJob } from '../../api'
 import { getErrorMessage } from '../../api/client'
 import type { DataSource, PushJob } from '../../api/types'
-import { formatDateTime } from '../../utils/status'
+import { PageHeader } from '../../components/PageHeader'
+import { TableEmpty } from '../../components/TableEmpty'
+import { formatDateTime, RunStatusTag } from '../../utils/status'
 
 export function PushJobListPage() {
   const navigate = useNavigate()
@@ -70,7 +72,7 @@ export function PushJobListPage() {
   const onRun = (row: PushJob) => {
     Modal.confirm({
       title: '立即执行',
-      content: `确认立即执行任务「${row.name}」？`,
+      content: `确认立即执行任务「${row.name}」？将按当前配置取数并投递到已绑定通道。`,
       okText: '执行',
       cancelText: '取消',
       onOk: async () => {
@@ -133,19 +135,9 @@ export function PushJobListPage() {
       width: 160,
       render: (_, row) => {
         if (!row.last_run_status) return <Tag>未运行</Tag>
-        const color =
-          row.last_run_status === 'succeeded'
-            ? 'success'
-            : row.last_run_status === 'failed'
-              ? 'error'
-              : row.last_run_status === 'partial'
-                ? 'warning'
-                : row.last_run_status === 'running'
-                  ? 'processing'
-                  : 'default'
         return (
           <Space size={4} direction="vertical">
-            <Tag color={color}>{row.last_run_status}</Tag>
+            <RunStatusTag status={row.last_run_status} />
             {row.last_run_id ? (
               <Link to={`/job-runs/${row.last_run_id}`} style={{ fontSize: 12 }}>
                 查看
@@ -165,6 +157,7 @@ export function PushJobListPage() {
       title: '操作',
       key: 'actions',
       width: 300,
+      fixed: 'right',
       render: (_, row) => (
         <Space>
           <Button
@@ -196,23 +189,40 @@ export function PushJobListPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} align="start">
-        <div>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            任务管理
-          </Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            调度、启用、最近运行。日常取数与样式请用「内容工作台」；也可在此新建任务后进入编辑。
-          </Typography.Text>
-        </div>
-        <Space>
-          <Button onClick={() => navigate('/editor')}>打开内容工作台</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>
-            新建任务
-          </Button>
-        </Space>
-      </Space>
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <PageHeader
+        title="任务管理"
+        description="调度、启用、最近运行。日常取数与样式请用「内容工作台」；也可在此新建任务后进入编辑。"
+        extra={
+          <>
+            <Button onClick={() => navigate('/editor')}>打开内容工作台</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>
+              新建任务
+            </Button>
+          </>
+        }
+      />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        scroll={{ x: 1100 }}
+        locale={{
+          emptyText: (
+            <TableEmpty
+              description="还没有推送任务。可新建任务，或先在内容工作台编排模板。"
+              action={
+                <Space>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>
+                    新建任务
+                  </Button>
+                  <Button onClick={() => navigate('/editor')}>打开内容工作台</Button>
+                </Space>
+              }
+            />
+          ),
+        }}
+      />
 
       <Modal
         title="新建推送任务"
@@ -249,6 +259,11 @@ export function PushJobListPage() {
               }))}
             />
           </Form.Item>
+          {!sources.length ? (
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              没有可用数据源？请先去 <Link to="/data-sources/new">新建数据源</Link>。
+            </Typography.Text>
+          ) : null}
         </Form>
       </Modal>
     </div>

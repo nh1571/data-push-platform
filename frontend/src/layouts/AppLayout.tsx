@@ -5,11 +5,13 @@ import {
   FormOutlined,
   HistoryOutlined,
   LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   SendOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
-import { Button, Layout, Menu, theme, Typography } from 'antd'
-import { useMemo } from 'react'
+import { Button, Layout, Menu, theme, Tooltip, Typography } from 'antd'
+import { useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
@@ -37,35 +39,49 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { logout } = useAuth()
+  const [collapsed, setCollapsed] = useState(false)
   const {
-    token: { colorBgContainer, borderRadiusLG },
+    token: { colorBgContainer, colorBgLayout, borderRadiusLG },
   } = theme.useToken()
 
   const selected = useMemo(() => selectedKey(location.pathname), [location.pathname])
+  const isEditor = location.pathname.startsWith('/editor')
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh', background: colorBgLayout }}>
       <Sider
         width={220}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
         theme="dark"
         breakpoint="lg"
         collapsedWidth={64}
-        style={{ position: 'sticky', top: 0, height: '100vh' }}
+        style={{
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
+          overflow: 'auto',
+        }}
       >
         <div
           style={{
             height: 56,
-            margin: 12,
+            margin: collapsed ? '0 8px' : '0 12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
             fontWeight: 600,
-            fontSize: 16,
-            letterSpacing: 1,
+            fontSize: collapsed ? 13 : 16,
+            letterSpacing: collapsed ? 0 : 1,
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
           }}
         >
-          数据推送中台
+          {collapsed ? '推送' : '数据推送中台'}
         </div>
         <Menu
           theme="dark"
@@ -73,22 +89,38 @@ export function AppLayout() {
           selectedKeys={[selected]}
           items={MENU_ITEMS}
           onClick={({ key }) => navigate(key)}
+          style={{ borderInlineEnd: 'none' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ background: colorBgLayout }}>
         <Header
           style={{
-            padding: '0 24px',
+            height: 56,
+            lineHeight: '56px',
+            padding: '0 20px',
             background: colorBgContainer,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             borderBottom: '1px solid #f0f0f0',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
           }}
         >
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            数据推送
-          </Typography.Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Tooltip title={collapsed ? '展开侧栏' : '收起侧栏'}>
+              <Button
+                type="text"
+                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={() => setCollapsed((c) => !c)}
+                aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
+              />
+            </Tooltip>
+            <Typography.Text strong style={{ fontSize: 15 }}>
+              数据推送
+            </Typography.Text>
+          </div>
           <Button
             type="text"
             icon={<LogoutOutlined />}
@@ -100,13 +132,15 @@ export function AppLayout() {
             退出登录
           </Button>
         </Header>
-        <Content style={{ margin: 24 }}>
+        <Content style={{ margin: isEditor ? 12 : 24 }}>
           <div
+            className={isEditor ? 'app-content-editor' : undefined}
             style={{
-              padding: 24,
+              padding: isEditor ? 12 : 24,
               minHeight: 360,
               background: colorBgContainer,
               borderRadius: borderRadiusLG,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
             }}
           >
             <Outlet />

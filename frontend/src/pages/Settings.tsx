@@ -6,7 +6,6 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Space,
   Table,
   Typography,
   message,
@@ -16,6 +15,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { createApiToken, listApiTokens, revokeApiToken } from '../api'
 import { getErrorMessage } from '../api/client'
 import type { ApiToken } from '../api/types'
+import { PageHeader } from '../components/PageHeader'
+import { TableEmpty } from '../components/TableEmpty'
 import { formatDateTime } from '../utils/status'
 
 export function SettingsPage() {
@@ -112,28 +113,48 @@ export function SettingsPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            系统设置
-          </Typography.Title>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            管理机器 API Token（Bearer），用于外部系统调用接口。
-          </Typography.Paragraph>
-        </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setCreatedToken(null)
-            setModalOpen(true)
-          }}
-        >
-          创建 Token
-        </Button>
-      </Space>
+      <PageHeader
+        title="系统设置"
+        description="管理机器 API Token（Bearer），用于外部系统调用接口。"
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setCreatedToken(null)
+              setModalOpen(true)
+            }}
+          >
+            创建 Token
+          </Button>
+        }
+      />
 
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        locale={{
+          emptyText: (
+            <TableEmpty
+              description="暂无 API Token。"
+              action={
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setCreatedToken(null)
+                    setModalOpen(true)
+                  }}
+                >
+                  创建 Token
+                </Button>
+              }
+            />
+          ),
+        }}
+      />
 
       <Modal
         title="创建 API Token"

@@ -1,11 +1,13 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined, ApiOutlined } from '@ant-design/icons'
-import { Button, message, Popconfirm, Space, Table, Typography } from 'antd'
+import { Button, message, Popconfirm, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { deleteDataSource, listDataSources, testDataSource } from '../../api'
 import { getErrorMessage } from '../../api/client'
 import type { DataSource } from '../../api/types'
+import { PageHeader } from '../../components/PageHeader'
+import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime } from '../../utils/status'
 
 export function DataSourceListPage() {
@@ -72,6 +74,7 @@ export function DataSourceListPage() {
       title: '操作',
       key: 'actions',
       width: 280,
+      fixed: 'right',
       render: (_, row) => (
         <Space>
           <Button
@@ -101,19 +104,41 @@ export function DataSourceListPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          数据源
-        </Typography.Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => navigate('/data-sources/new')}
-        >
-          新建数据源
-        </Button>
-      </Space>
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <PageHeader
+        title="数据源"
+        description="配置 MySQL / Doris 等业务取数连接，供内容工作台与任务执行使用。"
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => navigate('/data-sources/new')}
+          >
+            新建数据源
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        locale={{
+          emptyText: (
+            <TableEmpty
+              description="还没有数据源，请先创建连接。"
+              action={
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => navigate('/data-sources/new')}
+                >
+                  新建数据源
+                </Button>
+              }
+            />
+          ),
+        }}
+      />
     </div>
   )
 }
