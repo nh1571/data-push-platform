@@ -64,6 +64,20 @@ body {
   margin: 4px 0 0;
   line-height: 1.45;
 }
+.comp-rich {
+  font-size: 14px;
+  color: var(--fg);
+  line-height: 1.65;
+  word-break: break-word;
+}
+.comp-rich p { margin: 0 0 0.6em; }
+.comp-rich h1 { font-size: 22px; margin: 0 0 0.4em; color: var(--theme); }
+.comp-rich h2 { font-size: 18px; margin: 0 0 0.4em; color: var(--theme); }
+.comp-rich h3 { font-size: 15px; margin: 0 0 0.35em; font-weight: 600; }
+.comp-rich ul, .comp-rich ol { margin: 0.3em 0 0.6em 1.2em; padding: 0; }
+.comp-rich li { margin: 0.15em 0; }
+.comp-rich a { color: var(--theme); }
+.comp-rich strong { font-weight: 700; }
 .comp-vstack { display: flex; flex-direction: column; gap: var(--gap, 12px); }
 .comp-hstack { display: flex; flex-direction: row; gap: var(--gap, 8px); align-items: stretch; }
 .comp-kpi {
@@ -254,11 +268,41 @@ def _visible(node: dict[str, Any], data_ctx: dict[str, QueryResult] | None = Non
     return _eval_visible_when(str(expr), data_ctx or {}, binding)
 
 
+def _looks_like_html(s: str) -> bool:
+    t = (s or "").strip().lower()
+    return "<" in t and any(
+        tag in t
+        for tag in (
+            "<p",
+            "<div",
+            "<h1",
+            "<h2",
+            "<h3",
+            "<ul",
+            "<ol",
+            "<li",
+            "<span",
+            "<strong",
+            "<em",
+            "<br",
+            "<a ",
+        )
+    )
+
+
+def _strip_html(s: str) -> str:
+    return re.sub(r"<[^>]+>", "", s or "")
+
+
 def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """Render plain or rich (HTML) text; placeholders {{col}} resolved first."""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
-    text = substitute_first_row(str(props.get("text") or ""), result)
+    raw = str(props.get("html") or props.get("text") or "")
+    text = substitute_first_row(raw, result)
+    if _looks_like_html(text):
+        return f"<div class='comp-rich'>{text}</div>"
     variant = str(props.get("variant") or "body")
     cls = {
         "h1": "comp-text-h1",
@@ -266,6 +310,7 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
         "body": "comp-text-body",
         "caption": "comp-text-caption",
         "footer": "comp-text-caption",
+        "rich": "comp-text-body",
     }.get(variant, "comp-text-body")
     tag = "h1" if cls == "comp-text-h1" else "p"
     return f"<{tag} class='{cls}'>{_esc(text)}</{tag}>"
@@ -275,7 +320,10 @@ def _render_text_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> s
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
-    text = substitute_first_row(str(props.get("text") or ""), result)
+    raw = str(props.get("html") or props.get("text") or "")
+    text = substitute_first_row(raw, result)
+    if _looks_like_html(text):
+        text = _strip_html(text)
     variant = str(props.get("variant") or "body")
     if variant in ("h1", "title"):
         return f"## {text}" if text else ""

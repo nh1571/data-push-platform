@@ -53,6 +53,7 @@ import type {
 } from '../../api/types'
 import { seriesFromTable, type ChartStyle } from './chartOption'
 import { LiveChart } from './LiveChart'
+import { RichTextEditor } from './RichTextEditor'
 import {
   appendChild,
   defaultAlertArtboard,
@@ -167,7 +168,13 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
   if (type === 'ChartPie')
     return { ...chartBase, chart_type: 'pie', title: '饼图', show_legend: true }
   const base: DraftForm = { type, dataset_id: datasetId, text: '', title: '', label: '' }
-  if (type === 'Text') return { ...base, type: 'Text', variant: 'body', text: '标题文案' }
+  if (type === 'Text')
+    return {
+      ...base,
+      type: 'Text',
+      variant: 'rich',
+      text: '<p>在此编写推送文案，可用工具栏设置<strong>加粗</strong>、颜色、列表等。</p><p>插入字段：{{列名}}</p>',
+    }
   if (type === 'Alert') return { ...base, type: 'Alert', level: 'error', text: '请注意异常指标' }
   if (type === 'Kpi') return { ...base, type: 'Kpi', label: '指标' }
   if (type === 'Table') return { ...base, type: 'Table', table_style: 'business' }
@@ -275,7 +282,12 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
       id,
       type: 'Text',
       visible: true,
-      props: { variant: draft.variant || 'body', text: draft.text || '' },
+      props: {
+        variant: draft.variant || 'rich',
+        text: draft.text || '',
+        html: draft.text || '',
+        content_format: 'html',
+      },
       binding: { dataset_id: ds },
     }
   }
@@ -707,9 +719,15 @@ export function EditorPage() {
       message.error('请选择分类字段和至少一个数值字段')
       return
     }
-    if ((draft.type === 'Text' || draft.type === 'Alert') && !String(draft.text || '').trim()) {
-      message.error('请填写文案')
-      return
+    if (draft.type === 'Text' || draft.type === 'Alert') {
+      const plain = String(draft.text || '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim()
+      if (!plain) {
+        message.error('请填写文案')
+        return
+      }
     }
 
     let node = draftToNode(draft, editId || undefined)
@@ -1447,13 +1465,55 @@ export function EditorPage() {
                       </Form.Item>
                     </>
                   ) : null}
-                  {draft.type === 'Text' || draft.type === 'Alert' ? (
+                  {draft.type === 'Text' ? (
                     <>
-                      <Form.Item label="文案">
+                      <Form.Item
+                        label="富文本文案"
+                        extra="自由排版：标题/加粗/颜色/列表/对齐。点字段插入 {{列名}}。"
+                      >
+                        <RichTextEditor
+                          value={draft.text || ''}
+                          onChange={(html) => setDraft({ ...draft, text: html, variant: 'rich' })}
+                          minHeight={200}
+                        />
+                      </Form.Item>
+                      <div style={{ marginBottom: 12 }}>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          插入数据字段：
+                        </Typography.Text>
+                        <div style={{ marginTop: 4 }}>
+                          {draftFields.map((c) => (
+                            <Tag
+                              key={c}
+                              color="blue"
+                              style={{ cursor: 'pointer', marginBottom: 4 }}
+                              onClick={() =>
+                                setDraft({
+                                  ...draft,
+                                  text: `${draft.text || ''}<span>{{${c}}}</span>`,
+                                })
+                              }
+                            >
+                              +{`{{${c}}}`}
+                            </Tag>
+                          ))}
+                          {!draftFields.length ? (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              请先对所选数据集取数
+                            </Typography.Text>
+                          ) : null}
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {draft.type === 'Alert' ? (
+                    <>
+                      <Form.Item label="告警文案">
                         <Input.TextArea
                           rows={3}
                           value={draft.text}
                           onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+                          placeholder="可插入 {{列名}}"
                         />
                       </Form.Item>
                       <div style={{ marginBottom: 8 }}>
@@ -1472,31 +1532,17 @@ export function EditorPage() {
                           </Tag>
                         ))}
                       </div>
-                      {draft.type === 'Text' ? (
-                        <Form.Item label="文字样式">
-                          <Select
-                            value={draft.variant}
-                            onChange={(v) => setDraft({ ...draft, variant: v })}
-                            options={[
-                              { value: 'h1', label: '标题' },
-                              { value: 'body', label: '正文' },
-                              { value: 'caption', label: '脚注' },
-                            ]}
-                          />
-                        </Form.Item>
-                      ) : (
-                        <Form.Item label="级别">
-                          <Select
-                            value={draft.level}
-                            onChange={(v) => setDraft({ ...draft, level: v })}
-                            options={[
-                              { value: 'error', label: '严重' },
-                              { value: 'warning', label: '警告' },
-                              { value: 'info', label: '信息' },
-                            ]}
-                          />
-                        </Form.Item>
-                      )}
+                      <Form.Item label="级别">
+                        <Select
+                          value={draft.level}
+                          onChange={(v) => setDraft({ ...draft, level: v })}
+                          options={[
+                            { value: 'error', label: '严重' },
+                            { value: 'warning', label: '警告' },
+                            { value: 'info', label: '信息' },
+                          ]}
+                        />
+                      </Form.Item>
                     </>
                   ) : null}
                   {draft.type === 'Table' ? (
@@ -1606,23 +1652,38 @@ export function EditorPage() {
                     }))}
                   />
                 ) : makerLocal.kind === 'text' ? (
-                  <div
-                    style={{
-                      padding: 24,
-                      fontSize: makerLocal.variant === 'h1' ? 22 : 14,
-                      fontWeight: makerLocal.variant === 'h1' ? 700 : 400,
-                      color: makerLocal.alert
-                        ? makerLocal.level === 'error'
-                          ? '#a8071a'
-                          : '#d48806'
-                        : '#222',
-                      background: makerLocal.alert ? '#fff2f0' : 'transparent',
-                      borderRadius: 8,
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {makerLocal.text || '（空文案）'}
-                  </div>
+                  makerLocal.alert ? (
+                    <div
+                      style={{
+                        padding: 24,
+                        fontSize: 14,
+                        color:
+                          makerLocal.level === 'error'
+                            ? '#a8071a'
+                            : makerLocal.level === 'warning'
+                              ? '#d48806'
+                              : '#0958d9',
+                        background: '#fff2f0',
+                        borderRadius: 8,
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {makerLocal.text || '（空文案）'}
+                    </div>
+                  ) : (
+                    <div
+                      className="comp-rich-preview"
+                      style={{
+                        padding: 16,
+                        lineHeight: 1.65,
+                        fontSize: 14,
+                        color: '#222',
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: makerLocal.text || '<p>（空文案）</p>',
+                      }}
+                    />
+                  )
                 ) : makerLocal.kind === 'divider' ? (
                   <div style={{ padding: 40 }}>
                     <div style={{ borderTop: '1px solid #d9d9d9' }} />
