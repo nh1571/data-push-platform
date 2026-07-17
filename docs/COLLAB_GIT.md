@@ -1,139 +1,137 @@
 # Git 协同规范（三人 + 多 Agent）
 
-> **结论先说：** 分工对应 **目录/模块**，不对应「每人永久一条长分支」。  
-> 分支是 **短生命周期功能线**，从 `main` 拉出、做完合回 `main`。
+> **结论：** 分工对应 **目录**；分支是 **短任务沙箱**，从 `main` 自己创建，做完合回 `main`。  
+> Agent 强制版：`.grok/skills/data-push-collab/SKILL.md`（含完整命令）。
+
+**仓库：** https://github.com/nh1571/data-push-platform  
 
 ---
 
-## 1. 分支模型（采用：主干 + 短功能分支）
+## 0. 远程只有 main（和 m0）正常吗？
 
-```text
-main                          ← 唯一集成线；保持可 ./scripts/dev.sh
-  │
-  ├── feature/studio-画布缩放     ← 甲 的一条任务（做完就删）
-  ├── feature/io-钉钉oto         ← 乙
-  └── feature/runtime-补跑参数   ← 丙
-```
-
-| 分支 | 用途 | 寿命 |
-|------|------|------|
-| **`main`** | 默认可运行、可合并目标 | 长期 |
-| **`feature/<lane>-<简述>`** | 单任务开发 | **几天内**合完并删除 |
-| `feature/m0-scaffold` | 历史脚手架线 | 已并入 main，**勿再当主开发线** |
-| `fix/...` / `docs/...` | 修 bug / 纯文档 | 短 |
-
-### 为什么不「甲永远在 branch-studio」？
-
-| 永久分工分支 | 问题 |
-|--------------|------|
-| `lane/studio` 长期不合并 | 与 main 差越来越大，合并爆炸 |
-| 三人各改各的永远不合 | 无法一起跑完整产品 |
-| Agent 不知从哪拉 | 混乱 |
-
-**分工 = 你改哪些目录**（见 COLLAB_MODULES）。  
-**分支 = 你这一次任务的隔离沙箱**（做完必须回到 main）。
+**正常。** 不会预先建好「甲/乙/丙」三条永久分支。  
+别人 clone 后：**自己** `git checkout -b feature/...`，push 后远程才会多出他的分支。
 
 ---
 
-## 2. 命名约定
+## 1. 别人第一次拉下来
 
-```text
-feature/studio-<topic>    # 甲 · 工作台+成图
-feature/io-<topic>        # 乙 · 数据源+通道
-feature/runtime-<topic>   # 丙 · 执行+调度+运营
-fix/<topic>
-docs/<topic>
-chore/<topic>
-```
-
-示例：`feature/studio-push-shell`、`feature/io-webhook-retry`、`fix/runtime-jobrun-log`。
-
----
-
-## 3. 标准开发流程（人 / Agent 相同）
+### 有写权限（内部）
 
 ```bash
-# 0. 仓库
-cd /path/to/data-push-platform
-git fetch origin
+git clone https://github.com/nh1571/data-push-platform.git
+cd data-push-platform
+git checkout main
+git pull origin main
+./scripts/dev.sh
+# http://localhost:5173  admin / admin123
+```
+
+### 无写权限（外部）
+
+1. 网页 **Fork**  
+2. `git clone https://github.com/<你>/data-push-platform.git`  
+3. `git remote add upstream https://github.com/nh1571/data-push-platform.git`  
+4. 开发后：push 到自己的 Fork → PR 到上游 `main`
+
+---
+
+## 2. 每天开发 + 推送（抄这套）
+
+```bash
+# 1) 更新主线
 git checkout main
 git pull origin main
 
-# 1. 开任务分支（按自己的 lane）
-git checkout -b feature/studio-xxx
+# 2) 自己建任务分支（名字带分工）
+git checkout -b feature/studio-我的任务   # 甲
+# feature/io-…  乙    feature/runtime-…  丙
 
-# 2. 本地跑通（默认零依赖）
+# 3) 开发
 ./scripts/dev.sh
-# 或仅 API：APP_ENV=local 见 docs/DEPLOYMENT.md
+# …改代码…
 
-# 3. 开发 → 小步提交
-git add <相关文件>
-git commit -m "feat(studio): 简短说明"
+# 4) 提交
+git add <相关文件>          # 不要 add data/、.env
+git commit -m "feat(studio): 说明改了什么"
 
-# 4. 推远程
+# 5) 推送（第一次 -u）
 git push -u origin HEAD
 
-# 5. 开 PR → base: main
-gh pr create --base main --title "feat(studio): …" --body "…"
+# 6) 开 PR（base = main）
+gh pr create --base main --title "feat(studio): …" --body "## 摘要\n## 如何验证"
+# 或网页：Compare & pull request
 
-# 6. 合并后删分支
-gh pr merge --squash   # 或网页 Merge
-git checkout main && git pull
-git branch -d feature/studio-xxx
+# 7) 合并后
+git checkout main && git pull origin main
+git branch -d feature/studio-我的任务
 ```
 
-### 提交信息
+### 开发中途同步别人已合并的代码
 
-```text
-feat(studio): …
-fix(io): …
-docs: …
-chore: …
+```bash
+# 仍在你的 feature 分支上
+git fetch origin
+git merge origin/main
+# 解决冲突 → commit → git push
 ```
 
-scope 建议：`studio` | `io` | `runtime` | `deploy` | 空。
-
 ---
 
-## 4. 并行时如何少冲突
-
-1. **认领目录**（COLLAB_MODULES 甲/乙/丙），少改别人目录。  
-2. **一天至少一次** `git fetch && git merge origin/main`（或 rebase）到自己的 feature 分支。  
-3. 总线文件（`pipeline.py`、`compile.py`、`EditorPage.tsx`、`types.ts`）改前 Issue 打招呼。  
-4. PR 宜小：一个 PR 一个主题。
-
----
-
-## 5. Agent 强制规则
-
-1. 开始前：`git status` + `git branch` + 读 `docs/DEVELOPMENT_HANDOFF.md` §7。  
-2. **禁止**直接在 `main` 上堆大功能（紧急 hotfix 除外，且尽快 PR 记录）。  
-3. **禁止** `git push --force` 到 `main`。  
-4. **禁止**提交 `.env`、密钥、`backend/data/*`、真实钉钉凭证。  
-5. 推送 / 合并 PR：用户未授权则先说明再执行（用户说「直接推/合」可执行）。  
-6. 收工：更新 HANDOFF §7；有意义改动必须 commit。  
-7. 产品决策：优先 `docs/product/` 与 HANDOFF，**不要从零发明架构**。
-
----
-
-## 6. 与 GitHub Issues
-
-| 标签 | 含义 |
-|------|------|
-| `lane:studio` / `lane:io` / `lane:runtime` | 三条分工线 |
-| `help wanted` / `good first issue` | 欢迎外部贡献 |
-| `type:feat` / `fix` / `docs` | 类型 |
-
-PR 建议关联：`Fixes #12` 或 body 里写 Issue 编号。
-
----
-
-## 7. 一图记忆
+## 3. 分支模型
 
 ```text
-  分工（谁改哪）          分支（怎么隔离）
-  ─────────────          ────────────────
-  甲 studio 目录    →    feature/studio-*  → PR → main
-  乙 io 插件目录    →    feature/io-*      → PR → main
-  丙 runtime 目录   →    feature/runtime-* → PR → main
+main                          ← 唯一集成线
+  ├── feature/studio-xxx      ← 某人自己建，做完 PR 删
+  ├── feature/io-xxx
+  └── feature/runtime-xxx
+```
+
+| 分支 | 谁创建 | 寿命 |
+|------|--------|------|
+| `main` | 仓库默认 | 长期 |
+| `feature/<lane>-<topic>` | **开发者自己** | 几天内 |
+| `feature/m0-scaffold` | 历史 | 勿再当主开发线 |
+
+**不是主流、也不要用：** 每人永久 `branch-甲` 长期不合并。
+
+---
+
+## 4. 命名
+
+```text
+feature/studio-<topic>    # 工作台+成图
+feature/io-<topic>        # 数据源+通道
+feature/runtime-<topic>   # 执行+调度+运营
+fix/<topic>  docs/<topic>  chore/<topic>
+```
+
+提交：`feat(studio): …` / `fix(io): …` / `docs: …`
+
+---
+
+## 5. 分工（目录）见 COLLAB_MODULES.md
+
+| 线 | 分支前缀 | 主要改 |
+|----|----------|--------|
+| 甲 studio | `feature/studio-*` | `pages/editor`、`modules/studio` |
+| 乙 io | `feature/io-*` | `plugins/datasource|channel` |
+| 丙 runtime | `feature/runtime-*` | `execution`、`scheduler`、任务/运行页 |
+
+---
+
+## 6. 禁止
+
+- force-push `main`  
+- 提交密钥 / `.env` / `backend/data/*`  
+- 在 `main` 上堆大功能  
+- 从 `feature/m0-scaffold` 开新功能（从 **main** 开）
+
+---
+
+## 7. 一句话
+
+```text
+clone → 只用 main → 自己建 feature/线-任务
+→ 本地跑 → commit → push 自己的分支 → PR 合进 main
 ```
