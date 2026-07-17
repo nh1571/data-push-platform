@@ -149,6 +149,9 @@ class StudioCompileResponse(BaseModel):
     # When PNG missing: explain why (playwright/wkhtml unavailable, etc.)
     image_error: str | None = None
     ok: bool = True
+    # SQL params resolved for this compile (auto yesterday/today, …)
+    resolved_params: dict[str, str] = Field(default_factory=dict)
+    resolved_params_by_dataset: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class StudioSaveJobRequest(BaseModel):

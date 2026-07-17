@@ -2345,6 +2345,26 @@ export function EditorPage() {
                 图前 / 图后是<strong>文案模板</strong>（工具栏：标题、加粗、颜色、列表、链接）。
                 {'{{列名}}'} 在每次推送时用当次查询首行替换；发送时转钉钉 Markdown。
               </Typography.Paragraph>
+              {finalPreview?.resolved_params &&
+              Object.keys(finalPreview.resolved_params).length > 0 ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="本次刷新画布图时 SQL 参数"
+                  description={
+                    <span style={{ fontSize: 12 }}>
+                      {Object.entries(finalPreview.resolved_params)
+                        .map(([k, v]) => `${k}=${v}`)
+                        .join(' · ')}
+                      <span style={{ color: '#888' }}>
+                        {' '}
+                        （完整表见第 5 步预览）
+                      </span>
+                    </span>
+                  }
+                />
+              ) : null}
 
               <div style={{ marginBottom: 16 }}>
                 <Typography.Text type="secondary">消息标题（钉钉通知标题，纯文本）</Typography.Text>
@@ -2637,6 +2657,78 @@ export function EditorPage() {
                 下方是用<strong>此刻工作台样例数据</strong>渲染的终片，用于验收模板。
                 正式调度或试推时会<strong>重新解析参数、重新取数、重新成图</strong>再投递（图前/图/图后结构一致）。
               </Typography.Paragraph>
+
+              {/* 本次编译实际用到的 SQL 参数 — 强化「模板动态渲染」 */}
+              <div
+                style={{
+                  background: '#fff',
+                  borderRadius: 8,
+                  padding: 16,
+                  border: '1px solid #e8e8e8',
+                  marginBottom: 16,
+                }}
+              >
+                <Typography.Text strong>本次编译解析参数</Typography.Text>
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+                  工作台保存的是模板；这里是<strong>这一次</strong>预览时 SQL {'{{参数}}'} 被解析成的值（含
+                  yesterday/today 等自动日期）。调度推送时会按当时再算一遍。
+                </Typography.Paragraph>
+                {finalLoading && !finalPreview ? (
+                  <Spin size="small" />
+                ) : finalPreview?.resolved_params &&
+                  Object.keys(finalPreview.resolved_params).length > 0 ? (
+                  <>
+                    <Table
+                      size="small"
+                      pagination={false}
+                      rowKey="name"
+                      dataSource={Object.entries(finalPreview.resolved_params).map(
+                        ([name, value]) => ({ name, value }),
+                      )}
+                      columns={[
+                        { title: '参数名', dataIndex: 'name', width: 160 },
+                        {
+                          title: '本次解析值',
+                          dataIndex: 'value',
+                          render: (v: string) => (
+                            <Typography.Text code style={{ fontSize: 12 }}>
+                              {v}
+                            </Typography.Text>
+                          ),
+                        },
+                      ]}
+                    />
+                    {finalPreview.resolved_params_by_dataset &&
+                    Object.keys(finalPreview.resolved_params_by_dataset).length > 1 ? (
+                      <div style={{ marginTop: 12 }}>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          分数据集
+                        </Typography.Text>
+                        {Object.entries(finalPreview.resolved_params_by_dataset).map(
+                          ([dsId, map]) => (
+                            <div key={dsId} style={{ marginTop: 6, fontSize: 12 }}>
+                              <Tag>{dsId}</Tag>
+                              {Object.entries(map)
+                                .map(([k, v]) => `${k}=${v}`)
+                                .join(' · ')}
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    本次编译未返回参数表（SQL 可能无 {'{{占位}}'}，或尚未完成编译）。
+                    可在「数据」步为 SQL 配置 auto 参数后重新编译。
+                  </Typography.Text>
+                )}
+                {finalPreview != null ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+                    取数行数：{finalPreview.row_count ?? '—'}
+                  </div>
+                ) : null}
+              </div>
 
               <div
                 style={{

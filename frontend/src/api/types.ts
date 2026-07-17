@@ -394,6 +394,9 @@ export interface StudioCompileResponse {
   artboard: ArtboardDoc
   image_error?: string | null
   ok?: boolean
+  /** Params used for this compile (e.g. yesterday → 2026-07-16) */
+  resolved_params?: Record<string, string>
+  resolved_params_by_dataset?: Record<string, Record<string, string>>
 }
 
 export interface StudioSaveJobRequest {
