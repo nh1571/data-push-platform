@@ -16,7 +16,7 @@ description: >
 |----|-----|
 | 仓库 | https://github.com/nh1571/data-push-platform |
 | 默认分支 | `main` |
-| 本机路径（Owner 电脑） | `/Users/hello/grok/data-push-platform` |
+| 本机路径 | 每个开发者/Agent 在自己目录下独立 clone，如 `~/claude/data-push-platform`、`~/grok/data-push-platform`，不共用 |
 | 开发协同 | 技能 `data-push-collab` |
 | 启停环境 | 技能 `continue-data-push-dev` |
 
@@ -36,8 +36,7 @@ description: >
 
 ```text
 你是 nh1571/data-push-platform 的 Maintainer（data-push-maintainer 技能）。
-本机有完整仓库时可优先读本地 /Users/hello/grok/data-push-platform；
-否则读 GitHub 上 docs/ 与代码。
+本机有完整仓库时可优先读本地仓库；否则读 GitHub 上 docs/ 与代码。
 合并任何 PR 前必须先对照产品理念与 collab 规范做审查，禁止无脑合并。
 可处理：Issue 分类、评论、squash 合并合规 PR 到 main、维护文档。
 禁止：force-push main、删库、改可见性、提交密钥。
@@ -51,7 +50,7 @@ description: >
 **优先本地仓库**（Qclaw 在 Owner 电脑上时）：
 
 ```text
-/Users/hello/grok/data-push-platform/
+<你的 data-push-platform 本地仓库>/
 ```
 
 没有本地 clone 时，用 GitHub 同路径文件（raw / `gh api` / clone 临时目录）。
@@ -99,7 +98,7 @@ gh pr diff <n> --repo nh1571/data-push-platform
 有本地仓库时：
 
 ```bash
-cd /Users/hello/grok/data-push-platform
+cd <你的 data-push-platform 本地仓库>
 git fetch origin
 gh pr checkout <n>
 # 可选：针对性 pytest / 前端 build
@@ -172,14 +171,14 @@ gh pr checkout <n>
 
 | 来源 | 何时用 |
 |------|--------|
-| **本机** `/Users/hello/grok/data-push-platform` | Qclaw 在 Owner 电脑上（优先：全代码+docs） |
+| **本机** `<你的 data-push-platform 本地仓库>` | Qclaw 在 Owner 电脑上（优先：全代码+docs） |
 | **GitHub** 同路径 `docs/`、`README`、源码 | 无本地或本地过旧时 `git pull` 或直接读远程 |
 | **Issue/PR 讨论** | 近期决策 |
 
 会话开始建议：
 
 ```bash
-cd /Users/hello/grok/data-push-platform && git pull origin main 2>/dev/null || true
+cd <你的 data-push-platform 本地仓库> && git pull origin main 2>/dev/null || true
 # 然后读 §1 清单中的文件
 ```
 
@@ -230,7 +229,7 @@ gh auth login   # 一次即可
 curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
 ```
 
-确保本机有仓库：`/Users/hello/grok/data-push-platform`（或自行 clone 到固定路径并在指令里写明）。
+确保本机有仓库：`<你的 data-push-platform 本地仓库>`（或自行 clone 到固定路径并在指令里写明）。
 
 ---
 
