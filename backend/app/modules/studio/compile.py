@@ -1320,11 +1320,20 @@ def _html_to_png(html_doc: str, width: int = 750) -> tuple[bytes | None, str | N
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as p:
-                browser = p.chromium.launch()
-                page = browser.new_page(viewport={"width": width + 40, "height": 900})
-                page.set_content(html_doc, wait_until="networkidle")
-                page.locator("#artboard").screenshot(path=str(out))
-                browser.close()
+                browser = p.chromium.launch(
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+                )
+                try:
+                    page = browser.new_page(
+                        viewport={"width": width + 40, "height": 1200}
+                    )
+                    page.set_default_timeout(20_000)
+                    # 画板 HTML 内嵌 data-url 图，无需 networkidle（避免外网卡死）
+                    page.set_content(html_doc, wait_until="domcontentloaded")
+                    page.wait_for_timeout(200)
+                    page.locator("#artboard").screenshot(path=str(out))
+                finally:
+                    browser.close()
             if out.is_file() and out.stat().st_size > 0:
                 png = out.read_bytes()
         except Exception:

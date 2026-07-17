@@ -7,6 +7,9 @@
 import type { ArtboardDoc, StudioCanvasBoard, StudioComposeSegment, StudioNode } from '../../api/types'
 import { nid } from './studioUtils'
 
+/** 与后端 normalize.ARTBOARD_VERSION 对齐 */
+export const ARTBOARD_VERSION = 3
+
 /** 保证 root 容器结构 */
 export function emptyCanvasTree(): StudioNode {
   return {
@@ -167,6 +170,8 @@ export function normalizeArtboardDoc(doc: ArtboardDoc): ArtboardDoc {
   }
   return {
     ...doc,
+    version: Math.max(Number(doc.version) || 0, ARTBOARD_VERSION),
+    kind: doc.kind || 'artboard',
     library,
     canvases,
     tree: canvases[0]?.tree || doc.tree,
@@ -179,6 +184,7 @@ export function normalizeArtboardDoc(doc: ArtboardDoc): ArtboardDoc {
     },
     compose: {
       ...compose,
+      mode: compose.mode || 'image_primary',
       segments,
       text_format: compose.text_format || 'html',
     },

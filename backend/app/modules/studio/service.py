@@ -30,6 +30,7 @@ from app.modules.editor.schemas import ChannelSendResult, SaveJobRequest
 from app.modules.studio.compile import compile_artboard
 from app.modules.studio.defaults import default_daily_artboard
 from app.modules.studio.migrate import design_to_artboard, extract_artboard, is_artboard_spec
+from app.modules.studio.normalize import ARTBOARD_VERSION, normalize_artboard_doc
 from app.modules.studio.sql_params import extract_placeholders, resolve_sql_params
 from app.plugins.base import QueryResult
 
@@ -43,8 +44,11 @@ def ensure_artboard_doc(
     """将入参归一为 artboard v3 文档，并同步主数据集 data_source_id / sql。
 
     识别顺序：完整 artboard → 嵌套 extract → 旧 design 迁移 → 默认日报模板。
+    最后强制 :func:`normalize_artboard_doc`（canvases / library / segments）。
     """
-    if isinstance(raw, dict) and is_artboard_spec(raw) and "tree" in raw:
+    if isinstance(raw, dict) and is_artboard_spec(raw) and (
+        "tree" in raw or "canvases" in raw
+    ):
         doc = dict(raw)
     elif isinstance(raw, dict) and extract_artboard(raw):
         doc = dict(extract_artboard(raw) or {})
@@ -58,6 +62,8 @@ def ensure_artboard_doc(
     else:
         doc = default_daily_artboard()
 
+    doc = normalize_artboard_doc(doc)
+
     # 同步主数据集槽位（任务级 data_source/sql 覆盖文档内定义）
     datasets = list(doc.get("datasets") or [])
     if not datasets:
@@ -68,7 +74,7 @@ def ensure_artboard_doc(
         main["data_source_id"] = data_source_id
     if sql is not None:
         main["sql"] = sql
-    doc["version"] = 3
+    doc["version"] = ARTBOARD_VERSION
     doc["kind"] = "artboard"
     return doc
 
