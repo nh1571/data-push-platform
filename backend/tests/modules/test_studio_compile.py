@@ -200,8 +200,8 @@ def test_free_compose_layout_absolute_html() -> None:
 
 
 def test_multi_canvas_segments_message_order() -> None:
-    """多画布 + segments：文案与画布按顺序组成 parts。"""
-    from app.modules.studio.compile import artboard_to_message, list_canvases
+    """多画布合成一条推送：文案合并为一段，不拆成多条 image。"""
+    from app.modules.studio.compile import artboard_to_message, build_artboard_html, list_canvases
 
     doc = {
         "artboard": {"width": 750, "show_chrome": False},
@@ -211,7 +211,7 @@ def test_multi_canvas_segments_message_order() -> None:
                 "name": "画布A",
                 "tree": {
                     "type": "Container",
-                    "children": [{"type": "Text", "props": {"text": "图A"}}],
+                    "children": [{"type": "Text", "props": {"text": "图A内容"}}],
                 },
             },
             {
@@ -219,7 +219,7 @@ def test_multi_canvas_segments_message_order() -> None:
                 "name": "画布B",
                 "tree": {
                     "type": "Container",
-                    "children": [{"type": "Text", "props": {"text": "图B"}}],
+                    "children": [{"type": "Text", "props": {"text": "图B内容"}}],
                 },
             },
         ],
@@ -241,14 +241,23 @@ def test_multi_canvas_segments_message_order() -> None:
         },
     }
     assert len(list_canvases(doc)) == 2
+    # HTML 纵向包含两块画布
+    html = build_artboard_html(doc, {"main": _sample_result()})
+    assert "图A内容" in html
+    assert "图B内容" in html
+    assert "artboard-stack" in html
+
     msg = artboard_to_message(doc, {"main": _sample_result()}, with_image=False)
     texts = [str(p.content) for p in msg.parts if p.kind == "text"]
-    assert any("演示院区" in t for t in texts)
-    assert any("中间说明" in t for t in texts)
-    assert any("结尾" in t for t in texts)
-    # with_image=False：不应有 image parts，但文案顺序保留
+    # 多段文案合并为一段
+    assert len(texts) == 1
+    assert "演示院区" in texts[0]
+    assert "中间说明" in texts[0]
+    assert "结尾" in texts[0]
+    # 无多条 image（with_image=False 时甚至无 image）
     assert all(p.kind == "text" for p in msg.parts)
-    assert texts[0].find("演示院区") >= 0
+    image_parts = [p for p in msg.parts if p.kind == "image"]
+    assert len(image_parts) == 0
 
 
 def test_design_to_artboard_migration() -> None:

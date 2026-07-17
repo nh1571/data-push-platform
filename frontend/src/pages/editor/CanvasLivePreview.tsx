@@ -1,19 +1,31 @@
 /**
  * 画布实时预览（本地 LiveComponent，不请求 Playwright）。
- * 用于组装推送步骤钉钉气泡内的「图」示意。
+ *
+ * 钉钉消息内图片是「整图展示、高度随内容撑开」，消息体本身无滚动条。
+ * 本组件按气泡宽度等比缩放，不设内部 maxHeight/overflow:auto。
  */
 import type { StudioNode } from '../../api/types'
 import { LiveComponent, type DatasetMaps } from './LiveComponent'
 
-type Props = {
+export type CanvasPreviewSpec = {
+  id?: string
+  name?: string
   nodes: StudioNode[]
-  data: DatasetMaps
-  /** 逻辑画布宽（与 compose 一致，默认 750） */
   logicalWidth?: number
-  /** 预览区显示宽（手机气泡内，如 220） */
+  chrome?: { show?: boolean; title?: string; color?: string }
+}
+
+type Props = {
+  /** 单画布：nodes；多画布：传入 canvases 纵向拼成一块（一条推送图） */
+  nodes?: StudioNode[]
+  canvases?: CanvasPreviewSpec[]
+  data: DatasetMaps
+  logicalWidth?: number
+  /** 消息气泡内可用宽（钉钉约屏宽-头像-边距，常见 ~240–280） */
   displayWidth?: number
   chrome?: { show?: boolean; title?: string; color?: string }
-  maxHeight?: number
+  /** 是否显示「实时示意」脚注（正式钉钉消息无此条，默认 false） */
+  showHint?: boolean
 }
 
 function readLayout(node: StudioNode, canvasWidth: number, index: number) {
@@ -37,48 +49,46 @@ function readLayout(node: StudioNode, canvasWidth: number, index: number) {
   }
 }
 
-export function CanvasLivePreview({
+function OneCanvas({
   nodes,
   data,
-  logicalWidth = 750,
-  displayWidth = 230,
+  logicalWidth,
+  displayWidth,
   chrome,
-  maxHeight = 320,
-}: Props) {
+}: {
+  nodes: StudioNode[]
+  data: DatasetMaps
+  logicalWidth: number
+  displayWidth: number
+  chrome?: { show?: boolean; title?: string; color?: string }
+}) {
   const scale = displayWidth / logicalWidth
   const layouts = nodes.map((n, i) => ({ node: n, layout: readLayout(n, logicalWidth, i) }))
-  const bottom = layouts.reduce((m, { layout }) => Math.max(m, layout.y + layout.h + 16), 100)
-  const scaledH = bottom * scale
+  const bottom = layouts.reduce((m, { layout }) => Math.max(m, layout.y + layout.h + 16), 80)
+  const scaledH = Math.max(40, bottom * scale)
 
   return (
-    <div
-      style={{
-        width: '100%',
-        background: '#fff',
-        borderRadius: 4,
-        overflow: 'hidden',
-        border: '1px solid #eee',
-      }}
-    >
+    <div style={{ width: displayWidth, background: '#fff' }}>
       {chrome?.show !== false ? (
         <div
           style={{
             background: chrome?.color || '#1677ff',
             color: '#fff',
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: 600,
-            padding: '6px 8px',
+            padding: '8px 10px',
+            lineHeight: 1.3,
           }}
         >
           {chrome?.title || '数据推送'}
         </div>
       ) : null}
+      {/* 高度随内容；禁止 overflow:auto —— 钉钉成图/消息内无滚动条 */}
       <div
         style={{
           width: displayWidth,
-          maxWidth: '100%',
-          height: Math.min(scaledH, maxHeight),
-          overflow: 'auto',
+          height: scaledH,
+          overflow: 'hidden',
           background: '#fafafa',
           position: 'relative',
         }}
@@ -93,7 +103,7 @@ export function CanvasLivePreview({
           }}
         >
           {nodes.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#999', fontSize: 14 }}>
+            <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 13 }}>
               画布为空
             </div>
           ) : (
@@ -128,17 +138,50 @@ export function CanvasLivePreview({
           )}
         </div>
       </div>
-      <div
-        style={{
-          fontSize: 10,
-          color: '#aaa',
-          textAlign: 'center',
-          padding: '3px 0',
-          background: '#f7f7f7',
-        }}
-      >
-        实时预览 · 正式推送为服务端截图
+    </div>
+  )
+}
+
+export function CanvasLivePreview({
+  nodes,
+  canvases,
+  data,
+  logicalWidth = 750,
+  displayWidth = 248,
+  chrome,
+  showHint = false,
+}: Props) {
+  const list: CanvasPreviewSpec[] =
+    canvases && canvases.length > 0
+      ? canvases
+      : [{ nodes: nodes || [], logicalWidth, chrome }]
+
+  return (
+    <div style={{ width: displayWidth, maxWidth: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {list.map((c, i) => (
+          <OneCanvas
+            key={c.id || i}
+            nodes={c.nodes}
+            data={data}
+            logicalWidth={c.logicalWidth || logicalWidth}
+            displayWidth={displayWidth}
+            chrome={c.chrome ?? chrome}
+          />
+        ))}
       </div>
+      {showHint ? (
+        <div
+          style={{
+            fontSize: 10,
+            color: '#b0b0b0',
+            textAlign: 'center',
+            paddingTop: 4,
+          }}
+        >
+          本地实时示意 · 正式推送为服务端整图截图
+        </div>
+      ) : null}
     </div>
   )
 }

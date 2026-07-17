@@ -83,8 +83,8 @@ import {
   ensureComposeLayouts,
   type ComposeLayout,
 } from './ComposeCanvas'
-import { DingTalkPhonePreview, type DingTalkBubble } from './DingTalkPhonePreview'
-import { isEmptyRich } from './dingtalkMd'
+import { DingTalkPhonePreview, type DingTalkPushContent } from './DingTalkPhonePreview'
+import { htmlToDingTalkMd, isEmptyRich } from './dingtalkMd'
 import { LiveChart } from './LiveChart'
 import {
   appendFieldToken,
@@ -1044,70 +1044,68 @@ export function EditorPage() {
     return normalizeArtboardDoc(artboard).compose?.segments || []
   }, [artboard])
 
-  /** 钉钉手机预览气泡：本地实时，无 Playwright */
-  const liveBubbles = useMemo((): DingTalkBubble[] => {
+  /**
+   * 钉钉「一条推送」实时内容：
+   * - 全部文案段合并为一段 Markdown
+   * - 全部画布纵向合成一块图（不是多条消息）
+   */
+  const livePushContent = useMemo((): DingTalkPushContent => {
     const mode = String(artboard.compose?.mode || 'image_primary')
     const segs = composeSegments
-    const bubbles: DingTalkBubble[] = []
     const row = firstRowForShell
+    const title = substituteRow(String(artboard.compose?.title || name || '数据推送'), row)
 
-    if (mode === 'image_only') {
-      for (const s of segs) {
-        if (s.type !== 'canvas') continue
-        const c = canvases.find((x) => x.id === s.canvas_id)
-        bubbles.push({
-          kind: 'image',
-          label: c?.name || '画布',
-          node: (
-            <CanvasLivePreview
-              nodes={canvasChildren(c)}
-              data={{ fieldsByDataset, rowsByDataset }}
-              logicalWidth={Number(c?.width) || 750}
-              displayWidth={220}
-              chrome={{
-                show: c?.show_chrome !== false,
-                title: String(c?.chrome_title || name || '数据推送'),
-                color: String(c?.theme?.color || artboard.artboard?.theme?.color || '#1677ff'),
-              }}
-            />
-          ),
-        })
-      }
-      return bubbles
-    }
-
+    const textParts: string[] = []
     for (const s of segs) {
-      if (s.type === 'text') {
-        const html = substituteRow(String(s.html || ''), row)
-        if (isEmptyRich(html) || isEmptyRichHtml(html)) continue
-        bubbles.push({ kind: 'text', htmlOrMd: html })
-      } else if (s.type === 'canvas' && mode !== 'markdown_primary') {
-        const c = canvases.find((x) => x.id === s.canvas_id)
-        bubbles.push({
-          kind: 'image',
-          label: c?.name || '画布',
-          node: (
-            <CanvasLivePreview
-              nodes={canvasChildren(c)}
-              data={{ fieldsByDataset, rowsByDataset }}
-              logicalWidth={Number(c?.width) || 750}
-              displayWidth={220}
-              chrome={{
-                show: c?.show_chrome !== false,
-                title: String(c?.chrome_title || name || '数据推送'),
-                color: String(c?.theme?.color || artboard.artboard?.theme?.color || '#1677ff'),
-              }}
-            />
-          ),
-        })
-      }
+      if (s.type !== 'text') continue
+      const raw = substituteRow(String(s.html || ''), row)
+      if (isEmptyRich(raw) || isEmptyRichHtml(raw)) continue
+      // 预览与出站一致：先转钉钉 MD 再渲染
+      textParts.push(htmlToDingTalkMd(raw) || raw)
     }
-    if (mode === 'markdown_primary' && bubbles.length === 0) {
-      bubbles.push({ kind: 'hint', text: '仅 Markdown 模式 · 请填写文案段' })
+    const markdown = textParts.join('\n\n')
+
+    const canvasOrder = segs
+      .filter((s): s is Extract<StudioComposeSegment, { type: 'canvas' }> => s.type === 'canvas')
+      .map((s) => canvases.find((c) => c.id === s.canvas_id))
+      .filter(Boolean) as typeof canvases
+    const canvasList = canvasOrder.length > 0 ? canvasOrder : canvases
+
+    // 气泡内图宽 ≈ 375 - 12 - 36 - 8 - 12 - 16 ≈ 291，取 248 更贴近常见渲染
+    const imgW = 248
+    const showImage = mode !== 'markdown_primary' && canvasList.length > 0
+    const image = showImage ? (
+      <CanvasLivePreview
+        canvases={canvasList.map((c) => ({
+          id: c.id,
+          name: c.name,
+          nodes: canvasChildren(c),
+          logicalWidth: Number(c.width) || 750,
+          chrome: {
+            show: c.show_chrome !== false,
+            title: String(c.chrome_title || name || '数据推送'),
+            color: String(c.theme?.color || artboard.artboard?.theme?.color || '#1677ff'),
+          },
+        }))}
+        data={{ fieldsByDataset, rowsByDataset }}
+        displayWidth={imgW}
+        showHint={false}
+      />
+    ) : undefined
+
+    return {
+      title,
+      botName: '数据推送机器人',
+      markdown: mode === 'image_only' ? '' : markdown,
+      image,
+      emptyHint:
+        mode === 'markdown_primary'
+          ? '仅 Markdown 模式：请填写文案段'
+          : '请添加文案或画布组件',
     }
-    return bubbles
   }, [
     artboard.compose?.mode,
+    artboard.compose?.title,
     artboard.artboard?.theme?.color,
     composeSegments,
     canvases,
@@ -2638,8 +2636,8 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                按顺序组合<strong>文案段</strong>与<strong>画布图</strong>（可多图）。右侧为钉钉手机
-                <strong>实时预览</strong>（本地渲染，改字即显）；正式推送时文案转钉钉 Markdown 子集、画布服务端截图。
+                本步编排的是<strong>一条钉钉推送</strong>：多画布会<strong>纵向合成一张图</strong>，文案合并为一段钉钉
+                Markdown，不会变成多条群消息。右侧按真实手机宽度模拟到达效果（本地实时，无消息内滚动条）。
                 {'{{列名}}'} 用样例首行替换示意。
               </Typography.Paragraph>
 
@@ -2680,12 +2678,12 @@ export function EditorPage() {
                         }}
                       >
                         <div>
-                          <Tag color="blue">画布</Tag>
+                          <Tag color="blue">画布（合成进一张图）</Tag>
                           <Typography.Text strong>
                             {c?.name || seg.canvas_id}
                           </Typography.Text>
                           <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                            {canvasChildren(c).length} 个组件 · 回第 3 步改版式
+                            {canvasChildren(c).length} 个组件 · 与其它画布纵向拼成 1 条推送
                           </Typography.Text>
                         </div>
                         <Space size={4}>
@@ -2826,27 +2824,31 @@ export function EditorPage() {
               }}
             >
               <Typography.Title level={5} style={{ marginTop: 0, textAlign: 'center' }}>
-                钉钉消息实时预览
+                推送到达效果（一条消息）
               </Typography.Title>
               <Typography.Paragraph
                 type="secondary"
                 style={{ fontSize: 12, textAlign: 'center', marginBottom: 12 }}
               >
-                示意手机打开钉钉群聊效果 · 文案按钉钉 MD 子集渲染 · 图为本地组件实时预览
+                375 逻辑宽手机 · 钉钉 Markdown 卡片 + 合成推送图
                 <br />
-                终片 PNG 截图请到第 5 步「重新编译」（较慢，仅验收用）
+                终片 PNG 见第 5 步编译（与正式投递一致）
               </Typography.Paragraph>
-              <DingTalkPhonePreview
-                title={shellPreview.title || name || '群消息'}
-                bubbles={liveBubbles}
-                width={320}
-              />
+              <DingTalkPhonePreview content={livePushContent} deviceWidth={375} deviceHeight={720} />
               {String(artboard.compose?.mode || '') === 'markdown_primary' ? (
                 <Alert
                   type="warning"
                   showIcon
-                  style={{ marginTop: 12, maxWidth: 320, marginLeft: 'auto', marginRight: 'auto' }}
-                  message="当前为「仅 Markdown」，不会推送画布截图"
+                  style={{ marginTop: 12, maxWidth: 375, marginLeft: 'auto', marginRight: 'auto' }}
+                  message="当前为「仅 Markdown」，不会附带画布截图"
+                />
+              ) : null}
+              {canvases.length > 1 ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginTop: 12, maxWidth: 375, marginLeft: 'auto', marginRight: 'auto' }}
+                  message={`当前 ${canvases.length} 个画布将合成 1 张推送图（1 条消息）`}
                 />
               ) : null}
             </div>
