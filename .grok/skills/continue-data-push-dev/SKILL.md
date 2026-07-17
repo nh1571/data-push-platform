@@ -30,7 +30,7 @@ If both mentioned, do **STOP** first only if they said they're leaving; else ask
 
 | Item | Path |
 |------|------|
-| Repo | `/Users/hello/grok/data-push-platform` |
+| Repo | **各自 clone，不共用**：每个开发者在自己目录下独立 clone（如 `~/claude/data-push-platform`、`~/grok/data-push-platform`），禁止多个 Agent 共用同一份本地仓库 |
 | Remote | https://github.com/nh1571/data-push-platform （Public） |
 | **Default branch** | `main`（勿把 `feature/m0-scaffold` 当主开发线） |
 | **Handoff** | `docs/DEVELOPMENT_HANDOFF.md` |
@@ -66,7 +66,7 @@ From this session (or git log since last handoff):
 ## S2. Save code (git)
 
 ```bash
-cd /Users/hello/grok/data-push-platform
+cd <你的 data-push-platform 本地仓库>
 git status
 git branch --show-current
 git diff --stat
@@ -119,7 +119,7 @@ git commit -m "docs: session pause handoff YYYY-MM-DD"
 ### 4a. Docker (meta MySQL + Redis + any compose services)
 
 ```bash
-cd /Users/hello/grok/data-push-platform
+cd <你的 data-push-platform 本地仓库>
 docker compose ps
 docker compose down
 # Do NOT use docker compose down -v unless user explicitly wants to wipe DB volumes
@@ -178,7 +178,7 @@ Tell the user clearly:
 ### 2. Git state
 
 ```bash
-cd /Users/hello/grok/data-push-platform
+cd <你的 data-push-platform 本地仓库>
 git status
 git branch --show-current
 git fetch origin 2>/dev/null || true
@@ -201,7 +201,7 @@ curl -s -m 2 -o /dev/null -w "%{http_code}" http://localhost:5173/ || true
 **Default (collaborators / agents):**
 
 ```bash
-cd /Users/hello/grok/data-push-platform
+cd <你的 data-push-platform 本地仓库>
 ./scripts/dev.sh
 # APP_ENV=local → SQLite meta, no MySQL/Redis required
 ```
