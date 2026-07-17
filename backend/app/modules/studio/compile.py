@@ -862,11 +862,23 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     try:
         from app.modules.studio.charts import chart_img_html, chart_to_png_data_url
 
+        # 成图尺寸优先用组装画布 compose_w/h，字号等样式用做组件写入的 props
+        try:
+            cw = int(props.get("chart_width") or props.get("compose_w") or 680)
+        except (TypeError, ValueError):
+            cw = 680
+        try:
+            ch = int(props.get("chart_height") or props.get("compose_h") or 360)
+        except (TypeError, ValueError):
+            ch = 360
+        ch = max(120, ch - int(props.get("compose_padding") or 0) * 2)
         props_full = {
             **props,
             "chart_type": chart_type,
             "value_series": multi if len(multi) > 1 else None,
             "show_legend": props.get("legend") or props.get("show_legend") or len(multi) > 1,
+            "chart_width": max(200, min(1200, cw)),
+            "chart_height": max(120, min(900, ch)),
         }
         data_url, err = chart_to_png_data_url(labels, values, props_full)
         if data_url:
@@ -1308,11 +1320,20 @@ def _html_to_png(html_doc: str, width: int = 750) -> tuple[bytes | None, str | N
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as p:
-                browser = p.chromium.launch()
-                page = browser.new_page(viewport={"width": width + 40, "height": 900})
-                page.set_content(html_doc, wait_until="networkidle")
-                page.locator("#artboard").screenshot(path=str(out))
-                browser.close()
+                browser = p.chromium.launch(
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+                )
+                try:
+                    page = browser.new_page(
+                        viewport={"width": width + 40, "height": 1200}
+                    )
+                    page.set_default_timeout(20_000)
+                    # 画板 HTML 内嵌 data-url 图，无需 networkidle（避免外网卡死）
+                    page.set_content(html_doc, wait_until="domcontentloaded")
+                    page.wait_for_timeout(200)
+                    page.locator("#artboard").screenshot(path=str(out))
+                finally:
+                    browser.close()
             if out.is_file() and out.stat().st_size > 0:
                 png = out.read_bytes()
         except Exception:
