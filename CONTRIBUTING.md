@@ -23,7 +23,11 @@ cd data-push-platform
 3. 小步提交，保持 `./scripts/dev.sh` 可跑  
 4. 向 **本仓库 `main`** 提 Pull Request  
 
-分工说明（三人线，也适用于外部贡献选域）：[docs/COLLAB_MODULES.md](docs/COLLAB_MODULES.md)
+分工与分支（必读）：
+
+- [docs/COLLAB_MODULES.md](docs/COLLAB_MODULES.md) — 三人改哪些目录  
+- [docs/COLLAB_GIT.md](docs/COLLAB_GIT.md) — **从 main 开短分支、怎么提交/PR**  
+- [docs/product/](docs/product/) — 产品与架构笔记
 
 | 方向 | 标签 | 大致目录 |
 |------|------|----------|

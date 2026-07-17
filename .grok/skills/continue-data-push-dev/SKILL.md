@@ -31,11 +31,13 @@ If both mentioned, do **STOP** first only if they said they're leaving; else ask
 | Item | Path |
 |------|------|
 | Repo | `/Users/hello/grok/data-push-platform` |
-| Branch | `feature/m0-scaffold` (verify with `git branch`) |
-| **Handoff** | `/Users/hello/grok/data-push-platform/docs/DEVELOPMENT_HANDOFF.md` |
-| Checklist | `/Users/hello/grok/data-push-platform/docs/CONTINUE_CHECKLIST.md` |
-| Obsidian | `/Users/hello/Documents/obsidian/notes/20_项目/企业数据推送中台/` |
-| Session log (optional) | `.../20_项目/企业数据推送中台/10-开发进度与交接.md` |
+| Remote | https://github.com/nh1571/data-push-platform （Public） |
+| **Default branch** | `main`（勿把 `feature/m0-scaffold` 当主开发线） |
+| **Handoff** | `docs/DEVELOPMENT_HANDOFF.md` |
+| Checklist | `docs/CONTINUE_CHECKLIST.md` |
+| **Collab skill** | `.grok/skills/data-push-collab/SKILL.md`（分支/PR 强制） |
+| **Product notes** | `docs/product/`（原 Obsidian 已入库） |
+| Git rules | `docs/COLLAB_GIT.md` |
 
 ---
 
@@ -95,9 +97,9 @@ Replace **§7 当前阻塞 / 进行中** block with:
 停工环境：docker 已 down；API/前端已停（或注明仍在跑）
 ```
 
-### 3b. Optional Obsidian line
+### 3b. Optional product session line
 
-Append to `10-开发进度与交接.md` 变更:
+Append to `docs/product/10-开发进度与交接.md` if useful:
 
 ```text
 - YYYY-MM-DD：收工 — <一句话>；下一动作 <…>
@@ -110,7 +112,7 @@ git add docs/DEVELOPMENT_HANDOFF.md
 git commit -m "docs: session pause handoff YYYY-MM-DD"
 ```
 
-(Include Obsidian only if that vault is not the git repo — Obsidian path is outside repo; only update file on disk.)
+(Product notes live in-repo under `docs/product/`; prefer commit there over only-Obsidian.)
 
 ## S4. Stop helper processes
 
@@ -166,11 +168,12 @@ Tell the user clearly:
 
 ## Startup Sequence
 
-### 1. Read handoff
+### 1. Read handoff + collab + product
 
-- `docs/DEVELOPMENT_HANDOFF.md` (full, especially §6–§7)  
+- `docs/DEVELOPMENT_HANDOFF.md` (§6–§7)  
 - `docs/CONTINUE_CHECKLIST.md`  
-- Product gaps if needed: Obsidian `09`, `08`, `07`
+- **Collab:** load skill `data-push-collab` or read `docs/COLLAB_GIT.md`  
+- Product: `docs/product/README.md` → as needed `09`/`13`/`17`/`22`  
 
 ### 2. Git state
 
@@ -178,46 +181,32 @@ Tell the user clearly:
 cd /Users/hello/grok/data-push-platform
 git status
 git branch --show-current
+git fetch origin 2>/dev/null || true
 git log -5 --oneline
-# If stashed last time:
 git stash list
 ```
 
-If `stash` exists with `wip: pause`, ask whether to `git stash pop` before coding.
+- Prefer work on **`feature/<lane>-*` from latest `main`** (see data-push-collab).  
+- If `stash` with `wip: pause`, ask before `git stash pop`.
 
 ### 3. Environment pulse
 
 ```bash
-docker compose ps
 curl -s -m 2 http://localhost:8000/health || true
 curl -s -m 2 -o /dev/null -w "%{http_code}" http://localhost:5173/ || true
 ```
 
-### 4. Start stack (if UI/API needed or health down)
+### 4. Start stack (prefer zero-deps local)
+
+**Default (collaborators / agents):**
 
 ```bash
 cd /Users/hello/grok/data-push-platform
-docker compose up -d mysql redis
+./scripts/dev.sh
+# APP_ENV=local → SQLite meta, no MySQL/Redis required
 ```
 
-```bash
-cd /Users/hello/grok/data-push-platform/backend
-export DATABASE_URL=mysql+pymysql://push:push@localhost:3306/push
-export REDIS_URL=redis://localhost:6379/0
-export SECRET_KEY=dev-secret-key
-export TOKEN_FERNET_KEY="b2oli7D5BQ8tJcl6Rs4DmSAbdPxyIrMZ-NMGNHP0np0="
-export ADMIN_USERNAME=admin
-export ADMIN_PASSWORD=admin123
-export EXECUTION_SYNC=true
-export CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]'
-alembic upgrade head
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-```bash
-cd /Users/hello/grok/data-push-platform/frontend
-npm run dev -- --host 0.0.0.0 --port 5173
-```
+**Optional full stack (MySQL+Redis):** `docker compose up -d` — see `docs/DEPLOYMENT.md`.
 
 | Login | Value |
 |-------|--------|
@@ -225,7 +214,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 | User | `admin` |
 | Pass | `admin123` |
 
-Meta DB = **MySQL** service `mysql`, not Postgres.
+Meta DB default **SQLite** under `backend/data/`; production uses MySQL.
 
 ### 5. Report before coding
 

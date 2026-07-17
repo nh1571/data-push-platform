@@ -453,20 +453,22 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：本地零依赖协作模式（SQLite）已落地
+进行中：公开仓协同基建就绪（文档+技能+产品笔记入库）
 阻塞：无
 上次完成：
-  - APP_ENV=local 默认 SQLite 元库 + EXECUTION_SYNC + 演示业务库
-  - scripts/dev.sh / docs/DEPLOYMENT.md / .env.example
-  - 生产/Docker 仍用外置 MySQL+Redis（compose APP_ENV=docker）
+  - GitHub Public：https://github.com/nh1571/data-push-platform
+  - Obsidian 笔记同步至 docs/product/
+  - 分支规范 docs/COLLAB_GIT.md（主干+短功能分支，非永久分工分支）
+  - Agent 技能 data-push-collab（.grok/skills + 用户级副本）
+  - 本地 SQLite 零依赖 ./scripts/dev.sh
 建议下一动作：
-  1) 新同事按 ./scripts/dev.sh 验收
-  2) 参数 UI 后期整体调
-  3) 可选：CI 默认 APP_ENV=test + sqlite
+  1) 三人填 COLLAB_MODULES 认领表
+  2) 各从 main 开 feature/<lane>-* 做第一批任务
+  3) 参数 UI 后期整体调
 
-本地：./scripts/dev.sh（无需 docker）
-外置：docker compose up
-参考：docs/DEPLOYMENT.md、Obsidian 22
+本地：./scripts/dev.sh
+远程：main
+Agent：data-push-collab + continue-data-push-dev
 ```
 
 
