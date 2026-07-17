@@ -39,7 +39,7 @@ router = APIRouter()
 
 
 def _job_to_out(row: PushJob) -> PushJobOut:
-    """PushJob ORM → PushJobOut。"""
+    """将 PushJob 数据库行转为 PushJobOut 响应模型。"""
     raw_ids = row.channel_ids or []
     return PushJobOut(
         id=row.id,

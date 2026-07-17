@@ -84,7 +84,7 @@ def resolve_data_context(
 ) -> tuple[dict[str, QueryResult], dict[str, dict[str, str]]]:
     """执行画板上全部可运行数据集。
 
-    Returns
+    返回
     -------
     (data_ctx, resolved_params_by_dataset)
         data_ctx 供编译器绑定；params 映射供工作台展示本次实际 SQL 参数

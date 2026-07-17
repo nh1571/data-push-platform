@@ -263,7 +263,7 @@ def substitute_first_row(template: str, result: QueryResult | None) -> str:
 class CompileResult:
     """一次完整编译的产物，供工作台预览 API 序列化。
 
-    Attributes
+    属性
     ----------
     html:
         可直接 iframe / 截图的完整 HTML 文档。
@@ -579,7 +579,7 @@ def _chart_series(
 ) -> tuple[list[str], list[float], str, list[dict[str, Any]]]:
     """从绑定列抽取图表序列。
 
-    Returns
+    返回
     -------
     labels, primary_values, chart_type, multi_series
         multi_series 为 ``[{name, values}, ...]``，多 Y 列时使用。

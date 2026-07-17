@@ -87,14 +87,14 @@ def tick(
 ) -> list[UUID]:
     """扫描开启调度的任务，触发 cron 命中当前分钟者。
 
-    Parameters
+    参数
     ----------
     db:
         SQLAlchemy 会话。
     now:
         可注入时钟（测试）；默认 UTC 当前时间。
 
-    Returns
+    返回
     -------
     list[UUID]
         本轮创建的 JobRun id 列表。

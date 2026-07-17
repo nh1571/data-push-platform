@@ -6,7 +6,7 @@
  */
 import { Tag } from 'antd'
 
-/** JobRun.status → Tag color */
+/** JobRun.status 对应 Tag 颜色 */
 const RUN_STATUS_COLOR: Record<string, string> = {
   pending: 'default',
   running: 'processing',
@@ -17,7 +17,7 @@ const RUN_STATUS_COLOR: Record<string, string> = {
   skipped: 'default',
 }
 
-/** Delivery.status → Tag color */
+/** Delivery.status 对应 Tag 颜色 */
 const DELIVERY_STATUS_COLOR: Record<string, string> = {
   pending: 'default',
   running: 'processing',
@@ -26,7 +26,7 @@ const DELIVERY_STATUS_COLOR: Record<string, string> = {
   skipped: 'default',
 }
 
-/** JobRun.status → 中文标签 */
+/** JobRun.status 对应中文标签文案 */
 const RUN_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
   running: '运行中',
@@ -37,7 +37,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
   skipped: '已跳过',
 }
 
-/** Delivery.status → 中文标签 */
+/** Delivery.status 对应中文标签文案 */
 const DELIVERY_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
   running: '投递中',

@@ -85,7 +85,7 @@ def resolve_auto_kind(
 ) -> str:
     """将单个 auto kind 解析为格式化字符串。
 
-    Parameters
+    参数
     ----------
     kind:
         today / yesterday / biz_date / now / 本月起止 / 上月起止 / 近 N 天起点等。

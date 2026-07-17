@@ -28,12 +28,12 @@ register_builtin_channels(plugin_registry)
 def run_job_run_task(self, job_run_id: str) -> dict[str, str]:  # noqa: ARG001
     """异步执行指定 JobRun。
 
-    Parameters
+    参数
     ----------
     job_run_id:
         待执行 JobRun 行的 UUID 字符串。
 
-    Returns
+    返回
     -------
     dict
         含 ``job_run_id`` 与 ``status=done``（流水线内部失败会写库，此处仍返回 done

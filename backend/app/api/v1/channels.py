@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 def _to_out(row: Channel) -> ChannelOut:
-    """Channel ORM → 脱敏后的 ChannelOut。"""
+    """将 Channel 行转为脱敏后的 ChannelOut。"""
     plain = decrypt_dict(row.config_enc)
     return ChannelOut(
         id=row.id,

@@ -20,7 +20,7 @@ from typing import Any, Protocol, runtime_checkable
 class QueryResult:
     """数据源查询返回的表格结果。
 
-    Attributes
+    属性
     ----------
     columns:
         列名列表。
@@ -36,7 +36,7 @@ class QueryResult:
 class MessagePart:
     """推送消息的一个片段（文本、图片、文件、卡片等）。
 
-    Attributes
+    属性
     ----------
     kind:
         片段类型：``text`` | ``image`` | ``file`` | ``card`` 等。
@@ -59,7 +59,7 @@ class Message:
 class DeliveryResult:
     """通道插件发送结果。
 
-    Attributes
+    属性
     ----------
     success:
         是否投递成功。

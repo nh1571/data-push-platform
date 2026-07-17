@@ -223,7 +223,7 @@ def run_job_run(
 ) -> None:
     """端到端执行一次 JobRun（pending 或可重入）。
 
-    Parameters
+    参数
     ----------
     db_session_factory:
         SQLAlchemy Session（测试/同步 API）或零参工厂（Celery worker）。

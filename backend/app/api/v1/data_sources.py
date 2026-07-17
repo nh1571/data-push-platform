@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 def _to_out(row: DataSource) -> DataSourceOut:
-    """DataSource ORM → 脱敏后的 DataSourceOut。"""
+    """将 DataSource 行转为脱敏后的 DataSourceOut。"""
     plain = decrypt_dict(row.config_enc)
     return DataSourceOut(
         id=row.id,

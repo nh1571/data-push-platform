@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 def _to_out(row: JobRun) -> JobRunOut:
-    """JobRun ORM → JobRunOut。"""
+    """将 JobRun 数据库行转为 JobRunOut 响应模型。"""
     return JobRunOut.model_validate(row)
 
 

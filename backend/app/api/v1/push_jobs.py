@@ -52,7 +52,7 @@ def _to_out(
     *,
     last_run: JobRun | None = None,
 ) -> PushJobOut:
-    """PushJob ORM → PushJobOut（可选附带最近运行）。"""
+    """将 PushJob 数据库行转为 PushJobOut（可选附带最近一次运行）。"""
     raw_ids = row.channel_ids or []
     return PushJobOut(
         id=row.id,
