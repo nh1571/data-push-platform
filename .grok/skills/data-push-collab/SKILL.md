@@ -13,8 +13,9 @@ description: >
 
 | 文档 | 用途 |
 |------|------|
+| `docs/LANES.md` | **可扩展分工线注册表**（默认 3 条，可加第 N 条） |
 | `docs/COLLAB_GIT.md` | 分支模型说明（给人读） |
-| `docs/COLLAB_MODULES.md` | 三人改哪些目录 |
+| `docs/COLLAB_MODULES.md` | 目录说明（链到 LANES） |
 | `docs/product/` | 产品与架构笔记 |
 | `docs/DEVELOPMENT_HANDOFF.md` | 工程进度交接 |
 | `docs/DEPLOYMENT.md` | 本地/生产环境 |
@@ -85,7 +86,7 @@ PR 时：从 **你的 Fork 的 feature 分支** → **nh1571/data-push-platform 
 
 ```text
 [ ] docs/DEVELOPMENT_HANDOFF.md §7（当前进度）
-[ ] docs/COLLAB_MODULES.md（我改哪条线）
+[ ] docs/LANES.md（当前有哪些 lane、我属于哪条；可扩展）
 [ ] docs/product/README.md（产品背景，按需深入）
 [ ] 本技能全文
 ```
@@ -111,20 +112,13 @@ git pull origin main
 ```bash
 git checkout main
 git pull origin main
-git checkout -b feature/studio-<topic>    # 甲
-# git checkout -b feature/io-<topic>      # 乙
-# git checkout -b feature/runtime-<topic> # 丙
-# git checkout -b fix/<topic>
-# git checkout -b docs/<topic>
+# 前缀 = docs/LANES.md 里的 laneId（默认 studio | io | runtime，可扩展）
+git checkout -b feature/<laneId>-<topic>
+# 例：feature/studio-grid  feature/io-webhook  feature/runtime-rerun
+# 例（未来）：feature/platform-oauth
 ```
 
-| 前缀 | 对应分工 |
-|------|----------|
-| `feature/studio-*` | 工作台 + 成图 |
-| `feature/io-*` | 数据源 + 通道 |
-| `feature/runtime-*` | 执行 + 调度 + 运营页 |
-
-**禁止**长期只推 `lane/studio` 永不合并。
+**禁止**长期只推 `lane/xxx` 永不合并。新人/新领域 → 先看或更新 `docs/LANES.md`。
 
 ## B3. 在分支上改代码
 
@@ -260,18 +254,23 @@ git branch -d feature/studio-demo-task
 
 ---
 
-# D. 三人改哪里（目录）
+# D. 改哪里（目录）— 以 LANES.md 为准
 
-| Lane | 主目录 |
-|------|--------|
-| **studio** | `frontend/src/pages/editor/*`、`backend/app/modules/studio/*`、`backend/app/api/v1/editor.py` |
-| **io** | `backend/app/plugins/datasource/*`、`channel/*`、`pages/data-sources/*`、`pages/channels/*` |
-| **runtime** | `backend/app/modules/execution/*`、`scheduler/*`、`worker/*`、`pages/push-jobs/*`、`job-runs/*` |
+默认起步（完整表见 `docs/LANES.md`，**可加第 4、第 5 条**）：
+
+| laneId | 主目录（摘要） |
+|--------|----------------|
+| **studio** | `pages/editor/*`、`modules/studio/*`、`api/v1/editor.py` |
+| **io** | `plugins/datasource|channel/*`、对应配置页 |
+| **runtime** | `execution/*`、`scheduler/*`、任务/运行页 |
+
+| 情况 | 做法 |
+|------|------|
+| 人多、领域不变 | 同一 lane **多人共线**，子目录认领 |
+| 新领域稳定 | **改 LANES.md 注册新 laneId** + GitHub 标签 `lane:<id>` |
+| 临时支援 | 不改表，PR 注明 |
 
 总线（改前打招呼）：`pipeline.py`、`compile.py`、`plugins/base.py`、`types.ts`、`EditorPage.tsx`。
-
-**工作台 + 成图 = studio 一人主责。**
-
 ---
 
 # E. Agent 额外义务
