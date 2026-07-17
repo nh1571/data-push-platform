@@ -420,7 +420,7 @@ def _chart_series(
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
     chart_type = str(props.get("chart_type") or binding.get("chart_type") or "bar").lower()
-    if chart_type not in ("bar", "pie", "line"):
+    if chart_type not in ("bar", "pie", "line", "area", "hbar"):
         chart_type = "bar"
 
     if result is None or not result.columns or not result.rows:
@@ -601,22 +601,48 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     props = dict(node.get("props") or {})
     labels, values, chart_type = _chart_series(node, data_ctx)
     title = str(props.get("title") or "")
-    title_html = f"<div class='comp-chart-title'>{_esc(title)}</div>" if title else ""
     if not values:
-        return f"<div class='comp-chart'>{title_html}<p class='comp-empty'>（请绑定分类列与数值列，并先取数）</p></div>"
+        return (
+            f"<div class='comp-chart'><p class='comp-empty'>"
+            f"（请绑定分类列与数值列，并先取数）</p></div>"
+        )
+
+    # Prefer pyecharts (ECharts) — same family as many BI tools; falls back to SVG
+    try:
+        from app.modules.studio.charts import chart_img_html, chart_to_png_data_url
+
+        props_full = {**props, "chart_type": chart_type}
+        data_url, err = chart_to_png_data_url(labels, values, props_full)
+        if data_url:
+            # title already in chart when set; avoid double title
+            return chart_img_html(data_url, title="" if props.get("title") else "")
+        # if failed, keep going to SVG fallback with note
+        note = f"<p class='comp-empty' style='font-size:11px'>pyecharts: {_esc(err or 'fail')}</p>"
+    except Exception as exc:  # noqa: BLE001
+        note = f"<p class='comp-empty' style='font-size:11px'>chart engine: {_esc(str(exc))}</p>"
+    else:
+        note = ""
+
+    title_html = f"<div class='comp-chart-title'>{_esc(title)}</div>" if title else ""
     if chart_type == "pie":
         body = _render_pie_svg(labels, values)
-    elif chart_type == "line":
+    elif chart_type in ("line", "area"):
         body = _render_line_svg(labels, values)
     else:
         body = _render_bar_svg(labels, values)
-    return f"<div class='comp-chart'>{title_html}{body}</div>"
+    return f"<div class='comp-chart'>{title_html}{body}{note}</div>"
 
 
 def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     props = dict(node.get("props") or {})
     labels, values, chart_type = _chart_series(node, data_ctx)
-    type_label = {"pie": "饼图", "line": "折线图", "bar": "柱状图"}.get(chart_type, chart_type)
+    type_label = {
+        "pie": "饼图",
+        "line": "折线图",
+        "bar": "柱状图",
+        "area": "面积图",
+        "hbar": "条形图",
+    }.get(chart_type, chart_type)
     title = str(props.get("title") or type_label)
     if not values:
         return f"**{title}**（无数据）"

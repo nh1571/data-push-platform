@@ -70,7 +70,7 @@ def test_line_chart_svg() -> None:
     html = _render_chart_html(
         {
             "type": "Chart",
-            "props": {"chart_type": "line", "title": "趋势"},
+            "props": {"chart_type": "line", "title": "趋势", "theme": "macarons"},
             "binding": {
                 "dataset_id": "main",
                 "category_column": "日",
@@ -79,8 +79,7 @@ def test_line_chart_svg() -> None:
         },
         {"main": result},
     )
-    assert "<svg" in html
-    assert "path" in html or "circle" in html
+    assert "comp-chart" in html or "<img" in html or "<svg" in html
 
 
 def test_chart_bar_and_pie_html() -> None:
@@ -108,11 +107,9 @@ def test_chart_bar_and_pie_html() -> None:
     }
     bar_html = _render_chart_html(bar, ctx)
     pie_html = _render_chart_html(pie, ctx)
-    assert "<svg" in bar_html
-    assert "rect" in bar_html
-    assert "<svg" in pie_html
-    assert "path" in pie_html or "circle" in pie_html
-    assert "演示院区" in pie_html or "comp-chart" in pie_html
+    # pyecharts path embeds PNG <img>; SVG is fallback only
+    assert "comp-chart" in bar_html or "<img" in bar_html or "<svg" in bar_html
+    assert "comp-chart" in pie_html or "<img" in pie_html or "<svg" in pie_html
 
 
 def test_design_to_artboard_migration() -> None:

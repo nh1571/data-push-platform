@@ -56,7 +56,6 @@ import {
   defaultAlertArtboard,
   defaultDailyArtboard,
   emptyArtboard,
-  ensureSecondaryDataset,
   extractArtboardFromJob,
   moveNodeTo,
   newComponent,
@@ -80,9 +79,30 @@ const CART_TYPES = [
   { type: 'Table', label: '表格' },
   { type: 'ChartBar', label: '柱状图' },
   { type: 'ChartLine', label: '折线图' },
+  { type: 'ChartArea', label: '面积图' },
+  { type: 'ChartHBar', label: '条形图' },
   { type: 'ChartPie', label: '饼图' },
   { type: 'Alert', label: '告警' },
   { type: 'Divider', label: '分隔' },
+]
+
+const CHART_TYPES = [
+  { value: 'bar', label: '柱状图' },
+  { value: 'line', label: '折线图' },
+  { value: 'area', label: '面积图' },
+  { value: 'hbar', label: '条形图' },
+  { value: 'pie', label: '饼图' },
+]
+
+const CHART_THEMES = [
+  { value: 'white', label: '默认白' },
+  { value: 'macarons', label: 'Macarons' },
+  { value: 'wonderland', label: 'Wonderland' },
+  { value: 'walden', label: 'Walden' },
+  { value: 'roma', label: 'Roma' },
+  { value: 'shine', label: 'Shine' },
+  { value: 'infographic', label: 'Infographic' },
+  { value: 'dark', label: '深色' },
 ]
 
 type StepKey = 'data' | 'make' | 'compose' | 'preview'
@@ -106,13 +126,38 @@ type DraftForm = {
   variant?: string
   table_style?: string
   level?: string
+  // chart style (pyecharts / BI-like)
+  chart_theme?: string
+  show_label?: boolean
+  smooth?: boolean
+  stack?: boolean
+  donut?: boolean
+  rose?: boolean
+  legend?: boolean
 }
 
 function emptyDraft(type: string, datasetId: string): DraftForm {
+  const chartBase: DraftForm = {
+    type: 'Chart',
+    dataset_id: datasetId,
+    text: '',
+    title: '',
+    label: '',
+    chart_theme: 'macarons',
+    show_label: true,
+    smooth: true,
+    stack: false,
+    donut: false,
+    rose: false,
+    legend: false,
+  }
+  if (type === 'ChartBar') return { ...chartBase, chart_type: 'bar', title: '柱状图' }
+  if (type === 'ChartLine') return { ...chartBase, chart_type: 'line', title: '折线图' }
+  if (type === 'ChartArea') return { ...chartBase, chart_type: 'area', title: '面积图' }
+  if (type === 'ChartHBar') return { ...chartBase, chart_type: 'hbar', title: '条形图' }
+  if (type === 'ChartPie')
+    return { ...chartBase, chart_type: 'pie', title: '饼图', donut: false, legend: true }
   const base: DraftForm = { type, dataset_id: datasetId, text: '', title: '', label: '' }
-  if (type === 'ChartBar') return { ...base, type: 'Chart', chart_type: 'bar', title: '柱状图' }
-  if (type === 'ChartLine') return { ...base, type: 'Chart', chart_type: 'line', title: '折线图' }
-  if (type === 'ChartPie') return { ...base, type: 'Chart', chart_type: 'pie', title: '饼图' }
   if (type === 'Text') return { ...base, type: 'Text', variant: 'body', text: '标题文案' }
   if (type === 'Alert') return { ...base, type: 'Alert', level: 'error', text: '请注意异常指标' }
   if (type === 'Kpi') return { ...base, type: 'Kpi', label: '指标' }
@@ -136,6 +181,13 @@ function nodeToDraft(node: StudioNode): DraftForm {
     variant: String(p.variant || 'body'),
     table_style: String(p.style || 'business'),
     level: String(p.level || 'error'),
+    chart_theme: String(p.theme || p.chart_theme || 'macarons'),
+    show_label: p.show_label !== false,
+    smooth: p.smooth !== false,
+    stack: Boolean(p.stack),
+    donut: Boolean(p.donut),
+    rose: Boolean(p.rose),
+    legend: Boolean(p.legend),
   }
 }
 
@@ -165,6 +217,13 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
         chart_type: draft.chart_type || 'bar',
         title: draft.title || '',
         max_rows: 12,
+        theme: draft.chart_theme || 'macarons',
+        show_label: draft.show_label !== false,
+        smooth: draft.smooth !== false,
+        stack: Boolean(draft.stack),
+        donut: Boolean(draft.donut),
+        rose: Boolean(draft.rose),
+        legend: Boolean(draft.legend),
       },
       binding: {
         dataset_id: ds,
@@ -219,7 +278,13 @@ function cartItems(tree?: StudioNode): StudioNode[] {
 
 function typeLabel(t: string, chart?: string): string {
   if (t === 'Chart') {
-    const m: Record<string, string> = { bar: '柱状图', line: '折线图', pie: '饼图' }
+    const m: Record<string, string> = {
+      bar: '柱状图',
+      line: '折线图',
+      area: '面积图',
+      hbar: '条形图',
+      pie: '饼图',
+    }
     return m[chart || 'bar'] || '图表'
   }
   const m: Record<string, string> = {
@@ -230,6 +295,18 @@ function typeLabel(t: string, chart?: string): string {
     Divider: '分隔',
   }
   return m[t] || t
+}
+
+function readyDatasets(
+  datasets: { id: string; name?: string }[],
+  fieldsByDataset: Record<string, string[]>,
+): { value: string; label: string }[] {
+  return datasets
+    .filter((d) => (fieldsByDataset[d.id] || []).length > 0)
+    .map((d) => ({
+      value: d.id,
+      label: `${d.name || d.id}（${fieldsByDataset[d.id]?.length || 0} 列）`,
+    }))
 }
 
 /** Artboard with a single component for maker preview (no page chrome). */
@@ -526,34 +603,47 @@ export function EditorPage() {
       .finally(() => setFinalLoading(false))
   }, [step, cart.length, dataSourceId, buildDoc, runCompile])
 
-  const onQuery = async () => {
-    if (!dataSourceId) {
-      message.error('请先选数据源')
+  const onQueryDataset = async (datasetId: string) => {
+    const dsMeta = datasets.find((d) => d.id === datasetId)
+    const slotSql =
+      datasetId === 'main' ? sql : String(dsMeta?.sql || '')
+    const slotDs = String(
+      datasetId === 'main'
+        ? dataSourceId
+        : dsMeta?.data_source_id || dataSourceId || '',
+    )
+    if (!slotDs) {
+      message.error('请先为该数据集选择数据源')
       return
     }
-    const slot = activeDs?.id || 'main'
-    const slotSql = slot === 'main' ? sql : String(activeDs?.sql || sql)
-    const slotDs = String(activeDs?.data_source_id || dataSourceId)
+    if (!slotSql.trim()) {
+      message.error('请填写 SQL')
+      return
+    }
     setQuerying(true)
     try {
       const res = await queryPreview({
         data_source_id: slotDs,
         sql: slotSql,
-        max_rows: 50,
+        max_rows: 200,
       })
-      setFieldsByDataset((p) => ({ ...p, [slot]: res.columns }))
-      setRowsByDataset((p) => ({ ...p, [slot]: res.rows }))
-      if (slot === 'main') setArtboard((p) => syncMainDataset(p, dataSourceId, sql))
-      else
+      setFieldsByDataset((p) => ({ ...p, [datasetId]: res.columns }))
+      setRowsByDataset((p) => ({ ...p, [datasetId]: res.rows }))
+      if (datasetId === 'main') {
+        setArtboard((p) => syncMainDataset(p, slotDs, slotSql))
+        setDataSourceId(slotDs)
+        setSql(slotSql)
+      } else {
         setArtboard((p) =>
           upsertDataset(p, {
-            id: slot,
-            name: activeDs?.name,
+            id: datasetId,
+            name: dsMeta?.name,
             data_source_id: slotDs,
             sql: slotSql,
           }),
         )
-      message.success(`取数成功 ${res.row_count} 行`)
+      }
+      message.success(`「${dsMeta?.name || datasetId}」取数 ${res.row_count} 行`)
     } catch (e) {
       message.error(getErrorMessage(e))
     } finally {
@@ -561,9 +651,52 @@ export function EditorPage() {
     }
   }
 
+  const addDataset = () => {
+    const id = `ds_${nid().slice(0, 6)}`
+    const nameDs = `数据集${datasets.length + 1}`
+    setArtboard((p) =>
+      upsertDataset(p, {
+        id,
+        name: nameDs,
+        data_source_id: dataSourceId || null,
+        sql: 'SELECT 1 AS demo',
+      }),
+    )
+    setActiveDatasetId(id)
+    message.success(`已添加 ${nameDs}，请配置 SQL 并取数`)
+  }
+
+  const removeDataset = (id: string) => {
+    if (id === 'main') {
+      message.error('主数据集不可删除')
+      return
+    }
+    setArtboard((p) => ({
+      ...p,
+      datasets: (p.datasets || []).filter((d) => d.id !== id),
+    }))
+    setFieldsByDataset((p) => {
+      const n = { ...p }
+      delete n[id]
+      return n
+    })
+    setRowsByDataset((p) => {
+      const n = { ...p }
+      delete n[id]
+      return n
+    })
+    if (activeDatasetId === id) setActiveDatasetId('main')
+  }
+
+  const readyDsOptions = readyDatasets(datasets, fieldsByDataset)
+
   const startNew = (paletteType: string) => {
     setEditId(null)
-    setDraft(emptyDraft(paletteType, activeDatasetId))
+    const preferDs =
+      readyDsOptions.find((d) => d.value === activeDatasetId)?.value ||
+      readyDsOptions[0]?.value ||
+      activeDatasetId
+    setDraft(emptyDraft(paletteType, preferDs))
     setMakerPreview(null)
   }
 
@@ -773,122 +906,216 @@ export function EditorPage() {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#eef0f3' }}>
-        {/* ========== 1 数据 ========== */}
+        {/* ========== 1 数据：多数据集预生成 ========== */}
         {step === 'data' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-            <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', gap: 16 }}>
-              <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16 }}>
-                <Typography.Title level={5}>准备数据</Typography.Title>
-                <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                  <div>
-                    <Typography.Text type="secondary">数据集</Typography.Text>
-                    <Space style={{ display: 'flex', marginTop: 4 }}>
-                      <Select
-                        style={{ minWidth: 140 }}
-                        value={activeDatasetId}
-                        onChange={setActiveDatasetId}
-                        options={datasetOptions}
-                      />
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          setArtboard((p) => ensureSecondaryDataset(p))
-                          setActiveDatasetId('trend')
-                        }}
-                      >
-                        + 数据集
-                      </Button>
-                    </Space>
-                  </div>
-                  <div>
-                    <Typography.Text type="secondary">数据源</Typography.Text>
-                    <Select
-                      style={{ width: '100%', marginTop: 4 }}
-                      showSearch
-                      optionFilterProp="label"
-                      value={
-                        activeDatasetId === 'main'
-                          ? dataSourceId
-                          : (activeDs?.data_source_id as string) || dataSourceId
-                      }
-                      onChange={(v) => {
-                        if (activeDatasetId === 'main') setDataSourceId(v)
-                        else
-                          setArtboard((p) =>
-                            upsertDataset(p, {
-                              id: activeDatasetId,
-                              data_source_id: v,
-                              sql: activeDs?.sql,
-                              name: activeDs?.name,
-                            }),
-                          )
-                      }}
-                      options={sources.map((s) => ({
-                        value: s.id,
-                        label: `${s.name} (${s.type})`,
-                      }))}
-                    />
-                  </div>
-                  <div>
-                    <Typography.Text type="secondary">SQL</Typography.Text>
-                    <Input.TextArea
-                      rows={8}
-                      style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
-                      value={activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')}
-                      onChange={(e) => {
-                        if (activeDatasetId === 'main') setSql(e.target.value)
-                        else
-                          setArtboard((p) =>
-                            upsertDataset(p, {
-                              id: activeDatasetId,
-                              sql: e.target.value,
-                              data_source_id: activeDs?.data_source_id,
-                              name: activeDs?.name,
-                            }),
-                          )
-                      }}
-                    />
-                  </div>
-                  <Button type="primary" block loading={querying} onClick={() => void onQuery()}>
-                    运行取数
+            <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div>
+                  <Typography.Title level={5} style={{ margin: 0 }}>
+                    数据集管理
+                  </Typography.Title>
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    预先配置并取数多个数据集；做组件时再自由选用。
+                  </Typography.Text>
+                </div>
+                <Space>
+                  <Button type="dashed" icon={<PlusOutlined />} onClick={addDataset}>
+                    新建数据集
                   </Button>
                   <Button
-                    block
-                    disabled={!previewColumns.length}
+                    type="primary"
+                    disabled={readyDsOptions.length === 0}
                     onClick={() => setStep('make')}
                   >
                     下一步：做组件 →
                   </Button>
                 </Space>
-              </div>
-              <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16 }}>
-                <Typography.Title level={5}>字段与数据</Typography.Title>
-                {!previewColumns.length ? (
-                  <Empty description="取数后显示" />
-                ) : (
-                  <>
-                    <div style={{ marginBottom: 8 }}>
-                      {previewColumns.map((c) => (
-                        <Tag key={c}>{c}</Tag>
-                      ))}
+              </Space>
+
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                {/* 数据集列表 */}
+                <div style={{ width: 240, flexShrink: 0 }}>
+                  {datasets.map((d) => {
+                    const ready = (fieldsByDataset[d.id] || []).length > 0
+                    const rows = (rowsByDataset[d.id] || []).length
+                    const active = activeDatasetId === d.id
+                    return (
+                      <div
+                        key={d.id}
+                        onClick={() => setActiveDatasetId(d.id)}
+                        style={{
+                          background: active ? '#e6f4ff' : '#fff',
+                          border: active ? '1px solid #1677ff' : '1px solid #f0f0f0',
+                          borderRadius: 8,
+                          padding: 10,
+                          marginBottom: 8,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Typography.Text strong style={{ fontSize: 13 }}>
+                            {d.name || d.id}
+                          </Typography.Text>
+                          {d.id !== 'main' ? (
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                removeDataset(d.id)
+                              }}
+                            />
+                          ) : (
+                            <Tag style={{ margin: 0 }}>主</Tag>
+                          )}
+                        </Space>
+                        <div style={{ marginTop: 4 }}>
+                          {ready ? (
+                            <Tag color="success">
+                              已取数 {rows} 行 / {fieldsByDataset[d.id]?.length} 列
+                            </Tag>
+                          ) : (
+                            <Tag>未取数</Tag>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* 当前数据集编辑 */}
+                <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16 }}>
+                  <Typography.Title level={5} style={{ marginTop: 0 }}>
+                    编辑：{activeDs?.name || activeDatasetId}
+                  </Typography.Title>
+                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                    <div>
+                      <Typography.Text type="secondary">名称</Typography.Text>
+                      <Input
+                        style={{ marginTop: 4 }}
+                        value={String(activeDs?.name || '')}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          if (activeDatasetId === 'main') {
+                            setArtboard((p) =>
+                              upsertDataset(p, {
+                                id: 'main',
+                                name: v,
+                                data_source_id: dataSourceId,
+                                sql,
+                              }),
+                            )
+                          } else {
+                            setArtboard((p) =>
+                              upsertDataset(p, {
+                                id: activeDatasetId,
+                                name: v,
+                                data_source_id: activeDs?.data_source_id,
+                                sql: activeDs?.sql,
+                              }),
+                            )
+                          }
+                        }}
+                      />
                     </div>
-                    <Table
-                      size="small"
-                      pagination={false}
-                      scroll={{ y: 360, x: true }}
-                      rowKey="__key"
-                      dataSource={tableData}
-                      columns={previewColumns.map((c) => ({
-                        title: c,
-                        dataIndex: c,
-                        ellipsis: true,
-                        width: 100,
-                        render: (v: unknown) =>
-                          v === null || v === undefined ? '—' : String(v),
-                      }))}
-                    />
-                  </>
-                )}
+                    <div>
+                      <Typography.Text type="secondary">数据源</Typography.Text>
+                      <Select
+                        style={{ width: '100%', marginTop: 4 }}
+                        showSearch
+                        optionFilterProp="label"
+                        value={
+                          activeDatasetId === 'main'
+                            ? dataSourceId
+                            : (activeDs?.data_source_id as string) || dataSourceId
+                        }
+                        onChange={(v) => {
+                          if (activeDatasetId === 'main') setDataSourceId(v)
+                          else
+                            setArtboard((p) =>
+                              upsertDataset(p, {
+                                id: activeDatasetId,
+                                data_source_id: v,
+                                sql: activeDs?.sql,
+                                name: activeDs?.name,
+                              }),
+                            )
+                        }}
+                        options={sources.map((s) => ({
+                          value: s.id,
+                          label: `${s.name} (${s.type})`,
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">SQL</Typography.Text>
+                      <Input.TextArea
+                        rows={8}
+                        style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
+                        value={
+                          activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')
+                        }
+                        onChange={(e) => {
+                          if (activeDatasetId === 'main') setSql(e.target.value)
+                          else
+                            setArtboard((p) =>
+                              upsertDataset(p, {
+                                id: activeDatasetId,
+                                sql: e.target.value,
+                                data_source_id: activeDs?.data_source_id,
+                                name: activeDs?.name,
+                              }),
+                            )
+                        }}
+                      />
+                    </div>
+                    <Button
+                      type="primary"
+                      loading={querying}
+                      onClick={() => void onQueryDataset(activeDatasetId)}
+                    >
+                      运行取数并缓存字段
+                    </Button>
+                  </Space>
+                </div>
+
+                {/* 预览当前结果 */}
+                <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, minWidth: 0 }}>
+                  <Typography.Title level={5} style={{ marginTop: 0 }}>
+                    结果预览
+                  </Typography.Title>
+                  {!previewColumns.length ? (
+                    <Empty description="对该数据集取数后显示字段与样例行" />
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        {previewColumns.map((c) => (
+                          <Tag key={c} color="blue">
+                            {c}
+                          </Tag>
+                        ))}
+                      </div>
+                      <Table
+                        size="small"
+                        pagination={false}
+                        scroll={{ y: 360, x: true }}
+                        rowKey="__key"
+                        dataSource={tableData}
+                        columns={previewColumns.map((c) => ({
+                          title: c,
+                          dataIndex: c,
+                          ellipsis: true,
+                          width: 100,
+                          render: (v: unknown) =>
+                            v === null || v === undefined ? '—' : String(v),
+                        }))}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -936,11 +1163,30 @@ export function EditorPage() {
                     </Tag>
                   </Form.Item>
                   {draft.type !== 'Divider' ? (
-                    <Form.Item label="数据集">
+                    <Form.Item
+                      label="数据集"
+                      extra={
+                        readyDsOptions.length === 0
+                          ? '请先在「数据」步对至少一个数据集取数'
+                          : undefined
+                      }
+                    >
                       <Select
                         value={draft.dataset_id}
-                        onChange={(v) => setDraft({ ...draft, dataset_id: v })}
-                        options={datasetOptions}
+                        onChange={(v) =>
+                          setDraft({
+                            ...draft,
+                            dataset_id: v,
+                            value_column: undefined,
+                            category_column: undefined,
+                          })
+                        }
+                        options={
+                          readyDsOptions.length
+                            ? readyDsOptions
+                            : datasetOptions
+                        }
+                        placeholder="选择已取数的数据集"
                       />
                     </Form.Item>
                   ) : null}
@@ -967,6 +1213,13 @@ export function EditorPage() {
                   ) : null}
                   {draft.type === 'Chart' ? (
                     <>
+                      <Form.Item label="图表类型">
+                        <Select
+                          value={draft.chart_type || 'bar'}
+                          onChange={(v) => setDraft({ ...draft, chart_type: v })}
+                          options={CHART_TYPES}
+                        />
+                      </Form.Item>
                       <Form.Item label="分类字段" required>
                         <Select
                           allowClear
@@ -988,6 +1241,75 @@ export function EditorPage() {
                           value={draft.title}
                           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
                         />
+                      </Form.Item>
+                      <Form.Item label="图表主题（ECharts）">
+                        <Select
+                          value={draft.chart_theme || 'macarons'}
+                          onChange={(v) => setDraft({ ...draft, chart_theme: v })}
+                          options={CHART_THEMES}
+                        />
+                      </Form.Item>
+                      <Form.Item label="样式选项">
+                        <Space wrap>
+                          <span>
+                            <Switch
+                              size="small"
+                              checked={draft.show_label !== false}
+                              onChange={(v) => setDraft({ ...draft, show_label: v })}
+                            />{' '}
+                            数据标签
+                          </span>
+                          {(draft.chart_type === 'line' || draft.chart_type === 'area') && (
+                            <span>
+                              <Switch
+                                size="small"
+                                checked={draft.smooth !== false}
+                                onChange={(v) => setDraft({ ...draft, smooth: v })}
+                              />{' '}
+                              平滑
+                            </span>
+                          )}
+                          {(draft.chart_type === 'bar' ||
+                            draft.chart_type === 'line' ||
+                            draft.chart_type === 'area') && (
+                            <span>
+                              <Switch
+                                size="small"
+                                checked={Boolean(draft.stack)}
+                                onChange={(v) => setDraft({ ...draft, stack: v })}
+                              />{' '}
+                              堆叠
+                            </span>
+                          )}
+                          {draft.chart_type === 'pie' && (
+                            <>
+                              <span>
+                                <Switch
+                                  size="small"
+                                  checked={Boolean(draft.donut)}
+                                  onChange={(v) => setDraft({ ...draft, donut: v })}
+                                />{' '}
+                                环形
+                              </span>
+                              <span>
+                                <Switch
+                                  size="small"
+                                  checked={Boolean(draft.rose)}
+                                  onChange={(v) => setDraft({ ...draft, rose: v })}
+                                />{' '}
+                                南丁格尔
+                              </span>
+                            </>
+                          )}
+                          <span>
+                            <Switch
+                              size="small"
+                              checked={Boolean(draft.legend)}
+                              onChange={(v) => setDraft({ ...draft, legend: v })}
+                            />{' '}
+                            图例
+                          </span>
+                        </Space>
                       </Form.Item>
                     </>
                   ) : null}
