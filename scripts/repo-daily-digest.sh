@@ -24,25 +24,27 @@ echo ""
 
 echo "## 开放 Issues"
 echo ""
-ISSUE_OUT="$(gh issue list --repo "$REPO" --state open --limit 30 2>/dev/null || true)"
-if [[ -z "${ISSUE_OUT// }" ]]; then
+if ! gh issue list --repo "$REPO" --state open --limit 30 --json number,title,labels,updatedAt \
+  --jq '.[] | "- #\(.number) \(.title) · \([.labels[].name] | join(", ")) · \(.updatedAt[:10])"' \
+  2>/dev/null | grep -q .
+then
   echo "无开放 Issue。"
 else
-  echo '```'
-  echo "$ISSUE_OUT"
-  echo '```'
+  gh issue list --repo "$REPO" --state open --limit 30 --json number,title,labels,updatedAt \
+    --jq '.[] | "- #\(.number) \(.title) · \([.labels[].name] | join(", ")) · \(.updatedAt[:10])"'
 fi
 echo ""
 
 echo "## 开放 Pull Requests"
 echo ""
-PR_OUT="$(gh pr list --repo "$REPO" --state open --limit 20 2>/dev/null || true)"
-if [[ -z "${PR_OUT// }" ]]; then
+if ! gh pr list --repo "$REPO" --state open --limit 20 --json number,title,author,isDraft,url \
+  --jq '.[] | "- #\(.number)\(if .isDraft then " [draft]" else "" end) \(.title) · @\(.author.login) · \(.url)"' \
+  2>/dev/null | grep -q .
+then
   echo "无开放 PR。"
 else
-  echo '```'
-  echo "$PR_OUT"
-  echo '```'
+  gh pr list --repo "$REPO" --state open --limit 20 --json number,title,author,isDraft,url \
+    --jq '.[] | "- #\(.number)\(if .isDraft then " [draft]" else "" end) \(.title) · @\(.author.login) · \(.url)"'
 fi
 echo ""
 
