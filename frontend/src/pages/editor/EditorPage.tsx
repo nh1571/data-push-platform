@@ -142,6 +142,21 @@ const COMPOSE_LAYOUT_KEYS = [
   'compose_opacity',
   'compose_width',
   'preview_image',
+  // 内容样式（组装画布可调）
+  'content_font_size',
+  'content_font_weight',
+  'content_color',
+  'content_align',
+  'content_line_height',
+  'label_font_size',
+  'label_color',
+  'label_font_weight',
+  'title_font_size',
+  'chart_label_size',
+  'axis_font_size',
+  'show_label',
+  'show_legend',
+  'show_grid',
 ] as const
 
 /** 布局 + 内容样式（做组件确认时整体保留旧布局用） */
