@@ -40,14 +40,20 @@ install_one() {
 
 install_one "data-push-collab"
 install_one "continue-data-push-dev" || true
+install_one "data-push-maintainer" || true
 
 echo ""
-echo "==> Done. Tell your coding agent, for example:"
+echo "==> Done."
 echo ""
+echo "【开发者 Agent 开场白】"
 echo "  用 data-push-collab 技能。"
 echo "  仓库：https://github.com/nh1571/data-push-platform"
 echo "  从 main 拉最新，按 skill 建 feature/<lane>-* 分支。"
-echo "  任务：<在这里写要开发什么>"
+echo "  任务：<写要开发什么>"
 echo "  做完 push 并开 PR 到 main。"
 echo ""
-echo "Skills: data-push-collab (协同) · continue-data-push-dev (启停环境)"
+echo "【维护者 Agent 开场白】（Owner 授权后）"
+echo "  用 data-push-maintainer 技能，全权代理维护仓库。"
+echo "  每天看 Issue/PR，可 squash 合并合规 PR 到 main。"
+echo ""
+echo "Skills: collab · maintainer · continue-data-push-dev"

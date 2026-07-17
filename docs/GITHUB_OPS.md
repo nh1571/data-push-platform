@@ -18,19 +18,27 @@
 
 ---
 
-## 2. 邀请同事（你要在网页点一次）
+## 2. 邀请同事 / 全权维护者
 
-1. 打开 https://github.com/nh1571/data-push-platform/settings/access  
-2. **Add people** → 填同事 GitHub 用户名  
-3. 权限建议：**Write**（可推分支、开 PR）
+### 2a. 普通开发（Write）
 
-同事：
+1. https://github.com/nh1571/data-push-platform/settings/access  
+2. **Add people** → 权限 **Write**（推分支、开 PR）
+
+### 2b. 全权日常维护（Maintain / Admin）
+
+若需要有人**代理你**审 Issue、合 PR、日常维护：
+
+- 人类：同一页面加权限 **Maintain** 或 **Admin**  
+- 说明文档：[`docs/REPO_MAINTAINER.md`](./REPO_MAINTAINER.md)  
+- Agent 技能：`data-push-maintainer`（需你说「全权代理维护」）
+
+同事开发：
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
 git clone https://github.com/nh1571/data-push-platform.git
-cd data-push-platform
-./scripts/dev.sh
-# 登录 admin / admin123
+cd data-push-platform && ./scripts/dev.sh
 ```
 
 ---
