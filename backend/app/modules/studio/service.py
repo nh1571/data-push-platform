@@ -13,7 +13,7 @@ from app.modules.editor.schemas import ChannelSendResult, SaveJobRequest
 from app.modules.studio.compile import compile_artboard
 from app.modules.studio.defaults import default_daily_artboard
 from app.modules.studio.migrate import design_to_artboard, extract_artboard, is_artboard_spec
-from app.modules.studio.sql_params import resolve_sql_params
+from app.modules.studio.sql_params import extract_placeholders, resolve_sql_params
 from app.plugins.base import QueryResult
 
 
@@ -61,9 +61,14 @@ def resolve_data_context(
     fallback_sql: str | None = None,
     params: dict[str, Any] | None = None,
     max_rows: int = 200,
-) -> dict[str, QueryResult]:
-    """Execute all datasets on the artboard (S1: typically one main)."""
+) -> tuple[dict[str, QueryResult], dict[str, dict[str, str]]]:
+    """Execute all datasets on the artboard.
+
+    Returns ``(data_ctx, resolved_params_by_dataset)`` so the workbench can
+    show which SQL params were used for this render (template is dynamic).
+    """
     ctx: dict[str, QueryResult] = {}
+    params_by_ds: dict[str, dict[str, str]] = {}
     datasets = list(doc.get("datasets") or [])
     if not datasets and fallback_data_source_id and fallback_sql:
         datasets = [
@@ -100,6 +105,15 @@ def resolve_data_context(
         _sql, resolved = resolve_sql_params(
             sql, param_defs=param_defs, overrides=ds_overrides
         )
+        # UI: only names used in SQL or declared on dataset (not every builtin)
+        used = set(extract_placeholders(sql))
+        for p in param_defs or []:
+            if isinstance(p, dict) and p.get("name"):
+                used.add(str(p["name"]))
+        if used:
+            params_by_ds[ds_id] = {k: str(resolved.get(k, "")) for k in sorted(used)}
+        else:
+            params_by_ds[ds_id] = {}
         try:
             ctx[ds_id] = editor_service.execute_query(
                 db, source_uuid, sql, resolved, max_rows=max_rows
@@ -115,7 +129,7 @@ def resolve_data_context(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="artboard has no executable dataset (need data_source_id + sql)",
         )
-    return ctx
+    return ctx, params_by_ds
 
 
 def studio_compile(
@@ -133,7 +147,7 @@ def studio_compile(
         data_source_id=str(data_source_id) if data_source_id else None,
         sql=sql,
     )
-    ctx = resolve_data_context(
+    ctx, params_by_ds = resolve_data_context(
         db,
         doc,
         fallback_data_source_id=data_source_id,
@@ -142,6 +156,10 @@ def studio_compile(
         max_rows=max_rows,
     )
     result = compile_artboard(doc, ctx, want_image=want_image)
+    # Primary flat map for UI: main first, else first dataset
+    flat = dict(params_by_ds.get("main") or {})
+    if not flat and params_by_ds:
+        flat = dict(next(iter(params_by_ds.values())))
     return {
         "html": result.html,
         "markdown_text": result.markdown,
@@ -152,6 +170,8 @@ def studio_compile(
         "artboard": doc,
         "image_error": result.image_error,
         "ok": bool(result.image_base64 or result.markdown or result.html),
+        "resolved_params": flat,
+        "resolved_params_by_dataset": params_by_ds,
     }
 
 
@@ -183,7 +203,7 @@ def studio_test_push(
     from app.plugins.registry import plugin_registry
 
     doc = ensure_artboard_doc(artboard, data_source_id=str(data_source_id), sql=sql)
-    ctx = resolve_data_context(
+    ctx, _params_by_ds = resolve_data_context(
         db,
         doc,
         fallback_data_source_id=data_source_id,
