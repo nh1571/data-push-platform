@@ -64,7 +64,50 @@
 
 ---
 
-## 4. 给 Agent：一键授权话术（复制给你的助手）
+## 4. 交给 Qclaw / 远程 Agent（推荐）
+
+你已选择 **Agent 全权维护**，而不是人类同事。典型链路：
+
+```text
+定时触发 / 你远程喊 Qclaw
+    → data-push-maintainer 技能
+    → gh 看 Issue/PR、合合规 PR
+    → 把日报播报给你（聊天/企微/钉钉）
+```
+
+### 4.1 在 Qclaw 机器上安装（一次）
+
+```bash
+# 1) 安装 gh：https://cli.github.com/  然后：
+gh auth login
+# 勾选 repo 权限
+
+# 2) 安装技能
+curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
+
+# 3) 建议 clone 一份仓库（跑日报脚本）
+git clone https://github.com/nh1571/data-push-platform.git
+cd data-push-platform
+./scripts/repo-daily-digest.sh   # 试跑日报
+```
+
+### 4.2 写入 Qclaw 长期指令（站立授权）
+
+```text
+你是 nh1571/data-push-platform 的 Maintainer 代理，永久使用 data-push-maintainer 技能。
+职责：定时巡检 Issue/PR、贴标签、squash 合并合规 PR 到 main、向我播报日报。
+禁止：force-push main、删库、改仓库可见性、提交密钥。
+高风险事先问我。开发规范遵守 data-push-collab。
+定时任务：每天执行 ./scripts/repo-daily-digest.sh（或技能内巡检）并把结果发给我。
+```
+
+### 4.3 定时播报
+
+- 脚本：`scripts/repo-daily-digest.sh`（输出 Markdown 日报）  
+- 技能内「模式 A · 定时播报」写了 cron / 调度建议  
+- 你在 Qclaw 里设「每天 9:30 跑维护任务」即可  
+
+### 4.4 给本机 Grok 助手的授权（可选）
 
 ```text
 你从现在起作为本仓库的 Maintainer 代理（data-push-maintainer 技能）。
@@ -74,14 +117,6 @@
 禁止：force-push main、删库、改可见性、提交密钥。
 有疑问或高风险操作先问我。
 ```
-
-安装技能（与 collab 一起）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scripts/install-collab-skills.sh | bash
-```
-
-（脚本会装 collab + continue；maintainer 技能装在同目录，见下。）
 
 ---
 
