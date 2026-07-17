@@ -44,6 +44,43 @@ body {
 }
 .artboard-chrome.alert { background: #ff4d4f; }
 .artboard-body { padding: 16px 18px 4px; }
+.artboard-body.free { padding: 0; position: relative; min-height: 200px; }
+.comp-freeboard { position: relative; width: 100%; min-height: 200px; }
+.comp-free {
+  position: absolute;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.comp-free-inner {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.comp-free.card {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  background: #fff;
+}
+.comp-free.plain {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.comp-free.border {
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  box-shadow: none;
+  background: #fff;
+}
+.comp-free.shadow {
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  background: #fff;
+}
 .comp-text-h1 {
   font-size: 20px;
   font-weight: 700;
@@ -745,20 +782,96 @@ def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
     return f"> ⚠ {text}"
 
 
-def _wrap_compose_layout(node: dict[str, Any], inner: str) -> str:
-    """Assembly-step layout: width % and optional accent color."""
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _has_free_layout(props: dict[str, Any]) -> bool:
+    """True when assembly used free-canvas coords (compose_x / compose_y)."""
+    return props.get("compose_x") is not None or props.get("compose_y") is not None
+
+
+def _children_use_free_layout(children: list[Any]) -> bool:
+    for ch in children:
+        if isinstance(ch, dict) and _has_free_layout(dict(ch.get("props") or {})):
+            return True
+    return False
+
+
+def _free_board_height(children: list[Any], canvas_width: int = 750) -> int:
+    bottom = 200
+    for i, ch in enumerate(children):
+        if not isinstance(ch, dict):
+            continue
+        props = dict(ch.get("props") or {})
+        if not _has_free_layout(props):
+            continue
+        y = _as_int(props.get("compose_y"), 12 + i * 220)
+        h = _as_int(props.get("compose_h"), 200)
+        if h <= 0:
+            h = 200
+        bottom = max(bottom, y + h + 16)
+    return bottom
+
+
+def _wrap_compose_layout(node: dict[str, Any], inner: str, *, canvas_width: int = 750) -> str:
+    """Assembly layout: free absolute (x/y/w/h + style) or legacy width %."""
     if not inner:
         return ""
     props = dict(node.get("props") or {})
-    width = props.get("compose_width")
     color = props.get("compose_color")
+
+    if _has_free_layout(props):
+        x = max(0, _as_int(props.get("compose_x"), 12))
+        y = max(0, _as_int(props.get("compose_y"), 12))
+        w = _as_int(props.get("compose_w"), 0)
+        if w <= 0:
+            pct = _as_int(props.get("compose_width"), 100)
+            w = max(120, int(canvas_width * max(10, min(100, pct)) / 100) - 24)
+        h = max(40, _as_int(props.get("compose_h"), 200))
+        preset = str(props.get("compose_style") or "card")
+        if preset not in ("card", "plain", "border", "shadow"):
+            preset = "card"
+        radius = _as_int(props.get("compose_radius"), 8)
+        padding = max(0, _as_int(props.get("compose_padding"), 0))
+        try:
+            opacity = float(props.get("compose_opacity") if props.get("compose_opacity") is not None else 1)
+        except (TypeError, ValueError):
+            opacity = 1.0
+        opacity = max(0.05, min(1.0, opacity))
+        bg = props.get("compose_bg")
+        outer: list[str] = [
+            f"left:{x}px",
+            f"top:{y}px",
+            f"width:{w}px",
+            f"height:{h}px",
+            f"opacity:{opacity}",
+            f"border-radius:{radius}px",
+        ]
+        if bg:
+            outer.append(f"background:{html.escape(str(bg))}")
+        if color:
+            outer.append(f"--theme:{html.escape(str(color))}")
+            if preset in ("card", "border"):
+                outer.append(f"border-color:{html.escape(str(color))}")
+        inner_style = f"padding:{padding}px" if padding else ""
+        return (
+            f"<div class='comp-free {html.escape(preset)}' style='{';'.join(outer)}'>"
+            f"<div class='comp-free-inner' style='{inner_style}'>{inner}</div>"
+            f"</div>"
+        )
+
+    # Legacy: width percent + optional accent
     styles: list[str] = []
-    try:
-        w = int(width) if width is not None else 100
-    except (TypeError, ValueError):
-        w = 100
+    w = _as_int(props.get("compose_width"), 100)
     if w != 100:
-        styles.append(f"width:{max(10, min(100, w))}%;display:inline-block;vertical-align:top;box-sizing:border-box;padding:0 4px")
+        styles.append(
+            f"width:{max(10, min(100, w))}%;display:inline-block;"
+            "vertical-align:top;box-sizing:border-box;padding:0 4px"
+        )
     if color:
         styles.append(f"--theme:{html.escape(str(color))}")
     if not styles:
@@ -766,23 +879,32 @@ def _wrap_compose_layout(node: dict[str, Any], inner: str) -> str:
     return f"<div style='{';'.join(styles)}'>{inner}</div>"
 
 
-def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+def _walk_html(
+    node: dict[str, Any],
+    data_ctx: dict[str, QueryResult],
+    *,
+    canvas_width: int = 750,
+) -> str:
     if not _visible(node, data_ctx):
         return ""
     ntype = str(node.get("type") or "")
     if ntype == "Container":
         props = dict(node.get("props") or {})
+        children = [ch for ch in (node.get("children") or []) if isinstance(ch, dict)]
+        kids = [_walk_html(ch, data_ctx, canvas_width=canvas_width) for ch in children]
+        inner = "".join(k for k in kids if k)
+        if _children_use_free_layout(children):
+            height = _free_board_height(children, canvas_width)
+            return (
+                f"<div class='comp-freeboard' style='min-height:{height}px'>{inner}</div>"
+            )
         direction = str(props.get("direction") or "column")
         gap = int(props.get("gap") or (12 if direction == "column" else 8))
         cls = "comp-vstack" if direction == "column" else "comp-hstack"
-        kids = [
-            _walk_html(ch, data_ctx)
-            for ch in (node.get("children") or [])
-            if isinstance(ch, dict)
-        ]
-        inner = "".join(k for k in kids if k)
         return _wrap_compose_layout(
-            node, f"<div class='{cls}' style='--gap:{gap}px'>{inner}</div>"
+            node,
+            f"<div class='{cls}' style='--gap:{gap}px'>{inner}</div>",
+            canvas_width=canvas_width,
         )
     body = ""
     if ntype == "Text":
@@ -799,7 +921,7 @@ def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
         body = "<hr style='border:none;border-top:1px solid #e5e5e5;margin:4px 0'/>"
     else:
         return ""
-    return _wrap_compose_layout(node, body)
+    return _wrap_compose_layout(node, body, canvas_width=canvas_width)
 
 
 def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str]:
@@ -834,7 +956,12 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     pack = resolve_theme(ab)
     width = int(ab.get("width") or 750)
     tree = doc.get("tree") or {"type": "Container", "children": []}
-    body = _walk_html(tree if isinstance(tree, dict) else {}, data_ctx)
+    tree_dict = tree if isinstance(tree, dict) else {}
+    body = _walk_html(tree_dict, data_ctx, canvas_width=width)
+    free = _children_use_free_layout(
+        [ch for ch in (tree_dict.get("children") or []) if isinstance(ch, dict)]
+    )
+    body_cls = "artboard-body free" if free else "artboard-body"
     chrome_title = str(ab.get("chrome_title") or doc.get("scene_id") or "数据推送")
     # Allow first-row sub on chrome title from main dataset
     main = data_ctx.get("main") or (next(iter(data_ctx.values())) if data_ctx else None)
@@ -850,7 +977,7 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
         f"<style>{_CSS}\n:root {{ {theme_css_vars(pack)} --ab-width: {width}px; }}</style>"
         "</head><body>"
         f"<div class='artboard' id='artboard'>{chrome_html}"
-        f"<div class='artboard-body'>{body}</div></div>"
+        f"<div class='{body_cls}'>{body}</div></div>"
         "</body></html>"
     )
 

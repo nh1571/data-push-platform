@@ -112,6 +112,60 @@ def test_chart_bar_and_pie_html() -> None:
     assert "comp-chart" in pie_html or "<img" in pie_html or "<svg" in pie_html
 
 
+def test_free_compose_layout_absolute_html() -> None:
+    """Assemble free-canvas coords render as absolute positioned shells."""
+    doc = {
+        "scene_id": "free",
+        "artboard": {
+            "width": 750,
+            "show_chrome": True,
+            "chrome_title": "自由布局",
+            "theme": {"pack": "business", "color": "#1677ff"},
+        },
+        "tree": {
+            "type": "Container",
+            "id": "root",
+            "children": [
+                {
+                    "type": "Text",
+                    "id": "t1",
+                    "props": {
+                        "text": "标题",
+                        "compose_x": 20,
+                        "compose_y": 30,
+                        "compose_w": 300,
+                        "compose_h": 80,
+                        "compose_style": "card",
+                    },
+                },
+                {
+                    "type": "Kpi",
+                    "id": "k1",
+                    "props": {
+                        "label": "指标",
+                        "compose_x": 340,
+                        "compose_y": 30,
+                        "compose_w": 200,
+                        "compose_h": 100,
+                        "compose_style": "shadow",
+                        "compose_color": "#ff4d4f",
+                    },
+                    "binding": {"dataset_id": "main", "value_column": "门诊量"},
+                },
+            ],
+        },
+    }
+    html = build_artboard_html(doc, {"main": _sample_result()})
+    assert "artboard-body free" in html
+    assert "comp-freeboard" in html
+    assert "comp-free card" in html
+    assert "comp-free shadow" in html
+    assert "left:20px" in html
+    assert "top:30px" in html
+    assert "width:300px" in html
+    assert "height:80px" in html
+
+
 def test_design_to_artboard_migration() -> None:
     design = {
         "output_mode": "image",

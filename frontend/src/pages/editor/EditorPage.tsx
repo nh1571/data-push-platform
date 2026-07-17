@@ -8,7 +8,6 @@
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
-  HolderOutlined,
   PlusOutlined,
   SaveOutlined,
   ShoppingCartOutlined,
@@ -54,6 +53,11 @@ import type {
   StudioNode,
 } from '../../api/types'
 import { seriesFromTable, type ChartStyle } from './chartOption'
+import {
+  ComposeCanvas,
+  ensureComposeLayouts,
+  type ComposeLayout,
+} from './ComposeCanvas'
 import { LiveChart } from './LiveChart'
 import { RichTextEditor } from './RichTextEditor'
 import {
@@ -63,7 +67,6 @@ import {
   emptyArtboard,
   extractArtboardFromJob,
   firstRowMap,
-  moveNodeTo,
   newComponent,
   nid,
   removeNode,
@@ -75,6 +78,28 @@ import {
   upsertDataset,
   type DataPreviewCtx,
 } from './studioUtils'
+
+const COMPOSE_STYLE_OPTIONS = [
+  { value: 'card', label: '卡片' },
+  { value: 'plain', label: '无边框' },
+  { value: 'border', label: '描边' },
+  { value: 'shadow', label: '阴影' },
+]
+
+const COMPOSE_PROP_KEYS = [
+  'compose_x',
+  'compose_y',
+  'compose_w',
+  'compose_h',
+  'compose_style',
+  'compose_bg',
+  'compose_radius',
+  'compose_padding',
+  'compose_color',
+  'compose_opacity',
+  'compose_width',
+  'preview_image',
+] as const
 
 function colorToHex(color: Color | string): string {
   if (typeof color === 'string') return color
@@ -506,7 +531,6 @@ export function EditorPage() {
   const [querying, setQuerying] = useState(false)
   const [saving, setSaving] = useState(false)
   const [pushing, setPushing] = useState(false)
-  const [dragId, setDragId] = useState<string | null>(null)
   const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
   const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
   const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
@@ -799,12 +823,11 @@ export function EditorPage() {
     if (editId) {
       const old = findNode(tree, editId)
       if (old?.props) {
-        node.props = {
-          ...node.props,
-          compose_width: old.props.compose_width,
-          compose_color: old.props.compose_color,
-          preview_image: old.props.preview_image,
+        const kept: Record<string, unknown> = {}
+        for (const k of COMPOSE_PROP_KEYS) {
+          if (old.props[k] !== undefined) kept[k] = old.props[k]
         }
+        node.props = { ...node.props, ...kept }
       }
       setTree(updateNode(tree, editId, node))
       message.success('组件已更新')
@@ -964,6 +987,38 @@ export function EditorPage() {
 
   const stepIndex = STEPS.findIndex((s) => s.key === step)
   const selectedCompose = selectedComposeId && tree ? findNode(tree, selectedComposeId) : null
+  const canvasWidth = Number(artboard.artboard?.width) || 750
+
+  const patchComposeLayout = useCallback((id: string, layout: Partial<ComposeLayout>) => {
+    setArtboard((prev) => {
+      if (!prev.tree) return prev
+      const node = findNode(prev.tree, id)
+      if (!node) return prev
+      return {
+        ...prev,
+        tree: updateNode(prev.tree, id, {
+          props: { ...node.props, ...layout },
+        }),
+      }
+    })
+  }, [])
+
+  // Init free-layout coords when entering assemble step
+  useEffect(() => {
+    if (step !== 'compose') return
+    setArtboard((prev) => {
+      if (!prev.tree) return prev
+      const patches = ensureComposeLayouts(cartItems(prev.tree), canvasWidth)
+      if (!patches.length) return prev
+      let next = prev.tree
+      for (const { id, patch } of patches) {
+        const n = findNode(next, id)
+        if (!n) continue
+        next = updateNode(next, id, { props: { ...n.props, ...patch } })
+      }
+      return { ...prev, tree: next }
+    })
+  }, [step, cart.length, canvasWidth])
 
   const applyTemplate = (kind: 'daily' | 'alert') => {
     const board = kind === 'daily' ? defaultDailyArtboard() : defaultAlertArtboard()
@@ -2000,7 +2055,7 @@ export function EditorPage() {
         {step === 'compose' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-              <Space style={{ marginBottom: 12 }}>
+              <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('make')}>← 做组件</Button>
                 <Button type="primary" disabled={!cart.length} onClick={() => setStep('preview')}>
                   预览最终推送 →
@@ -2016,138 +2071,29 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                画布上调整顺序、宽度与颜色。拖拽排序；点选后在右侧改大小/配色。
+                自由拖拽定位 · 右下角拖柄改大小 · 右侧选风格与精确数值
               </Typography.Paragraph>
-              {/* Visual canvas */}
-              <div
-                style={{
-                  width: 780,
-                  maxWidth: '100%',
-                  margin: '0 auto',
-                  background: '#d9d9d9',
-                  padding: 16,
-                  borderRadius: 8,
+              <ComposeCanvas
+                canvasWidth={canvasWidth}
+                canvasMinHeight={420}
+                chrome={{
+                  show: artboard.artboard?.show_chrome !== false,
+                  title: String(artboard.artboard?.chrome_title || name || '数据推送'),
+                  color: String(artboard.artboard?.theme?.color || '#1677ff'),
                 }}
-              >
-                <div
-                  style={{
-                    width: artboard.artboard?.width || 750,
-                    maxWidth: '100%',
-                    margin: '0 auto',
-                    background: '#fff',
-                    minHeight: 400,
-                    borderRadius: 4,
-                    boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {artboard.artboard?.show_chrome !== false ? (
-                    <div
-                      style={{
-                        background: artboard.artboard?.theme?.color || '#1677ff',
-                        color: '#fff',
-                        padding: '12px 16px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {artboard.artboard?.chrome_title || name || '数据推送'}
-                    </div>
-                  ) : null}
-                  <div style={{ padding: 12 }}>
-                    {cart.length === 0 ? (
-                      <Empty description="清单为空，请回「做组件」添加" />
-                    ) : (
-                      cart.map((node, index) => {
-                        const w = Number(node.props?.compose_width ?? 100)
-                        const accent = String(node.props?.compose_color || '')
-                        const thumb =
-                          thumbById[node.id] || String(node.props?.preview_image || '')
-                        const selected = selectedComposeId === node.id
-                        return (
-                          <div
-                            key={node.id}
-                            draggable
-                            onDragStart={() => setDragId(node.id)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={() => {
-                              if (!tree || !dragId || dragId === node.id) return
-                              setTree(moveNodeTo(tree, dragId, 'root', index))
-                              setDragId(null)
-                            }}
-                            onDragEnd={() => setDragId(null)}
-                            onClick={() => setSelectedComposeId(node.id)}
-                            style={{
-                              width: `${Math.max(20, Math.min(100, w))}%`,
-                              display: w < 100 ? 'inline-block' : 'block',
-                              verticalAlign: 'top',
-                              boxSizing: 'border-box',
-                              padding: 4,
-                              cursor: 'grab',
-                            }}
-                          >
-                            <div
-                              style={{
-                                border: selected
-                                  ? '2px solid #1677ff'
-                                  : accent
-                                    ? `2px solid ${accent}`
-                                    : '1px solid #e8e8e8',
-                                borderRadius: 6,
-                                overflow: 'hidden',
-                                background: '#fafafa',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  padding: '2px 6px',
-                                  background: selected ? '#e6f4ff' : '#f0f0f0',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                }}
-                              >
-                                <HolderOutlined />
-                                <span>
-                                  {index + 1}.{' '}
-                                  {typeLabel(
-                                    String(node.type),
-                                    String(node.props?.chart_type || ''),
-                                  )}
-                                </span>
-                              </div>
-                              {thumb ? (
-                                <img
-                                  src={thumb}
-                                  alt=""
-                                  style={{ width: '100%', display: 'block' }}
-                                />
-                              ) : (
-                                <div
-                                  style={{
-                                    padding: 24,
-                                    textAlign: 'center',
-                                    color: '#999',
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  无预览图 · 点「刷新组件图」或回做组件重新加入
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
+                nodes={cart}
+                selectedId={selectedComposeId}
+                thumbs={thumbById}
+                onSelect={setSelectedComposeId}
+                onChangeLayout={patchComposeLayout}
+                typeLabel={typeLabel}
+              />
             </div>
 
-            {/* 右侧：选中组件版式 + 主题 */}
+            {/* 右侧：风格 + 位置尺寸 + 主题 */}
             <div
               style={{
-                width: 260,
+                width: 280,
                 background: '#fff',
                 borderLeft: '1px solid #f0f0f0',
                 padding: 12,
@@ -2207,58 +2153,159 @@ export function EditorPage() {
 
               {selectedCompose && tree ? (
                 <div style={{ marginTop: 20 }}>
-                  <Typography.Text strong>选中组件版式</Typography.Text>
+                  <Typography.Text strong>选中组件</Typography.Text>
                   <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
                     {typeLabel(
                       String(selectedCompose.type),
                       String(selectedCompose.props?.chart_type || ''),
                     )}
                   </div>
-                  <div style={{ marginTop: 8 }}>
-                    <Typography.Text type="secondary">宽度 %</Typography.Text>
-                    <InputNumber
+
+                  <div style={{ marginTop: 12 }}>
+                    <Typography.Text type="secondary">风格</Typography.Text>
+                    <Select
                       style={{ width: '100%', marginTop: 4 }}
-                      min={25}
-                      max={100}
-                      step={5}
-                      value={Number(selectedCompose.props?.compose_width ?? 100)}
+                      value={String(selectedCompose.props?.compose_style || 'card')}
+                      options={COMPOSE_STYLE_OPTIONS}
                       onChange={(v) =>
-                        setTree(
-                          updateNode(tree, selectedCompose.id, {
-                            props: {
-                              ...selectedCompose.props,
-                              compose_width: v ?? 100,
-                            },
-                          }),
-                        )
+                        patchComposeLayout(selectedCompose.id, { compose_style: v })
                       }
                     />
                   </div>
-                  <div style={{ marginTop: 8 }}>
-                    <Typography.Text type="secondary">边框强调色</Typography.Text>
+
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 8,
+                    }}
+                  >
+                    <div>
+                      <Typography.Text type="secondary">X</Typography.Text>
+                      <InputNumber
+                        style={{ width: '100%', marginTop: 4 }}
+                        min={0}
+                        max={canvasWidth - 40}
+                        value={Number(selectedCompose.props?.compose_x ?? 12)}
+                        onChange={(v) =>
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_x: Math.round(Number(v ?? 0)),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">Y</Typography.Text>
+                      <InputNumber
+                        style={{ width: '100%', marginTop: 4 }}
+                        min={0}
+                        value={Number(selectedCompose.props?.compose_y ?? 12)}
+                        onChange={(v) =>
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_y: Math.round(Number(v ?? 0)),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">宽</Typography.Text>
+                      <InputNumber
+                        style={{ width: '100%', marginTop: 4 }}
+                        min={120}
+                        max={canvasWidth}
+                        value={Number(selectedCompose.props?.compose_w ?? canvasWidth - 24)}
+                        onChange={(v) =>
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_w: Math.round(Number(v ?? 120)),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">高</Typography.Text>
+                      <InputNumber
+                        style={{ width: '100%', marginTop: 4 }}
+                        min={80}
+                        value={Number(selectedCompose.props?.compose_h ?? 200)}
+                        onChange={(v) =>
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_h: Math.round(Number(v ?? 80)),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <Typography.Text type="secondary">圆角</Typography.Text>
+                    <InputNumber
+                      style={{ width: '100%', marginTop: 4 }}
+                      min={0}
+                      max={32}
+                      value={Number(selectedCompose.props?.compose_radius ?? 8)}
+                      onChange={(v) =>
+                        patchComposeLayout(selectedCompose.id, {
+                          compose_radius: Number(v ?? 0),
+                        })
+                      }
+                    />
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <Typography.Text type="secondary">内边距</Typography.Text>
+                    <InputNumber
+                      style={{ width: '100%', marginTop: 4 }}
+                      min={0}
+                      max={48}
+                      value={Number(selectedCompose.props?.compose_padding ?? 0)}
+                      onChange={(v) =>
+                        patchComposeLayout(selectedCompose.id, {
+                          compose_padding: Number(v ?? 0),
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <Typography.Text type="secondary">边框/强调色</Typography.Text>
                     <div style={{ marginTop: 4 }}>
                       <ColorPicker
+                        allowClear
                         value={
                           selectedCompose.props?.compose_color
                             ? String(selectedCompose.props.compose_color)
                             : undefined
                         }
                         onChange={(c) =>
-                          setTree(
-                            updateNode(tree, selectedCompose.id, {
-                              props: {
-                                ...selectedCompose.props,
-                                compose_color: colorToHex(c),
-                              },
-                            }),
-                          )
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_color: c ? colorToHex(c) : '',
+                          })
                         }
                       />
                     </div>
                   </div>
+                  <div style={{ marginTop: 12 }}>
+                    <Typography.Text type="secondary">背景色</Typography.Text>
+                    <div style={{ marginTop: 4 }}>
+                      <ColorPicker
+                        allowClear
+                        value={
+                          selectedCompose.props?.compose_bg
+                            ? String(selectedCompose.props.compose_bg)
+                            : undefined
+                        }
+                        onChange={(c) =>
+                          patchComposeLayout(selectedCompose.id, {
+                            compose_bg: c ? colorToHex(c) : '',
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
                   <Button
                     size="small"
-                    style={{ marginTop: 8 }}
+                    style={{ marginTop: 12 }}
                     onClick={() => {
                       setEditId(selectedCompose.id)
                       setDraft(nodeToDraft(selectedCompose))
@@ -2273,7 +2320,7 @@ export function EditorPage() {
                   style={{ marginTop: 16 }}
                   type="info"
                   showIcon
-                  message="点画布上的组件进行版式调整"
+                  message="点画布上的组件，可拖拽、缩放并改风格"
                 />
               )}
             </div>
