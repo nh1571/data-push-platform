@@ -11,8 +11,9 @@ import { ApiOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { Alert, Button, Form, Input, message, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { createChannel, getChannel, testChannel, updateChannel } from '../../api'
+import { createChannel, getChannel, listIdentities, testChannel, updateChannel } from '../../api'
 import { getErrorMessage } from '../../api/client'
+import type { Identity } from '../../api/types'
 
 /** 通道提供商（目前仅钉钉） */
 const PROVIDERS = [{ value: 'dingtalk', label: '钉钉' }]
@@ -70,6 +71,7 @@ interface FormValues {
   robot_code?: string
   open_conversation_id?: string
   user_ids?: string
+  recipient_identity_ids?: string[]
 }
 
 /** 通道表单页：按模式切换字段、校验、保存与测试 */
@@ -81,6 +83,7 @@ export function ChannelFormPage() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [identities, setIdentities] = useState<Identity[]>([])
   const channelType = Form.useWatch('type', form)
   const isWebhook =
     !channelType ||
@@ -89,6 +92,22 @@ export function ChannelFormPage() {
   const isWorkNotice = channelType === 'dingtalk.work_notice'
   const isOpenApiGroup = channelType === 'dingtalk.openapi_group_robot'
   const isOpenApiOto = channelType === 'dingtalk.openapi_oto_robot'
+
+  /** 选取钉钉用户身份 */
+  const personIdentities = identities.filter(
+    (i) => i.kind === 'person' && i.channel_type === 'dingtalk',
+  )
+  /** 选取钉钉群身份 */
+  const groupIdentities = identities.filter(
+    (i) => i.kind === 'group' && i.channel_type === 'dingtalk',
+  )
+
+  // 加载通讯录身份列表
+  useEffect(() => {
+    listIdentities({ channel_type: 'dingtalk' })
+      .then(setIdentities)
+      .catch(() => {}) // 通讯录加载失败不影响通道编辑
+  }, [])
 
   useEffect(() => {
     if (isNew) {
@@ -129,6 +148,9 @@ export function ChannelFormPage() {
             : cfg.userid_list
               ? String(cfg.userid_list)
               : undefined,
+          recipient_identity_ids: Array.isArray(cfg.recipient_identity_ids)
+            ? (cfg.recipient_identity_ids as string[])
+            : undefined,
         })
       })
       .catch((err) => message.error(getErrorMessage(err)))
@@ -148,8 +170,10 @@ export function ChannelFormPage() {
         config.app_secret = values.app_secret
       }
       if (values.agent_id) config.agent_id = values.agent_id
-      if (values.userid_list) config.userid_list = values.userid_list
       if (values.dept_id_list) config.dept_id_list = values.dept_id_list
+      if (values.recipient_identity_ids?.length) {
+        config.recipient_identity_ids = values.recipient_identity_ids
+      }
       if (values.title) config.title = values.title
       return config
     }
@@ -160,8 +184,8 @@ export function ChannelFormPage() {
         config.app_secret = values.app_secret
       }
       if (values.robot_code) config.robot_code = values.robot_code
-      if (values.open_conversation_id) {
-        config.open_conversation_id = values.open_conversation_id
+      if (values.recipient_identity_ids?.length) {
+        config.recipient_identity_ids = values.recipient_identity_ids
       }
       if (values.webhook_url) config.webhook_url = values.webhook_url
       if (values.title) config.title = values.title
@@ -174,7 +198,9 @@ export function ChannelFormPage() {
         config.app_secret = values.app_secret
       }
       if (values.robot_code) config.robot_code = values.robot_code
-      if (values.user_ids) config.user_ids = values.user_ids
+      if (values.recipient_identity_ids?.length) {
+        config.recipient_identity_ids = values.recipient_identity_ids
+      }
       if (values.title) config.title = values.title
       return config
     }
@@ -198,8 +224,8 @@ export function ChannelFormPage() {
         return '请填写 app_secret'
       }
       if (!values.agent_id) return '请填写 agent_id'
-      if (!values.userid_list && !values.dept_id_list) {
-        return '请至少填写 userid_list 或 dept_id_list'
+      if (!values.recipient_identity_ids?.length && !values.dept_id_list) {
+        return '请至少选择收件人或填写部门 ID'
       }
       return null
     }
@@ -209,7 +235,7 @@ export function ChannelFormPage() {
         return '请填写 app_secret'
       }
       if (!values.robot_code) return '请填写 robot_code'
-      if (!values.open_conversation_id) return '请填写 open_conversation_id'
+      if (!values.recipient_identity_ids?.length) return '请选择目标群'
       return null
     }
     if (type === 'dingtalk.openapi_oto_robot') {
@@ -218,7 +244,7 @@ export function ChannelFormPage() {
         return '请填写 app_secret'
       }
       if (!values.robot_code) return '请填写 robot_code'
-      if (!values.user_ids) return '请填写 user_ids（钉钉 userid，逗号分隔）'
+      if (!values.recipient_identity_ids?.length) return '请选择收件人'
       return null
     }
     if (!values.webhook_url && (!values.access_token || values.access_token === MASK)) {
@@ -259,8 +285,10 @@ export function ChannelFormPage() {
             body.config = {
               app_key: values.app_key,
               agent_id: values.agent_id,
-              userid_list: values.userid_list || '',
               dept_id_list: values.dept_id_list || '',
+            }
+            if (values.recipient_identity_ids?.length) {
+              body.config.recipient_identity_ids = values.recipient_identity_ids
             }
             if (values.title) body.config.title = values.title
           } else {
@@ -272,7 +300,9 @@ export function ChannelFormPage() {
             body.config = {
               app_key: values.app_key,
               robot_code: values.robot_code,
-              open_conversation_id: values.open_conversation_id,
+            }
+            if (values.recipient_identity_ids?.length) {
+              body.config.recipient_identity_ids = values.recipient_identity_ids
             }
             if (values.webhook_url) body.config.webhook_url = values.webhook_url
             if (values.title) body.config.title = values.title
@@ -285,7 +315,9 @@ export function ChannelFormPage() {
             body.config = {
               app_key: values.app_key,
               robot_code: values.robot_code,
-              user_ids: values.user_ids,
+            }
+            if (values.recipient_identity_ids?.length) {
+              body.config.recipient_identity_ids = values.recipient_identity_ids
             }
             if (values.title) body.config.title = values.title
           } else {
@@ -431,11 +463,20 @@ export function ChannelFormPage() {
               <Input placeholder="应用 AgentId" />
             </Form.Item>
             <Form.Item
-              name="userid_list"
-              label="用户 ID 列表"
-              extra="多个用英文逗号分隔；与部门 ID 至少填一项"
+              name="recipient_identity_ids"
+              label="收件人"
+              extra="从通讯录中选择已登记的钉钉用户；与部门 ID 至少填一项"
             >
-              <Input placeholder="user1,user2" />
+              <Select
+                mode="multiple"
+                showSearch
+                optionFilterProp="label"
+                placeholder="搜索并选择用户"
+                options={personIdentities.map((i) => ({
+                  value: i.id,
+                  label: `${i.name} (${i.external_id})`,
+                }))}
+              />
             </Form.Item>
             <Form.Item
               name="dept_id_list"
@@ -476,12 +517,20 @@ export function ChannelFormPage() {
               <Input placeholder="dingxxxxxx" />
             </Form.Item>
             <Form.Item
-              name="open_conversation_id"
-              label="Open Conversation ID"
-              rules={[{ required: true, message: '请填写 open_conversation_id' }]}
-              extra="群会话 openConversationId"
+              name="recipient_identity_ids"
+              label="目标群"
+              rules={[{ required: true, message: '请选择目标群' }]}
+              extra="从通讯录中选择已登记的钉钉群（open_conversation_id）"
             >
-              <Input placeholder="cidXXXX==" />
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="搜索并选择群"
+                options={groupIdentities.map((i) => ({
+                  value: i.id,
+                  label: `${i.name} (${i.external_id})`,
+                }))}
+              />
             </Form.Item>
             <Form.Item
               name="webhook_url"
@@ -522,12 +571,21 @@ export function ChannelFormPage() {
               <Input placeholder="dingxxxxxx" />
             </Form.Item>
             <Form.Item
-              name="user_ids"
-              label="用户 ID 列表"
-              rules={[{ required: true, message: '请填写 user_ids' }]}
-              extra="钉钉 userid，逗号分隔；超过 20 人自动拆批发送"
+              name="recipient_identity_ids"
+              label="收件人"
+              rules={[{ required: true, message: '请选择收件人' }]}
+              extra="从通讯录中选择已登记的钉钉用户；超过 20 人自动拆批发送"
             >
-              <Input.TextArea rows={3} placeholder="userid1,userid2,..." />
+              <Select
+                mode="multiple"
+                showSearch
+                optionFilterProp="label"
+                placeholder="搜索并选择用户"
+                options={personIdentities.map((i) => ({
+                  value: i.id,
+                  label: `${i.name} (${i.external_id})`,
+                }))}
+              />
             </Form.Item>
             <Form.Item name="title" label="消息标题">
               <Input placeholder="数据推送" />

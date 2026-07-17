@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.common.crypto import decrypt_dict
 from app.db.models import (
+    ChannelRecipient,
     Channel,
     DataSource,
     Delivery,
@@ -39,6 +40,7 @@ from app.db.models import (
     JobRunStatus,
     PushJob,
 )
+from app.modules.address_book.resolver import resolve_recipient_ids
 from app.modules.editor.design import build_message_from_design, design_to_parts
 from app.modules.editor.schemas import (
     ChannelSendResult,
@@ -319,6 +321,7 @@ def test_push(
         try:
             ch_plugin = plugin_registry.get("channel", channel.type)
             ch_config = decrypt_dict(channel.config_enc)
+            ch_config = resolve_recipient_ids(db, channel.id, channel.type, ch_config)
             dr = ch_plugin.send(ch_config, message)
             if dr.success:
                 successes += 1

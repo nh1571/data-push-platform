@@ -53,6 +53,7 @@ from app.db.models import (
     LogLevel,
     PushJob,
 )
+from app.modules.address_book.resolver import resolve_recipient_ids
 from app.plugins.base import Message, MessagePart, QueryResult
 from app.plugins.registry import plugin_registry
 
@@ -421,6 +422,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
             try:
                 ch_plugin = plugin_registry.get("channel", channel.type)
                 ch_config = decrypt_dict(channel.config_enc)
+                ch_config = resolve_recipient_ids(db, cid, channel.type, ch_config)
                 _log(
                     db,
                     job_run_id,

@@ -16,6 +16,9 @@ import type {
   DataSource,
   DataSourceCreate,
   DataSourceUpdate,
+  Identity,
+  IdentityCreate,
+  IdentityUpdate,
   JobRun,
   JobRunDetail,
   JobRunListParams,
@@ -129,6 +132,42 @@ export async function deleteChannel(id: string): Promise<void> {
 export async function testChannel(id: string): Promise<TestConnectionResult> {
   const { data } = await api.post<TestConnectionResult>(`/v1/channels/${id}/test`)
   return data
+}
+
+// ---------------------------------------------------------------------------
+// 通讯录（各通道上的用户/群标识）
+// ---------------------------------------------------------------------------
+
+/** 列出全部身份（可选 ?kind=person&channel_type=dingtalk 筛选） */
+export async function listIdentities(params?: {
+  kind?: string
+  channel_type?: string
+}): Promise<Identity[]> {
+  const { data } = await api.get<Identity[]>('/v1/identities', { params })
+  return data
+}
+
+/** 按 id 获取身份 */
+export async function getIdentity(id: string): Promise<Identity> {
+  const { data } = await api.get<Identity>(`/v1/identities/${id}`)
+  return data
+}
+
+/** 新建身份 */
+export async function createIdentity(body: IdentityCreate): Promise<Identity> {
+  const { data } = await api.post<Identity>('/v1/identities', body)
+  return data
+}
+
+/** 更新身份 */
+export async function updateIdentity(id: string, body: IdentityUpdate): Promise<Identity> {
+  const { data } = await api.put<Identity>(`/v1/identities/${id}`, body)
+  return data
+}
+
+/** 删除身份 */
+export async function deleteIdentity(id: string): Promise<void> {
+  await api.delete(`/v1/identities/${id}`)
 }
 
 // ---------------------------------------------------------------------------
