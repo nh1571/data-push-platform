@@ -8,7 +8,9 @@ Data push middleware for configuring sources, SQL/templates, delivery channels (
 > 0. **技能** `continue-data-push-dev` — **启动/继续** 与 **停止/收工**（说「继续开发推送中台」或「停止开发/收工」）  
 > 1. [`docs/DEVELOPMENT_HANDOFF.md`](docs/DEVELOPMENT_HANDOFF.md) — 进度、架构、下一优先级、开场白  
 > 2. [`docs/CONTINUE_CHECKLIST.md`](docs/CONTINUE_CHECKLIST.md) — 下次开工 5 分钟清单  
-> 3. Obsidian：`20_项目/企业数据推送中台/`（尤其 `00` 索引与 `10-开发进度与交接`）
+> 3. [`docs/COLLAB_MODULES.md`](docs/COLLAB_MODULES.md) — **功能拆分与协同边界（多人认领用）**  
+> 4. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — 本地零依赖 / 生产外置依赖  
+> 5. Obsidian：`20_项目/企业数据推送中台/`
 
 ---
 
