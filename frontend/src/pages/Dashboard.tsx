@@ -1,14 +1,17 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Button, Space, Table, Typography } from 'antd'
+import { Alert, Button, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { listJobRuns } from '../api'
 import { getErrorMessage } from '../api/client'
 import type { JobRun } from '../api/types'
+import { PageHeader } from '../components/PageHeader'
+import { TableEmpty } from '../components/TableEmpty'
 import { formatDateTime, RunStatusTag } from '../utils/status'
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const [failed, setFailed] = useState<JobRun[]>([])
   const [recent, setRecent] = useState<JobRun[]>([])
   const [loading, setLoading] = useState(false)
@@ -75,47 +78,70 @@ export function DashboardPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          工作台
-        </Typography.Title>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
-          刷新
-        </Button>
-      </Space>
+      <PageHeader
+        title="工作台"
+        description="最近失败与运行概览，快速进入执行详情。"
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+        }
+      />
 
       {error ? (
-        <Typography.Text type="danger" style={{ display: 'block', marginBottom: 12 }}>
-          {error}
-        </Typography.Text>
+        <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />
       ) : null}
 
-      <Typography.Title level={5}>失败运行（最近 10 条）</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        查看 <Link to="/job-runs?status=failed">全部失败记录</Link>
-      </Typography.Paragraph>
-      <Table
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={failed}
-        pagination={false}
-        style={{ marginBottom: 32 }}
-      />
+      <div className="surface-section">
+        <Typography.Title level={5} className="surface-section-title">
+          失败运行（最近 10 条）
+        </Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 13 }}>
+          查看 <Link to="/job-runs?status=failed">全部失败记录</Link>
+        </Typography.Paragraph>
+        <Table
+          rowKey="id"
+          size="middle"
+          loading={loading}
+          columns={columns}
+          dataSource={failed}
+          pagination={false}
+          locale={{
+            emptyText: (
+              <TableEmpty description="暂无失败运行，运行状态良好。" />
+            ),
+          }}
+        />
+      </div>
 
-      <Typography.Title level={5}>最近运行</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        查看 <Link to="/job-runs">全部执行记录</Link>
-      </Typography.Paragraph>
-      <Table
-        rowKey="id"
-        size="small"
-        loading={loading}
-        columns={columns}
-        dataSource={recent}
-        pagination={false}
-      />
+      <div className="surface-section">
+        <Typography.Title level={5} className="surface-section-title">
+          最近运行
+        </Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 13 }}>
+          查看 <Link to="/job-runs">全部执行记录</Link>
+        </Typography.Paragraph>
+        <Table
+          rowKey="id"
+          size="middle"
+          loading={loading}
+          columns={columns}
+          dataSource={recent}
+          pagination={false}
+          locale={{
+            emptyText: (
+              <TableEmpty
+                description="暂无执行记录。"
+                action={
+                  <Button type="primary" onClick={() => navigate('/editor')}>
+                    打开内容工作台
+                  </Button>
+                }
+              />
+            ),
+          }}
+        />
+      </div>
     </div>
   )
 }

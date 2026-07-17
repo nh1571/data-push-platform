@@ -1,11 +1,13 @@
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Button, Form, Select, Space, Table, Typography } from 'antd'
+import { Alert, Button, Form, Select, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { listJobRuns, listPushJobs } from '../../api'
 import { getErrorMessage } from '../../api/client'
 import type { JobRun, PushJob } from '../../api/types'
+import { PageHeader } from '../../components/PageHeader'
+import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime, RunStatusTag } from '../../utils/status'
 
 const STATUS_OPTIONS = [
@@ -127,20 +129,28 @@ export function JobRunListPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          执行记录
-        </Typography.Title>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
-          刷新
-        </Button>
-      </Space>
+      <PageHeader
+        title="执行记录"
+        description="查看任务运行历史、失败原因与重跑入口。"
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+        }
+      />
 
       <Form
         form={form}
         layout="inline"
         onFinish={onSearch}
-        style={{ marginBottom: 16, rowGap: 12 }}
+        style={{
+          marginBottom: 16,
+          rowGap: 12,
+          padding: '12px 16px',
+          background: '#fafafa',
+          borderRadius: 8,
+          border: '1px solid #f0f0f0',
+        }}
       >
         <Form.Item name="status" label="状态">
           <Select allowClear placeholder="全部" style={{ width: 140 }} options={STATUS_OPTIONS} />
@@ -159,19 +169,37 @@ export function JobRunListPage() {
           <Select allowClear placeholder="全部" style={{ width: 120 }} options={TRIGGER_OPTIONS} />
         </Form.Item>
         <Form.Item>
-          <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>
-            筛选
-          </Button>
+          <Space>
+            <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>
+              筛选
+            </Button>
+            <Button
+              onClick={() => {
+                form.resetFields()
+                setSearchParams(new URLSearchParams())
+              }}
+            >
+              重置
+            </Button>
+          </Space>
         </Form.Item>
       </Form>
 
       {error ? (
-        <Typography.Text type="danger" style={{ display: 'block', marginBottom: 12 }}>
-          {error}
-        </Typography.Text>
+        <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />
       ) : null}
 
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        locale={{
+          emptyText: (
+            <TableEmpty description="暂无匹配的执行记录，可调整筛选条件或先执行一次任务。" />
+          ),
+        }}
+      />
     </div>
   )
 }

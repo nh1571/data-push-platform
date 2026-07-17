@@ -24,9 +24,64 @@ body {
     'Microsoft YaHei',
     sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #f5f5f5;
+  background: #f5f6f8;
+  color: rgba(0, 0, 0, 0.88);
 }
 
 a {
   color: #1677ff;
+}
+
+/* ── 页头 ── */
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-header-title {
+  margin: 0 !important;
+  font-weight: 600;
+}
+
+.page-header-desc {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── 内容区卡片分区 ── */
+.surface-section {
+  margin-bottom: 24px;
+}
+
+.surface-section:last-child {
+  margin-bottom: 0;
+}
+
+.surface-section-title {
+  margin: 0 0 4px !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+}
+
+/* ── 登录页 ── */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f6f8;
+  padding: 24px;
+}
+
+.login-card {
+  width: 400px;
+  max-width: 100%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+}
+
+/* ── 编辑器全宽内容区 ── */
+.app-content-editor {
+  padding: 12px !important;
 }

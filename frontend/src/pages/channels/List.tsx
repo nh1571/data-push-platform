@@ -1,11 +1,13 @@
 import { ApiOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, message, Popconfirm, Space, Table, Typography } from 'antd'
+import { Button, message, Popconfirm, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { deleteChannel, listChannels, testChannel } from '../../api'
 import { getErrorMessage } from '../../api/client'
 import type { Channel } from '../../api/types'
+import { PageHeader } from '../../components/PageHeader'
+import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime } from '../../utils/status'
 
 export function ChannelListPage() {
@@ -58,7 +60,7 @@ export function ChannelListPage() {
       dataIndex: 'name',
       render: (name: string, row) => <Link to={`/channels/${row.id}`}>{name}</Link>,
     },
-    { title: '类型', dataIndex: 'type', width: 120 },
+    { title: '类型', dataIndex: 'type', width: 200 },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
@@ -69,6 +71,7 @@ export function ChannelListPage() {
       title: '操作',
       key: 'actions',
       width: 280,
+      fixed: 'right',
       render: (_, row) => (
         <Space>
           <Button
@@ -98,15 +101,37 @@ export function ChannelListPage() {
 
   return (
     <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          通道
-        </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/channels/new')}>
-          新建通道
-        </Button>
-      </Space>
-      <Table rowKey="id" loading={loading} columns={columns} dataSource={data} />
+      <PageHeader
+        title="通道"
+        description="配置钉钉等投递方式（Webhook / 工作通知 / OpenAPI 等），与内容解耦。"
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/channels/new')}>
+            新建通道
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        locale={{
+          emptyText: (
+            <TableEmpty
+              description="还没有通道，请先创建投递配置。"
+              action={
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => navigate('/channels/new')}
+                >
+                  新建通道
+                </Button>
+              }
+            />
+          ),
+        }}
+      />
     </div>
   )
 }

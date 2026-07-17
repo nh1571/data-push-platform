@@ -17,6 +17,9 @@ import { PushJobFormPage } from './pages/push-jobs/Form'
 import { PushJobListPage } from './pages/push-jobs/List'
 import { SettingsPage } from './pages/Settings'
 
+const FONT_FAMILY =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
 export default function App() {
   return (
     <ConfigProvider
@@ -24,7 +27,28 @@ export default function App() {
       theme={{
         token: {
           colorPrimary: '#1677ff',
-          borderRadius: 6,
+          borderRadius: 8,
+          colorBgLayout: '#F5F6F8',
+          colorBgContainer: '#ffffff',
+          colorBorderSecondary: '#f0f0f0',
+          fontFamily: FONT_FAMILY,
+          fontSize: 14,
+          controlHeight: 36,
+        },
+        components: {
+          Layout: {
+            headerHeight: 56,
+            siderBg: '#001529',
+            triggerBg: '#002140',
+          },
+          Menu: {
+            darkItemBg: '#001529',
+            darkSubMenuItemBg: '#000c17',
+          },
+          Table: {
+            headerBg: '#fafafa',
+            rowHoverBg: '#f5f8ff',
+          },
         },
       }}
     >
