@@ -1048,42 +1048,102 @@ def _html_to_png(html_doc: str, width: int = 750) -> tuple[bytes | None, str | N
         return png, path
 
 
+def _main_query_result(data_ctx: dict[str, QueryResult]) -> QueryResult | None:
+    if "main" in data_ctx:
+        return data_ctx["main"]
+    if data_ctx:
+        return next(iter(data_ctx.values()))
+    return None
+
+
+def _resolve_compose_text(template: Any, data_ctx: dict[str, QueryResult]) -> str:
+    """Resolve push-shell markdown templates with first-row {{字段}}."""
+    raw = str(template or "")
+    if not raw.strip():
+        return ""
+    return substitute_first_row(raw, _main_query_result(data_ctx)).strip()
+
+
+def _compose_include_component_md(compose: dict[str, Any], *, has_shell_text: bool) -> bool:
+    """Whether to append auto markdown projected from component tree.
+
+    Explicit ``include_component_md`` wins. Otherwise legacy:
+    ``markdown_caption`` (default True) only when no user shell text.
+    """
+    if "include_component_md" in compose:
+        return bool(compose.get("include_component_md"))
+    if has_shell_text:
+        return False
+    return compose.get("markdown_caption", True) is not False
+
+
 def artboard_to_message(
     doc: dict[str, Any],
     data_ctx: dict[str, QueryResult],
     *,
     with_image: bool = True,
 ) -> Message:
-    """Build Message from artboard + data context."""
-    md = build_artboard_markdown(doc, data_ctx)
+    """Build Message from artboard + push shell (text around canvas image).
+
+    Compose fields (``doc.compose``)::
+
+        mode: image_primary | markdown_primary | mixed | image_only
+        text_before / text_after: markdown outside the canvas image
+        title: DingTalk markdown title
+        include_component_md / markdown_caption: optional auto MD from tree
+    """
+    md_auto = build_artboard_markdown(doc, data_ctx)
     compose = dict(doc.get("compose") or {})
     mode = str(compose.get("mode") or "image_primary")
-    caption = compose.get("markdown_caption", True) is not False
+    text_before = _resolve_compose_text(compose.get("text_before"), data_ctx)
+    text_after = _resolve_compose_text(compose.get("text_after"), data_ctx)
+    has_shell = bool(text_before or text_after)
+    include_auto = _compose_include_component_md(compose, has_shell_text=has_shell)
+    auto_md = md_auto if include_auto else ""
+    title = _resolve_compose_text(compose.get("title"), data_ctx)
+    if not title:
+        title = (auto_md or md_auto or text_before or "数据推送").split("\n")[0][:80]
+
     parts: list[MessagePart] = []
 
+    def _append_text(content: str) -> None:
+        if content:
+            parts.append(MessagePart(kind="text", content=content))
+
     if mode == "markdown_primary":
-        parts.append(MessagePart(kind="text", content=md or "（空内容）"))
+        body = "\n\n".join(x for x in (text_before, auto_md or md_auto, text_after) if x)
+        parts.append(MessagePart(kind="text", content=body or "（空内容）"))
         return Message(parts=parts)
 
-    if with_image:
+    # image_primary / mixed / image_only: optional text → image → optional text
+    _append_text(text_before)
+
+    image_added = False
+    if with_image and mode != "markdown_primary":
         html_doc = build_artboard_html(doc, data_ctx)
         width = int((doc.get("artboard") or {}).get("width") or 750)
-        png, path = _html_to_png(html_doc, width=width)
+        _png, path = _html_to_png(html_doc, width=width)
         if path:
-            title = md.split("\n")[0][:80] if md else "数据推送"
             parts.append(
                 MessagePart(kind="image", content={"path": path, "title": title})
             )
-        elif mode != "mixed":
-            # no image engine — fall back to markdown
-            parts.append(MessagePart(kind="text", content=md or "（成图失败，仅文本）"))
+            image_added = True
+        elif mode == "image_only":
+            parts.append(MessagePart(kind="text", content="（成图失败）"))
+            return Message(parts=parts)
+        elif mode != "mixed" and not has_shell and not auto_md:
+            # no image engine and nothing else — fall back to component md
+            parts.append(MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）"))
             return Message(parts=parts)
 
-    if mode == "mixed" or caption or not parts:
-        if md:
-            parts.append(MessagePart(kind="text", content=md))
-        elif not parts:
-            parts.append(MessagePart(kind="text", content="（空内容）"))
+    if text_after:
+        _append_text(text_after)
+    elif auto_md and (mode == "mixed" or include_auto or not image_added):
+        # Legacy / mixed: component markdown as caption when user did not set text_after
+        _append_text(auto_md)
+
+    if not parts:
+        parts.append(MessagePart(kind="text", content="（空内容）"))
 
     return Message(parts=parts)
 

@@ -112,6 +112,39 @@ def test_chart_bar_and_pie_html() -> None:
     assert "comp-chart" in pie_html or "<img" in pie_html or "<svg" in pie_html
 
 
+def test_push_shell_text_around_image() -> None:
+    """Assemble-push: text_before / text_after wrap the canvas image."""
+    from app.modules.studio.compile import artboard_to_message
+
+    doc = {
+        "artboard": {"width": 750, "show_chrome": False},
+        "tree": {
+            "type": "Container",
+            "children": [
+                {
+                    "type": "Text",
+                    "props": {"text": "画布内"},
+                }
+            ],
+        },
+        "compose": {
+            "mode": "image_primary",
+            "include_component_md": False,
+            "title": "{{院区}}日报",
+            "text_before": "**【{{院区}}】今日简报**",
+            "text_after": "共 {{门诊量}} 人次",
+        },
+    }
+    msg = artboard_to_message(doc, {"main": _sample_result()}, with_image=False)
+    kinds = [p.kind for p in msg.parts]
+    texts = [str(p.content) for p in msg.parts if p.kind == "text"]
+    assert "text" in kinds
+    assert any("演示院区" in t for t in texts)
+    assert any("1200" in t for t in texts)
+    # without image engine / with_image=False, shell text still present
+    assert len(texts) >= 1
+
+
 def test_free_compose_layout_absolute_html() -> None:
     """Assemble free-canvas coords render as absolute positioned shells."""
     doc = {

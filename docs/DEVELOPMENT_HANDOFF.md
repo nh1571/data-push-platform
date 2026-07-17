@@ -424,14 +424,14 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：组装画布自由拖拽/缩放/风格（待用户验）
+进行中：组装推送步骤（图外文案壳）待用户验
 阻塞：无
 上次完成：
-  - ComposeCanvas：绝对定位拖拽 + 右下角缩放
-  - 右侧风格预设（卡片/无边框/描边/阴影）+ X/Y/宽/高/圆角/内边距/色
-  - 后端 compile 绝对布局（compose_x/y/w/h + style）写入终片 HTML/PNG
-  - SQL 参数先搁置，后期整体调
-建议下一动作：浏览器走一遍 做组件→组装拖放→预览终片；反馈版式问题
+  - 工作流 5 步：数据→做组件→组装画布→组装推送→预览推送
+  - compose.text_before / text_after / title + include_component_md
+  - 后端 artboard_to_message：图前文 → 画布图 → 图后文
+  - 画布实时组件渲染（非截图缩放）
+建议下一动作：走一遍组装推送写文案 + 试推；看钉钉图文顺序是否符合预期
 
 环境：mysql+redis；API :8000 / 前端 :5173 应在跑
 参考：Obsidian 20–21

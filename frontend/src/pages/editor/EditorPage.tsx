@@ -1,9 +1,10 @@
 /**
- * Milestone workbench:
+ * Content workbench:
  * 1 数据
- * 2 做组件（表单 + 大预览）→ 加入小清单
- * 3 画布组装（可视化位置/大小/配色）
- * 4 预览最终推送成片（进入自动编译）
+ * 2 做组件 → 清单
+ * 3 组装画布（自由布局成图）
+ * 4 组装推送（图外 Markdown 文案壳）
+ * 5 预览推送 / 试推
  */
 import {
   ArrowLeftOutlined,
@@ -127,13 +128,14 @@ const CHART_TYPES = [
   { value: 'pie', label: '饼图' },
 ]
 
-type StepKey = 'data' | 'make' | 'compose' | 'preview'
+type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
 
 const STEPS = [
   { key: 'data' as const, title: '1. 数据' },
   { key: 'make' as const, title: '2. 做组件' },
   { key: 'compose' as const, title: '3. 组装画布' },
-  { key: 'preview' as const, title: '4. 预览推送' },
+  { key: 'message' as const, title: '4. 组装推送' },
+  { key: 'preview' as const, title: '5. 预览推送' },
 ]
 
 type DraftForm = {
@@ -572,9 +574,16 @@ export function EditorPage() {
     [dataSourceId, sql],
   )
 
-  // Auto final preview when entering step 4
+  const patchCompose = useCallback((patch: NonNullable<ArtboardDoc['compose']>) => {
+    setArtboard((prev) => ({
+      ...prev,
+      compose: { ...prev.compose, ...patch },
+    }))
+  }, [])
+
+  // Compile when entering message (shell) or final preview
   useEffect(() => {
-    if (step !== 'preview') return
+    if (step !== 'preview' && step !== 'message') return
     if (!dataSourceId) {
       setFinalError('请先完成数据源选择与取数')
       return
@@ -596,7 +605,9 @@ export function EditorPage() {
         setFinalError(getErrorMessage(e))
       })
       .finally(() => setFinalLoading(false))
-  }, [step, cart.length, dataSourceId, buildDoc, runCompile])
+    // Re-run when step changes or cart changes; text edits use local substitute for shell preview
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, cart.length, dataSourceId])
 
   const activeParamDefs = useMemo((): SqlParamDef[] => {
     const ds = datasets.find((d) => d.id === activeDatasetId)
@@ -931,6 +942,39 @@ export function EditorPage() {
   const stepIndex = STEPS.findIndex((s) => s.key === step)
   const selectedCompose = selectedComposeId && tree ? findNode(tree, selectedComposeId) : null
   const canvasWidth = Number(artboard.artboard?.width) || 750
+
+  /** Local substitute for push shell text (instant, no recompile). */
+  const shellPreview = useMemo(() => {
+    const row = firstRowMap(
+      { main: { columns: fieldsByDataset.main || [], rows: rowsByDataset.main || [] } },
+      'main',
+    )
+    // fallback to active dataset first row if main empty
+    const row2 =
+      row ||
+      firstRowMap(
+        {
+          [activeDatasetId]: {
+            columns: fieldsByDataset[activeDatasetId] || [],
+            rows: rowsByDataset[activeDatasetId] || [],
+          },
+        },
+        activeDatasetId,
+      )
+    return {
+      title: substituteRow(String(artboard.compose?.title || name || '数据推送'), row2),
+      before: substituteRow(String(artboard.compose?.text_before || ''), row2),
+      after: substituteRow(String(artboard.compose?.text_after || ''), row2),
+    }
+  }, [
+    artboard.compose?.title,
+    artboard.compose?.text_before,
+    artboard.compose?.text_after,
+    fieldsByDataset,
+    rowsByDataset,
+    activeDatasetId,
+    name,
+  ])
 
   const patchComposeLayout = useCallback((id: string, layout: Partial<ComposeLayout>) => {
     setArtboard((prev) => {
@@ -1989,12 +2033,13 @@ export function EditorPage() {
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('make')}>← 做组件</Button>
-                <Button type="primary" disabled={!cart.length} onClick={() => setStep('preview')}>
-                  预览最终推送 →
+                <Button type="primary" disabled={!cart.length} onClick={() => setStep('message')}>
+                  组装推送 →
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                画布内是真实组件（图表/表/KPI 等会随缩放重排），不是截图。顶栏把手拖动 · 右下角改区域大小 · 右侧选风格
+                本步只排版<strong>推送图</strong>。图外说明文字请在下一步「组装推送」中写。
+                画布内是真实组件（随缩放重排）。把手拖动 · 右下角改大小 · 右侧选风格
               </Typography.Paragraph>
               <ComposeCanvas
                 canvasWidth={canvasWidth}
@@ -2251,18 +2296,19 @@ export function EditorPage() {
           </div>
         )}
 
-        {/* ========== 4 最终预览 ========== */}
-        {step === 'preview' && (
-          <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-            <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        {/* ========== 4 组装推送（图 + 外层文案） ========== */}
+        {step === 'message' && (
+          <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
+            <div style={{ flex: 1, overflow: 'auto', padding: 16, maxWidth: 560 }}>
               <Space style={{ marginBottom: 12 }} wrap>
-                <Button onClick={() => setStep('compose')}>← 组装</Button>
+                <Button onClick={() => setStep('compose')}>← 组装画布</Button>
+                <Button type="primary" onClick={() => setStep('preview')}>
+                  预览推送 →
+                </Button>
                 <Button
-                  type="primary"
+                  size="small"
                   loading={finalLoading}
                   onClick={() => {
-                    setStep('preview')
-                    // force re-run by toggling
                     setFinalLoading(true)
                     setFinalError(null)
                     runCompile(buildDoc())
@@ -2275,7 +2321,248 @@ export function EditorPage() {
                       .finally(() => setFinalLoading(false))
                   }}
                 >
-                  重新生成推送图
+                  刷新画布图
+                </Button>
+              </Space>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                推送载体通常是<strong>钉钉 Markdown</strong>：可在画布成图<strong>上方 / 下方</strong>
+                写说明文字。字段用 {'{{列名}}'}，取主查询首行替换。
+              </Typography.Paragraph>
+
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text type="secondary">消息标题（钉钉 title）</Typography.Text>
+                <Input
+                  style={{ marginTop: 4 }}
+                  value={String(artboard.compose?.title || '')}
+                  onChange={(e) => patchCompose({ title: e.target.value })}
+                  placeholder="数据推送"
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography.Text type="secondary">图前文案（Markdown）</Typography.Text>
+                  <Select
+                    size="small"
+                    placeholder="插入字段"
+                    style={{ width: 140 }}
+                    options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
+                      (c) => ({ value: c, label: c }),
+                    )}
+                    onChange={(col) => {
+                      const cur = String(artboard.compose?.text_before || '')
+                      patchCompose({ text_before: `${cur}{{${col}}}` })
+                    }}
+                    allowClear={false}
+                    value={undefined}
+                  />
+                </div>
+                <Input.TextArea
+                  style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
+                  rows={5}
+                  value={String(artboard.compose?.text_before || '')}
+                  onChange={(e) => patchCompose({ text_before: e.target.value })}
+                  placeholder={'例如：\n**【{{院区}}】运营日报**\n\n今日要点如下：'}
+                />
+              </div>
+
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="中间固定插入「组装画布」生成的推送图"
+                description="图内布局请回第 3 步调整；本步只编排图外文字。"
+              />
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography.Text type="secondary">图后文案（Markdown）</Typography.Text>
+                  <Select
+                    size="small"
+                    placeholder="插入字段"
+                    style={{ width: 140 }}
+                    options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
+                      (c) => ({ value: c, label: c }),
+                    )}
+                    onChange={(col) => {
+                      const cur = String(artboard.compose?.text_after || '')
+                      patchCompose({ text_after: `${cur}{{${col}}}` })
+                    }}
+                    value={undefined}
+                  />
+                </div>
+                <Input.TextArea
+                  style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
+                  rows={4}
+                  value={String(artboard.compose?.text_after || '')}
+                  onChange={(e) => patchCompose({ text_after: e.target.value })}
+                  placeholder="例如：数据仅供内部参考，有问题请联系数据中心。"
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <Switch
+                  checked={Boolean(artboard.compose?.include_component_md)}
+                  onChange={(v) => patchCompose({ include_component_md: v, markdown_caption: v })}
+                />{' '}
+                <Typography.Text type="secondary">
+                  额外附带组件树 Markdown 摘要（一般不需要，图已包含内容）
+                </Typography.Text>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text type="secondary">推送模式</Typography.Text>
+                <Select
+                  style={{ width: '100%', marginTop: 4 }}
+                  value={String(artboard.compose?.mode || 'image_primary')}
+                  onChange={(v) => patchCompose({ mode: v })}
+                  options={[
+                    { value: 'image_primary', label: '图为主（推荐：文案 + 图 + 文案）' },
+                    { value: 'image_only', label: '仅推送图' },
+                    { value: 'markdown_primary', label: '仅 Markdown 文案（不成图）' },
+                    { value: 'mixed', label: '混合（图 + 组件 Markdown）' },
+                  ]}
+                />
+              </div>
+            </div>
+
+            {/* 右侧：消息结构预览 */}
+            <div
+              style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: 16,
+                background: '#f0f2f5',
+                borderLeft: '1px solid #f0f0f0',
+              }}
+            >
+              <Typography.Title level={5} style={{ marginTop: 0 }}>
+                推送消息预览
+              </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+                模拟钉钉会话中的一条消息：上图下文顺序与最终 parts 一致
+              </Typography.Paragraph>
+              <div
+                style={{
+                  maxWidth: 480,
+                  margin: '0 auto',
+                  background: '#fff',
+                  borderRadius: 8,
+                  padding: 16,
+                  border: '1px solid #e8e8e8',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                }}
+              >
+                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
+                  标题：{shellPreview.title || '数据推送'}
+                </div>
+                {shellPreview.before ? (
+                  <div
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      fontSize: 14,
+                      lineHeight: 1.6,
+                      marginBottom: 12,
+                      color: '#222',
+                    }}
+                  >
+                    {shellPreview.before}
+                  </div>
+                ) : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                    （无图前文案）
+                  </Typography.Text>
+                )}
+
+                {String(artboard.compose?.mode || '') === 'markdown_primary' ? (
+                  <Alert type="warning" showIcon message="当前为「仅 Markdown」，不会附带画布图" />
+                ) : (
+                  <div
+                    style={{
+                      border: '1px dashed #d9d9d9',
+                      borderRadius: 6,
+                      padding: 8,
+                      background: '#fafafa',
+                      marginBottom: 12,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>📷 画布推送图</div>
+                    <RenderPreview
+                      loading={finalLoading}
+                      image={finalPreview?.image_base64}
+                      html={null}
+                      error={finalPreview?.image_error || finalError}
+                      emptyHint="点「刷新画布图」生成"
+                      minHeight={200}
+                    />
+                  </div>
+                )}
+
+                {shellPreview.after ? (
+                  <div
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      fontSize: 14,
+                      lineHeight: 1.6,
+                      color: '#222',
+                    }}
+                  >
+                    {shellPreview.after}
+                  </div>
+                ) : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    （无图后文案）
+                  </Typography.Text>
+                )}
+
+                {artboard.compose?.include_component_md ? (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                      + 组件 Markdown 摘要（开启时附加）
+                    </Typography.Text>
+                    <pre
+                      style={{
+                        fontSize: 11,
+                        maxHeight: 120,
+                        overflow: 'auto',
+                        background: '#fafafa',
+                        padding: 8,
+                        borderRadius: 4,
+                      }}
+                    >
+                      {finalPreview?.markdown_text || '（编译后显示）'}
+                    </pre>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========== 5 最终预览 ========== */}
+        {step === 'preview' && (
+          <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
+            <div style={{ maxWidth: 900, margin: '0 auto' }}>
+              <Space style={{ marginBottom: 12 }} wrap>
+                <Button onClick={() => setStep('message')}>← 组装推送</Button>
+                <Button
+                  type="primary"
+                  loading={finalLoading}
+                  onClick={() => {
+                    setFinalLoading(true)
+                    setFinalError(null)
+                    runCompile(buildDoc())
+                      .then((res) => {
+                        setFinalPreview(res)
+                        if (!res.image_base64 && res.image_error)
+                          setFinalError(res.image_error)
+                      })
+                      .catch((e) => setFinalError(getErrorMessage(e)))
+                      .finally(() => setFinalLoading(false))
+                  }}
+                >
+                  重新编译
                 </Button>
                 <Button loading={pushing} onClick={() => void onTestPush()}>
                   试推
@@ -2287,39 +2574,60 @@ export function EditorPage() {
               ) : null}
 
               <Typography.Title level={5}>最终推送效果</Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
+                图前 / 图 / 图后结构与钉钉投递一致（OpenAPI 图文分 part；Webhook 会拼成 Markdown）
+              </Typography.Paragraph>
+
               <div
                 style={{
                   background: '#fff',
                   borderRadius: 8,
                   padding: 16,
                   border: '1px solid #e8e8e8',
+                  marginBottom: 16,
                 }}
               >
+                {shellPreview.before ? (
+                  <div style={{ whiteSpace: 'pre-wrap', marginBottom: 12, lineHeight: 1.6 }}>
+                    {shellPreview.before}
+                  </div>
+                ) : null}
                 <RenderPreview
                   loading={finalLoading}
                   image={finalPreview?.image_base64}
-                  html={finalPreview?.html}
+                  html={
+                    artboard.compose?.mode === 'markdown_primary'
+                      ? null
+                      : finalPreview?.html
+                  }
                   error={finalPreview?.image_error || finalError}
                   emptyHint="正在生成或清单为空"
-                  minHeight={400}
+                  minHeight={320}
                 />
+                {shellPreview.after ? (
+                  <div style={{ whiteSpace: 'pre-wrap', marginTop: 12, lineHeight: 1.6 }}>
+                    {shellPreview.after}
+                  </div>
+                ) : null}
               </div>
 
-              {finalPreview?.markdown_text ? (
-                <div style={{ marginTop: 16 }}>
-                  <Typography.Text type="secondary">文案投影（Markdown）</Typography.Text>
-                  <Input.TextArea
-                    style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
-                    rows={5}
-                    readOnly
-                    value={finalPreview.markdown_text}
-                  />
+              {finalPreview?.parts?.length ? (
+                <div style={{ marginBottom: 16 }}>
+                  <Typography.Text type="secondary">消息 parts</Typography.Text>
+                  <div style={{ marginTop: 6 }}>
+                    {finalPreview.parts.map((p, i) => (
+                      <Tag key={i} color={p.kind === 'image' ? 'blue' : 'default'}>
+                        {i + 1}. {p.kind}
+                        {p.content_preview ? ` · ${p.content_preview.slice(0, 40)}` : ''}
+                      </Tag>
+                    ))}
+                  </div>
                 </div>
               ) : null}
 
               <div
                 style={{
-                  marginTop: 16,
+                  marginTop: 8,
                   background: '#fff',
                   padding: 16,
                   borderRadius: 8,

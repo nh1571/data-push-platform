@@ -38,7 +38,14 @@ def empty_artboard(*, width: int = 750, theme_color: str = "#1677ff") -> dict[st
             "children": [],
             "binding": {},
         },
-        "compose": {"mode": "image_primary", "markdown_caption": True},
+        "compose": {
+            "mode": "image_primary",
+            "markdown_caption": False,
+            "include_component_md": False,
+            "title": "数据推送",
+            "text_before": "",
+            "text_after": "",
+        },
     }
 
 
@@ -175,7 +182,14 @@ def default_daily_artboard(*, theme_color: str = "#1677ff") -> dict[str, Any]:
                 },
             ],
         },
-        "compose": {"mode": "image_primary", "markdown_caption": True},
+        "compose": {
+            "mode": "image_primary",
+            "markdown_caption": False,
+            "include_component_md": False,
+            "title": "数据推送",
+            "text_before": "",
+            "text_after": "",
+        },
     }
 
 
@@ -235,5 +249,12 @@ def default_alert_artboard(*, theme_color: str = "#ff4d4f") -> dict[str, Any]:
                 },
             ],
         },
-        "compose": {"mode": "image_primary", "markdown_caption": True},
+        "compose": {
+            "mode": "image_primary",
+            "markdown_caption": False,
+            "include_component_md": False,
+            "title": "数据推送",
+            "text_before": "",
+            "text_after": "",
+        },
     }

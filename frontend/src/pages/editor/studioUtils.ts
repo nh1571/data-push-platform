@@ -122,7 +122,14 @@ export function defaultDailyArtboard(): ArtboardDoc {
         },
       ],
     },
-    compose: { mode: 'image_primary', markdown_caption: true },
+    compose: {
+      mode: 'image_primary',
+      markdown_caption: false,
+      include_component_md: false,
+      title: '运营日报',
+      text_before: '**【{{院区}}】运营日报**\n\n以下为今日核心指标：',
+      text_after: '数据来源：数据推送中台 · 仅供内部参考',
+    },
   }
 }
 
@@ -179,7 +186,14 @@ export function defaultAlertArtboard(): ArtboardDoc {
         },
       ],
     },
-    compose: { mode: 'image_primary', markdown_caption: true },
+    compose: {
+      mode: 'image_primary',
+      markdown_caption: false,
+      include_component_md: false,
+      title: '指标告警',
+      text_before: '⚠ **指标告警**\n\n监测到异常，请关注：',
+      text_after: '告警由数据推送中台自动生成',
+    },
   }
 }
 
@@ -202,7 +216,14 @@ export function emptyArtboard(): ArtboardDoc {
       children: [],
       binding: {},
     },
-    compose: { mode: 'image_primary', markdown_caption: true },
+    compose: {
+      mode: 'image_primary',
+      markdown_caption: false,
+      include_component_md: false,
+      title: '数据推送',
+      text_before: '',
+      text_after: '',
+    },
   }
 }
 

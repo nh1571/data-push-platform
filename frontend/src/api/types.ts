@@ -326,7 +326,20 @@ export interface ArtboardDoc {
   }
   datasets?: StudioDataset[]
   tree?: StudioNode
-  compose?: { mode?: string; markdown_caption?: boolean }
+  /** Push message shell: canvas image + optional markdown around it. */
+  compose?: {
+    mode?: 'image_primary' | 'markdown_primary' | 'mixed' | 'image_only' | string
+    /** @deprecated use include_component_md / text_before|after */
+    markdown_caption?: boolean
+    /** Auto-append markdown projected from component tree */
+    include_component_md?: boolean
+    /** DingTalk markdown title */
+    title?: string
+    /** Markdown above the canvas image (supports {{字段}}) */
+    text_before?: string
+    /** Markdown below the canvas image (supports {{字段}}) */
+    text_after?: string
+  }
 }
 
 export interface StudioMeta {
