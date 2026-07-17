@@ -569,6 +569,207 @@ export function fieldDropSlots(node: StudioNode): { role: FieldBindRole; label: 
 
 export const FIELD_DND_MIME = 'application/x-studio-field'
 
+// ---------------------------------------------------------------------------
+// Live data resolution (绑定后显示「值」不是「列名」)
+// ---------------------------------------------------------------------------
+
+export type DatasetPreview = {
+  columns: string[]
+  rows: unknown[][]
+}
+
+export type DataPreviewCtx = Record<string, DatasetPreview>
+
+export function firstRowMap(
+  ctx: DataPreviewCtx,
+  datasetId: string,
+): Record<string, unknown> | null {
+  const ds = ctx[datasetId]
+  if (!ds || !ds.columns?.length || !ds.rows?.length) return null
+  const row = ds.rows[0] || []
+  const out: Record<string, unknown> = {}
+  ds.columns.forEach((c, i) => {
+    out[c] = row[i]
+  })
+  return out
+}
+
+export function substituteRow(template: string, row: Record<string, unknown> | null): string {
+  if (!template) return ''
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name: string) => {
+    const key = name.trim()
+    if (!row || !(key in row)) return `{{${key}}}`
+    const v = row[key]
+    return v === null || v === undefined ? '' : String(v)
+  })
+}
+
+/** Whether a content component has enough binding to show data. */
+export function isComponentBound(node: StudioNode): boolean {
+  const t = String(node.type)
+  const b = node.binding || {}
+  if (t === 'Kpi') return !!b.value_column
+  if (t === 'Chart') return !!(b.category_column && b.value_column)
+  if (t === 'Table') return true // whole dataset
+  if (t === 'Text' || t === 'Alert') {
+    const text = String(node.props?.text || '')
+    return /\{\{/.test(text) || text.length > 0
+  }
+  return t === 'Divider' || t === 'Container'
+}
+
+export type LiveComponentView = {
+  title: string
+  bound: boolean
+  /** Real data line(s) for UI — never just the column name as fake value */
+  primary: string
+  secondary?: string
+  warning?: string
+}
+
+export function liveComponentView(
+  node: StudioNode,
+  ctx: DataPreviewCtx,
+): LiveComponentView {
+  const t = String(node.type)
+  const b = node.binding || {}
+  const dsId = String(b.dataset_id || 'main')
+  const ds = ctx[dsId]
+  const row = firstRowMap(ctx, dsId)
+  const typeLabel = nodeLabel(node)
+
+  if (t === 'Kpi') {
+    const col = String(b.value_column || '')
+    const label = String(b.label || node.props?.label || col || '指标')
+    if (!col) {
+      return {
+        title: 'KPI',
+        bound: false,
+        primary: '未绑定',
+        secondary: '请把数值字段拖到「指标值」槽',
+        warning: '未绑定字段',
+      }
+    }
+    if (!row) {
+      return {
+        title: label,
+        bound: true,
+        primary: '—',
+        secondary: `已绑字段「${col}」· 请先对该数据集取数`,
+        warning: '无预览数据',
+      }
+    }
+    const val = row[col]
+    return {
+      title: label,
+      bound: true,
+      primary: val === null || val === undefined ? 'null' : String(val),
+      secondary: `来自 ${dsId}.${col}（第 1 行）`,
+    }
+  }
+
+  if (t === 'Text' || t === 'Alert') {
+    const raw = String(node.props?.text || '')
+    if (!raw) {
+      return { title: t === 'Alert' ? '告警' : '文案', bound: false, primary: '（空文案）', warning: '未填写' }
+    }
+    const resolved = substituteRow(raw, row)
+    const hasPh = /\{\{/.test(raw)
+    return {
+      title: t === 'Alert' ? '告警条' : '文案',
+      bound: true,
+      primary: resolved,
+      secondary: hasPh
+        ? row
+          ? '占位符已用第 1 行替换'
+          : '含 {{字段}}，取数后显示实值'
+        : '固定文案',
+      warning: hasPh && !row ? '无预览数据' : undefined,
+    }
+  }
+
+  if (t === 'Chart') {
+    const cat = String(b.category_column || '')
+    const val = String(b.value_column || '')
+    const ct = String(node.props?.chart_type || 'bar')
+    const map: Record<string, string> = { bar: '柱状图', pie: '饼图', line: '折线图' }
+    if (!cat || !val) {
+      return {
+        title: map[ct] || '图表',
+        bound: false,
+        primary: '未绑定完整',
+        secondary: '需要：分类字段 + 数值字段',
+        warning: '未绑定字段',
+      }
+    }
+    if (!ds?.rows?.length) {
+      return {
+        title: String(node.props?.title || map[ct]),
+        bound: true,
+        primary: `${cat} → ${val}`,
+        secondary: `数据集 ${dsId} · 请先取数看系列`,
+        warning: '无预览数据',
+      }
+    }
+    const ci = ds.columns.indexOf(cat)
+    const vi = ds.columns.indexOf(val)
+    const samples: string[] = []
+    for (const r of ds.rows.slice(0, 3)) {
+      const a = ci >= 0 ? r[ci] : ''
+      const v = vi >= 0 ? r[vi] : ''
+      samples.push(`${a}: ${v}`)
+    }
+    return {
+      title: String(node.props?.title || map[ct]),
+      bound: true,
+      primary: `${ds.rows.length} 个数据点`,
+      secondary: samples.join(' · '),
+    }
+  }
+
+  if (t === 'Table') {
+    if (!ds?.rows) {
+      return {
+        title: '数据表',
+        bound: true,
+        primary: `数据集 ${dsId}`,
+        secondary: '请先取数',
+        warning: '无预览数据',
+      }
+    }
+    return {
+      title: '数据表',
+      bound: true,
+      primary: `${ds.rows.length} 行 × ${ds.columns.length} 列`,
+      secondary: ds.columns.slice(0, 6).join(', ') + (ds.columns.length > 6 ? '…' : ''),
+    }
+  }
+
+  if (t === 'Container') {
+    const n = (node.children || []).length
+    return {
+      title: String(node.props?.direction) === 'row' ? '横向容器' : '纵向容器',
+      bound: true,
+      primary: `${n} 个子组件`,
+      secondary: '用于组装布局',
+    }
+  }
+
+  return { title: typeLabel, bound: isComponentBound(node), primary: typeLabel }
+}
+
+/** Flat list of content components for the 「组件」 step (includes containers). */
+export function listComponentInstances(root: StudioNode | undefined): StudioNode[] {
+  if (!root) return []
+  const out: StudioNode[] = []
+  const walk = (n: StudioNode) => {
+    if (n.id !== 'root') out.push(n)
+    for (const ch of n.children || []) walk(ch)
+  }
+  walk(root)
+  return out
+}
+
 export function extractArtboardFromJob(renderSpec: unknown): ArtboardDoc | null {
   if (!renderSpec || typeof renderSpec !== 'object' || Array.isArray(renderSpec)) return null
   const spec = renderSpec as Record<string, unknown>
