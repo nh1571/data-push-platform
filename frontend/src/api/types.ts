@@ -393,9 +393,29 @@ export interface StudioDataset {
   param_values?: Record<string, string>
 }
 
+/** 单个推送画布（可有多个；组装推送可组合） */
+export interface StudioCanvasBoard {
+  id: string
+  name: string
+  width?: number
+  show_chrome?: boolean
+  chrome_title?: string
+  theme?: { pack?: string; color?: string; table_style?: string }
+  /** 该画布的组件树（root Container + 清单子节点） */
+  tree: StudioNode
+}
+
+/**
+ * 推送消息段落：文案 或 某一画布成图。
+ * 顺序即钉钉消息 parts 顺序。
+ */
+export type StudioComposeSegment =
+  | { id: string; type: 'text'; html?: string }
+  | { id: string; type: 'canvas'; canvas_id: string }
+
 /**
  * 完整画板文档，序列化进 PushJob.render_spec。
- * 含主题/画布尺寸、多数据集、组件树，以及推送外壳 compose。
+ * 含主题/画布尺寸、多数据集、多画布、组件树，以及推送外壳 compose。
  */
 export interface ArtboardDoc {
   version?: number
@@ -410,10 +430,13 @@ export interface ArtboardDoc {
     chrome_title?: string
   }
   datasets?: StudioDataset[]
+  /** @deprecated 请用 canvases；保留以兼容旧任务 */
   tree?: StudioNode
+  /** 多画布列表（推荐） */
+  canvases?: StudioCanvasBoard[]
   /**
-   * 推送消息外壳：画布图 + 图上下方可选富文本。
-   * 正式推送时 text_before/after（HTML）会转成钉钉 Markdown。
+   * 推送消息外壳：多画布图 + 交错富文本。
+   * 正式推送时 HTML 文案会转成钉钉 Markdown 子集。
    */
   compose?: {
     mode?: 'image_primary' | 'markdown_primary' | 'mixed' | 'image_only' | string
@@ -424,17 +447,17 @@ export interface ArtboardDoc {
     /** 钉钉 markdown 标题（纯文本） */
     title?: string
     /**
-     * 画布图上方富文本（Quill HTML；支持 {{字段}}）。
-     * 发送时转换为钉钉 Markdown。
+     * @deprecated 优先用 segments；兼容单画布时的图前文案
      */
     text_before?: string
     /**
-     * 画布图下方富文本（Quill HTML；支持 {{字段}}）。
-     * 发送时转换为钉钉 Markdown。
+     * @deprecated 优先用 segments；兼容单画布时的图后文案
      */
     text_after?: string
-    /** text_before/after 的内容格式；使用富文本编辑器时默认为 html */
+    /** text 的内容格式；使用富文本编辑器时默认为 html */
     text_format?: 'html' | 'markdown' | string
+    /** 消息段落顺序（文案 / 画布交错） */
+    segments?: StudioComposeSegment[]
   }
 }
 

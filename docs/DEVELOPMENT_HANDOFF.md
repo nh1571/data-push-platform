@@ -453,21 +453,21 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：公开仓协同基建就绪（文档+技能+产品笔记入库）
+进行中：feature/studio-realtime-dingtalk-multicanvas（组装推送实时预览+多画布）
 阻塞：无
 上次完成：
-  - GitHub Public：https://github.com/nh1571/data-push-platform
-  - Obsidian 笔记同步至 docs/product/
-  - 分支规范 docs/COLLAB_GIT.md（主干+短功能分支，非永久分工分支）
-  - Agent 技能 data-push-collab（.grok/skills + 用户级副本）
-  - 本地 SQLite 零依赖 ./scripts/dev.sh
+  - 组装推送：钉钉手机实时预览（本地 Live，不走 Playwright）
+  - 钉钉 MD 子集渲染（dingtalkMd.ts / 后端 html_md）
+  - 多画布：compose tabs + compose.segments 组合文案/画布
+  - 后端 artboard_to_message 按 segments 输出多图+文案
+  - 单测 test_multi_canvas_segments_message_order；前端 build 通过
 建议下一动作：
-  1) 三人填 COLLAB_MODULES 认领表
-  2) 各从 main 开 feature/<lane>-* 做第一批任务
-  3) 参数 UI 后期整体调
+  1) 浏览器验收：第3步多画布 → 第4步段落排序/实时预览 → 第5步编译
+  2) push 分支并开 PR → main
+  3) 可选：preview 步也用多图 parts 展示；参数 UI 后期
 
-本地：./scripts/dev.sh
-远程：main
+本地：API:8000 FE:5173 已在跑（APP_ENV=local）
+分支：feature/studio-realtime-dingtalk-multicanvas
 Agent：data-push-collab + continue-data-push-dev
 ```
 

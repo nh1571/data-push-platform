@@ -199,6 +199,58 @@ def test_free_compose_layout_absolute_html() -> None:
     assert "height:80px" in html
 
 
+def test_multi_canvas_segments_message_order() -> None:
+    """多画布 + segments：文案与画布按顺序组成 parts。"""
+    from app.modules.studio.compile import artboard_to_message, list_canvases
+
+    doc = {
+        "artboard": {"width": 750, "show_chrome": False},
+        "canvases": [
+            {
+                "id": "c1",
+                "name": "画布A",
+                "tree": {
+                    "type": "Container",
+                    "children": [{"type": "Text", "props": {"text": "图A"}}],
+                },
+            },
+            {
+                "id": "c2",
+                "name": "画布B",
+                "tree": {
+                    "type": "Container",
+                    "children": [{"type": "Text", "props": {"text": "图B"}}],
+                },
+            },
+        ],
+        "tree": {
+            "type": "Container",
+            "children": [{"type": "Text", "props": {"text": "legacy"}}],
+        },
+        "compose": {
+            "mode": "image_primary",
+            "include_component_md": False,
+            "title": "多图画报",
+            "segments": [
+                {"id": "s1", "type": "text", "html": "开场 {{院区}}"},
+                {"id": "s2", "type": "canvas", "canvas_id": "c1"},
+                {"id": "s3", "type": "text", "html": "中间说明"},
+                {"id": "s4", "type": "canvas", "canvas_id": "c2"},
+                {"id": "s5", "type": "text", "html": "结尾"},
+            ],
+        },
+    }
+    assert len(list_canvases(doc)) == 2
+    msg = artboard_to_message(doc, {"main": _sample_result()}, with_image=False)
+    texts = [str(p.content) for p in msg.parts if p.kind == "text"]
+    assert any("演示院区" in t for t in texts)
+    assert any("中间说明" in t for t in texts)
+    assert any("结尾" in t for t in texts)
+    # with_image=False：不应有 image parts，但文案顺序保留
+    assert all(p.kind == "text" for p in msg.parts)
+    assert texts[0].find("演示院区") >= 0
+
+
 def test_design_to_artboard_migration() -> None:
     design = {
         "output_mode": "image",

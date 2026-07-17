@@ -1047,11 +1047,76 @@ def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str
     return []
 
 
+def list_canvases(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """列出画布；兼容仅有 ``tree`` 的旧文档（升为单画布）。"""
+    raw = doc.get("canvases")
+    if isinstance(raw, list) and raw:
+        out: list[dict[str, Any]] = []
+        for i, c in enumerate(raw):
+            if not isinstance(c, dict):
+                continue
+            out.append(
+                {
+                    **c,
+                    "id": str(c.get("id") or f"canvas_{i}"),
+                    "name": str(c.get("name") or f"画布 {i + 1}"),
+                    "tree": c.get("tree")
+                    if isinstance(c.get("tree"), dict)
+                    else {"type": "Container", "children": []},
+                }
+            )
+        if out:
+            return out
+    tree = doc.get("tree") or {"type": "Container", "children": []}
+    ab = dict(doc.get("artboard") or {})
+    return [
+        {
+            "id": "canvas_main",
+            "name": "画布 1",
+            "width": ab.get("width") or 750,
+            "show_chrome": ab.get("show_chrome"),
+            "chrome_title": ab.get("chrome_title"),
+            "theme": ab.get("theme"),
+            "tree": tree if isinstance(tree, dict) else {"type": "Container", "children": []},
+        }
+    ]
+
+
+def canvas_to_doc(parent: dict[str, Any], canvas: dict[str, Any]) -> dict[str, Any]:
+    """将单个画布提升为可独立编译的 artboard 文档。"""
+    ab = dict(parent.get("artboard") or {})
+    theme = canvas.get("theme") if isinstance(canvas.get("theme"), dict) else ab.get("theme")
+    ab = {
+        **ab,
+        "width": canvas.get("width") or ab.get("width") or 750,
+        "show_chrome": canvas.get("show_chrome")
+        if canvas.get("show_chrome") is not None
+        else ab.get("show_chrome"),
+        "chrome_title": canvas.get("chrome_title") or ab.get("chrome_title"),
+        "theme": theme,
+    }
+    tree = canvas.get("tree") if isinstance(canvas.get("tree"), dict) else {
+        "type": "Container",
+        "children": [],
+    }
+    return {
+        **{k: v for k, v in parent.items() if k not in ("tree", "canvases", "artboard", "compose")},
+        "artboard": ab,
+        "tree": tree,
+        "canvases": [canvas],
+    }
+
+
 def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     """组装完整 HTML 文档：主题 CSS + chrome 顶栏 + 组件树 body。
 
     输出含 ``id='artboard'`` 根节点，供 Playwright 精确截图。
+    多画布时默认渲染第一画布（各画布独立成图见 :func:`artboard_to_message`）。
     """
+    canvases = list_canvases(doc)
+    # 优先用第一画布元数据，兼容旧 tree
+    if canvases:
+        doc = canvas_to_doc(doc, canvases[0])
     ab = dict(doc.get("artboard") or {})
     pack = resolve_theme(ab)
     width = int(ab.get("width") or 750)
@@ -1083,7 +1148,20 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 
 def build_artboard_markdown(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """组件树 → 单一 Markdown 字符串（段落间空行分隔）。"""
+    """组件树 → 单一 Markdown 字符串（段落间空行分隔）。
+
+    多画布时拼接各画布 Markdown。
+    """
+    canvases = list_canvases(doc)
+    chunks: list[str] = []
+    for c in canvases:
+        tree = c.get("tree") or {}
+        parts = _walk_md(tree if isinstance(tree, dict) else {}, data_ctx)
+        md = "\n\n".join(p for p in parts if p)
+        if md:
+            chunks.append(md)
+    if chunks:
+        return "\n\n".join(chunks)
     tree = doc.get("tree") or {}
     parts = _walk_md(tree if isinstance(tree, dict) else {}, data_ctx)
     return "\n\n".join(p for p in parts if p)
@@ -1189,6 +1267,32 @@ def _compose_include_component_md(compose: dict[str, Any], *, has_shell_text: bo
     return compose.get("markdown_caption", True) is not False
 
 
+def _compose_segments(compose: dict[str, Any], canvases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """解析 compose.segments；缺失时由 text_before/after + 全画布生成默认顺序。"""
+    raw = compose.get("segments")
+    if isinstance(raw, list) and raw:
+        ids = {str(c.get("id")) for c in canvases}
+        out: list[dict[str, Any]] = []
+        for s in raw:
+            if not isinstance(s, dict):
+                continue
+            st = str(s.get("type") or "")
+            if st == "text":
+                out.append(s)
+            elif st == "canvas" and str(s.get("canvas_id") or "") in ids:
+                out.append(s)
+        if out:
+            return out
+    # 默认：图前文案 → 各画布 → 图后文案
+    segs: list[dict[str, Any]] = [
+        {"id": "seg_before", "type": "text", "html": compose.get("text_before") or ""},
+    ]
+    for c in canvases:
+        segs.append({"id": f"seg_{c.get('id')}", "type": "canvas", "canvas_id": c.get("id")})
+    segs.append({"id": "seg_after", "type": "text", "html": compose.get("text_after") or ""})
+    return segs
+
+
 def artboard_to_message(
     doc: dict[str, Any],
     data_ctx: dict[str, QueryResult],
@@ -1200,23 +1304,39 @@ def artboard_to_message(
     compose 字段（``doc.compose``）::
 
         mode: image_primary | markdown_primary | mixed | image_only
-        text_before / text_after: 画板图前后的外壳文案
+        segments: [{type:text, html}, {type:canvas, canvas_id}, ...] 消息段落顺序
+        text_before / text_after: 兼容旧单画布（无 segments 时使用）
         title: 钉钉等渠道的消息标题
         include_component_md / markdown_caption: 是否附带组件树 MD
 
+    多画布时按 segments 顺序依次输出文案与各画布截图。
     成图失败时按 mode 降级为纯文本，保证渠道仍可收到内容。
     """
     md_auto = build_artboard_markdown(doc, data_ctx)
     compose = dict(doc.get("compose") or {})
     mode = str(compose.get("mode") or "image_primary")
-    text_before = _resolve_compose_text(compose.get("text_before"), data_ctx)
-    text_after = _resolve_compose_text(compose.get("text_after"), data_ctx)
-    has_shell = bool(text_before or text_after)
+    canvases = list_canvases(doc)
+    canvas_by_id = {str(c.get("id")): c for c in canvases}
+    segments = _compose_segments(compose, canvases)
+
+    text_parts_resolved = [
+        _resolve_compose_text(s.get("html"), data_ctx)
+        for s in segments
+        if str(s.get("type")) == "text"
+    ]
+    has_shell = any(bool(t) for t in text_parts_resolved)
+    # 兼容：旧字段 text_before/after 也算外壳
+    if not has_shell:
+        has_shell = bool(
+            _resolve_compose_text(compose.get("text_before"), data_ctx)
+            or _resolve_compose_text(compose.get("text_after"), data_ctx)
+        )
     include_auto = _compose_include_component_md(compose, has_shell_text=has_shell)
     auto_md = md_auto if include_auto else ""
     title = _resolve_compose_text(compose.get("title"), data_ctx)
     if not title:
-        title = (auto_md or md_auto or text_before or "数据推送").split("\n")[0][:80]
+        first_text = next((t for t in text_parts_resolved if t), "")
+        title = (auto_md or md_auto or first_text or "数据推送").split("\n")[0][:80]
 
     parts: list[MessagePart] = []
 
@@ -1224,40 +1344,76 @@ def artboard_to_message(
         if content:
             parts.append(MessagePart(kind="text", content=content))
 
+    def _append_canvas_image(canvas: dict[str, Any]) -> bool:
+        """截取单画布 PNG，成功返回 True。"""
+        sub = canvas_to_doc(doc, canvas)
+        html_doc = build_artboard_html(sub, data_ctx)
+        width = int((sub.get("artboard") or {}).get("width") or 750)
+        _png, path = _html_to_png(html_doc, width=width)
+        if path:
+            cname = str(canvas.get("name") or title)
+            parts.append(
+                MessagePart(kind="image", content={"path": path, "title": cname})
+            )
+            return True
+        return False
+
     if mode == "markdown_primary":
-        body = "\n\n".join(x for x in (text_before, auto_md or md_auto, text_after) if x)
+        texts = [t for t in text_parts_resolved if t]
+        body = "\n\n".join(x for x in (*texts, auto_md or md_auto) if x)
         parts.append(MessagePart(kind="text", content=body or "（空内容）"))
         return Message(parts=parts)
 
-    # image_primary / mixed / image_only：可选文案 → 图 → 可选文案
-    _append_text(text_before)
-
-    image_added = False
-    if with_image and mode != "markdown_primary":
-        html_doc = build_artboard_html(doc, data_ctx)
-        width = int((doc.get("artboard") or {}).get("width") or 750)
-        _png, path = _html_to_png(html_doc, width=width)
-        if path:
-            parts.append(
-                MessagePart(kind="image", content={"path": path, "title": title})
-            )
-            image_added = True
-        elif mode == "image_only":
+    if mode == "image_only":
+        # 仅推各画布图（按 segments 中的 canvas 顺序，缺省则全画布）
+        canvas_ids = [
+            str(s.get("canvas_id"))
+            for s in segments
+            if str(s.get("type")) == "canvas" and s.get("canvas_id")
+        ]
+        if not canvas_ids:
+            canvas_ids = [str(c.get("id")) for c in canvases]
+        image_added = False
+        if with_image:
+            for cid in canvas_ids:
+                c = canvas_by_id.get(cid)
+                if c and _append_canvas_image(c):
+                    image_added = True
+        if not image_added:
             parts.append(MessagePart(kind="text", content="（成图失败）"))
-            return Message(parts=parts)
-        elif mode != "mixed" and not has_shell and not auto_md:
-            # 无截图引擎且无其它内容 — 回退组件 MD
-            parts.append(MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）"))
-            return Message(parts=parts)
+        return Message(parts=parts)
 
-    if text_after:
-        _append_text(text_after)
-    elif auto_md and (mode == "mixed" or include_auto or not image_added):
-        # 兼容/混合：用户未设 text_after 时用组件 MD 作图注
-        _append_text(auto_md)
+    # image_primary / mixed：按 segments 交错文案与多画布图
+    image_added = False
+    for seg in segments:
+        st = str(seg.get("type") or "")
+        if st == "text":
+            _append_text(_resolve_compose_text(seg.get("html"), data_ctx))
+        elif st == "canvas":
+            if not with_image:
+                continue
+            c = canvas_by_id.get(str(seg.get("canvas_id") or ""))
+            if not c:
+                continue
+            if _append_canvas_image(c):
+                image_added = True
+            elif mode == "mixed":
+                # 混合模式：成图失败不中断，继续后续段
+                continue
+
+    if auto_md and (mode == "mixed" or include_auto or not image_added):
+        # 未通过 text 段表达时附加组件 MD
+        if not any(p.kind == "text" and auto_md in str(p.content) for p in parts):
+            if include_auto or (not image_added and not has_shell):
+                _append_text(auto_md)
 
     if not parts:
-        parts.append(MessagePart(kind="text", content="（空内容）"))
+        if not image_added and not has_shell:
+            parts.append(
+                MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）")
+            )
+        else:
+            parts.append(MessagePart(kind="text", content="（空内容）"))
 
     return Message(parts=parts)
 
