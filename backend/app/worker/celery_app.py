@@ -1,4 +1,12 @@
-"""Celery application for the data-push-platform worker."""
+"""Celery 应用实例：data-push-platform 异步 worker 入口配置。
+
+使用 ``settings.redis_url`` 同时作为 broker 与 result backend；
+任务模块通过 ``include`` 自动加载 ``app.worker.tasks``。
+
+启动示例（生产）::
+
+    celery -A app.worker.celery_app.celery_app worker -l info
+"""
 
 from __future__ import annotations
 
@@ -13,6 +21,7 @@ celery_app = Celery(
     include=["app.worker.tasks"],
 )
 
+# JSON 序列化 + UTC，便于跨进程传递 job_run_id 等简单参数
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

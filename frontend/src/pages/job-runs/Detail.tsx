@@ -1,3 +1,11 @@
+/**
+ * 执行记录详情页。
+ *
+ * 展示运行元信息、各通道投递结果与步骤日志；
+ * 支持「重跑」（基于最新任务配置 + 复制当前参数，生成新 JobRun）。
+ *
+ * 路由：`/job-runs/:id`
+ */
 import { ArrowLeftOutlined, RedoOutlined } from '@ant-design/icons'
 import {
   Button,
@@ -17,6 +25,7 @@ import { getErrorMessage } from '../../api/client'
 import type { Delivery, JobRunDetail, JobRunLog } from '../../api/types'
 import { DeliveryStatusTag, formatDateTime, RunStatusTag } from '../../utils/status'
 
+/** 单次 JobRun 详情：概要 + 投递 + 日志 */
 export function JobRunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -40,6 +49,7 @@ export function JobRunDetailPage() {
     void load()
   }, [load])
 
+  /** 确认后调用 rerun API，并跳转到新运行详情 */
   const onRerun = () => {
     if (!id) return
     Modal.confirm({

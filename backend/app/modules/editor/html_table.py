@@ -1,12 +1,12 @@
-"""HTML+CSS table rendering for push images (legacy pythonProject4 style).
+"""推送图片用 HTML+CSS 表格渲染（兼容旧 pythonProject4 样式）。
 
-Pipeline: QueryResult + design → HTML (with CSS) → PNG.
+管线：QueryResult + design → HTML(CSS) → PNG。
 
-Screenshot backends (first available wins):
+截图后端（先成功者胜）::
 
-1. Playwright Chromium (``pip install playwright && playwright install chromium``)
-2. wkhtmltoimage on PATH or ``WKHTMLTOIMAGE`` env
-3. Fallback: existing Pillow templates
+1. Playwright Chromium
+2. PATH / ``WKHTMLTOIMAGE`` 环境变量中的 wkhtmltoimage
+3. 回退：Pillow 模板
 """
 
 from __future__ import annotations
@@ -84,12 +84,14 @@ table.data tr:nth-child(even) td { background: #fafbfc; }
 
 
 def _esc(value: Any) -> str:
+    """HTML 转义。"""
     if value is None:
         return ""
     return html.escape(str(value))
 
 
 def _ratio_class(cell: str, *, enabled: bool) -> str:
+    """百分比单元格 CSS 类（±20% 强弱）。"""
     if not enabled:
         return ""
     m = _PERCENT_RE.match(cell.strip())
@@ -108,7 +110,7 @@ def _ratio_class(cell: str, *, enabled: bool) -> str:
 
 
 def build_report_html(result: QueryResult, design: dict[str, Any] | None) -> str:
-    """Build a self-contained HTML document for screenshot."""
+    """构建可截图的完整 HTML 文档。"""
     design = dict(design or {})
     template_id = str(design.get("template_id") or "report_v1")
     theme = str(design.get("theme_color") or "#1677ff")
@@ -123,7 +125,7 @@ def build_report_html(result: QueryResult, design: dict[str, Any] | None) -> str
     if design.get("title") and design.get("header_text"):
         header_text = substitute_first_row(str(design.get("header_text")), result)
     elif design.get("header_text") and str(design.get("header_text")) != str(design.get("title") or ""):
-        # title already from header_text
+        # title 已来自 header_text
         if design.get("title"):
             header_text = substitute_first_row(str(design.get("header_text")), result)
     footer_text = (
@@ -197,6 +199,7 @@ def build_report_html(result: QueryResult, design: dict[str, Any] | None) -> str
 
 
 def _screenshot_playwright(html: str, out_path: Path) -> bool:
+    """Playwright 截取 .card 节点为 PNG。"""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -206,7 +209,7 @@ def _screenshot_playwright(html: str, out_path: Path) -> bool:
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 760, "height": 900})
             page.set_content(html, wait_until="networkidle")
-            # Clip to card width
+            # 裁剪到卡片宽度
             page.locator(".card").screenshot(path=str(out_path))
             browser.close()
         return out_path.is_file() and out_path.stat().st_size > 0
@@ -215,6 +218,7 @@ def _screenshot_playwright(html: str, out_path: Path) -> bool:
 
 
 def _screenshot_wkhtml(html: str, out_path: Path) -> bool:
+    """wkhtmltoimage 将 HTML 转为 PNG。"""
     binary = os.environ.get("WKHTMLTOIMAGE") or "wkhtmltoimage"
     with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as fh:
         fh.write(html)
@@ -242,7 +246,7 @@ def _screenshot_wkhtml(html: str, out_path: Path) -> bool:
 
 
 def render_html_png(result: QueryResult, design: dict[str, Any] | None) -> bytes:
-    """Render via HTML+CSS screenshot, or fall back to Pillow templates."""
+    """HTML+CSS 截图渲染；失败则回退 Pillow 模板。"""
     design = dict(design or {})
     engine = str(design.get("render_engine") or "auto").lower()
 
@@ -260,7 +264,7 @@ def render_html_png(result: QueryResult, design: dict[str, Any] | None) -> bytes
         if ok:
             return out.read_bytes()
 
-    # Fallback: pillow templates (always available)
+    # 回退：Pillow 模板（始终可用）
     return render_template_png(result, design)
 
 
@@ -270,7 +274,7 @@ def render_and_save_html(
     *,
     filename: str = "push_html.png",
 ) -> tuple[bytes, str]:
-    """Render HTML/CSS (or pillow fallback) and save via LocalStorage."""
+    """渲染 HTML/CSS（或 Pillow 回退）并经 LocalStorage 落盘。"""
     png = render_html_png(result, design)
     path = LocalStorage().save_bytes(png, filename)
     return png, path

@@ -1,4 +1,4 @@
-"""Migrate legacy design / blocks into artboard v3."""
+"""将旧版 design / 嵌套 render_spec 迁移为 artboard v3 文档。"""
 
 from __future__ import annotations
 
@@ -9,24 +9,25 @@ from app.modules.studio.defaults import default_daily_artboard, empty_artboard
 
 
 def _nid() -> str:
+    """生成短节点 id。"""
     return uuid4().hex[:12]
 
 
 def is_artboard_spec(spec: Any) -> bool:
-    """True when render_spec or nested object is an artboard document."""
+    """判断 render_spec 或嵌套对象是否为 artboard 文档。"""
     if not isinstance(spec, dict):
         return False
     if spec.get("kind") == "artboard" or int(spec.get("version") or 0) >= 3:
         return True
     if isinstance(spec.get("artboard"), dict) and isinstance(spec.get("tree"), dict):
         return True
-    # nested under render_spec
+    # 嵌套在 render_spec 下
     inner = spec.get("artboard_doc") or spec.get("studio")
     return is_artboard_spec(inner) if isinstance(inner, dict) else False
 
 
 def extract_artboard(spec: Any) -> dict[str, Any] | None:
-    """Pull artboard document from render_spec or return None."""
+    """从 render_spec 抽出 artboard 文档；没有则 None。"""
     if not isinstance(spec, dict):
         return None
     if is_artboard_spec(spec) and "tree" in spec:
@@ -44,7 +45,7 @@ def design_to_artboard(
     data_source_id: str | None = None,
     sql: str | None = None,
 ) -> dict[str, Any]:
-    """Convert legacy editor DesignSpec into a single-column artboard."""
+    """将旧 Editor DesignSpec 转为单列流式 artboard。"""
     design = dict(design or {})
     theme = str(design.get("theme_color") or "#1677ff")
     board = empty_artboard(theme_color=theme)
@@ -82,7 +83,7 @@ def design_to_artboard(
         row_children = []
         cols = [str(c) for c in kpi_cols][:4] if kpi_cols else []
         if not cols:
-            # placeholder KPIs filled at runtime from first columns
+            # 运行时按前几列自动填充的 KPI 占位
             cols = ["_auto0", "_auto1", "_auto2"]
         for i, col in enumerate(cols):
             row_children.append(

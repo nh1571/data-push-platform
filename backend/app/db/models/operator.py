@@ -1,3 +1,5 @@
+"""平台操作员模型：控制台管理员账号。"""
+
 import uuid
 from datetime import datetime
 
@@ -8,7 +10,10 @@ from app.db.base import Base
 
 
 class Operator(Base):
-    """Platform operator (admin / console user)."""
+    """控制台登录用户（管理员）。
+
+    密码以哈希形式存储；空库启动时可由 bootstrap 创建默认 admin。
+    """
 
     __tablename__ = "operators"
 

@@ -1,3 +1,5 @@
+"""投递通道配置模型：钉钉/Webhook 等，敏感字段加密存于 config_enc。"""
+
 import uuid
 from datetime import datetime
 
@@ -8,7 +10,11 @@ from app.db.base import Base
 
 
 class Channel(Base):
-    """Delivery channel configuration (secrets encrypted in config_enc)."""
+    """推送通道定义（webhook、工作通知、OpenAPI 机器人等）。
+
+    - ``type``: 对应 ChannelPlugin 注册名（如 ``dingtalk.webhook_robot``）
+    - ``config_enc``: Fernet 加密后的 JSON 配置（密钥、token、userid 等）
+    """
 
     __tablename__ = "channels"
 

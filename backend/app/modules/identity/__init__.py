@@ -1,1 +1,1 @@
-"""Identity: operator login (JWT) and machine API tokens."""
+"""身份认证：操作员登录（JWT）与机器 API Token。"""

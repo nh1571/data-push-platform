@@ -1,3 +1,9 @@
+/**
+ * 工作台首页。
+ *
+ * 展示最近失败运行（status=failed，最多 10 条）与最近全部运行，
+ * 便于运维快速发现异常并跳转到 JobRun / 任务详情。
+ */
 import { ReloadOutlined } from '@ant-design/icons'
 import { Alert, Button, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,6 +16,7 @@ import { PageHeader } from '../components/PageHeader'
 import { TableEmpty } from '../components/TableEmpty'
 import { formatDateTime, RunStatusTag } from '../utils/status'
 
+/** 工作台页面：失败运行 + 最近运行两张表 */
 export function DashboardPage() {
   const navigate = useNavigate()
   const [failed, setFailed] = useState<JobRun[]>([])
@@ -17,6 +24,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /** 并行拉取失败列表与最近列表 */
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)

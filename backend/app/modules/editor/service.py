@@ -1,4 +1,23 @@
-"""Editor service: query preview, message preview, test push, save job."""
+"""编辑器应用服务：SQL 预览、消息/图片预览、试推、保存任务。
+
+架构定位
+--------
+旧版「轻量 design」工作台的服务层，Studio 仍复用其中的：
+
+- :func:`execute_query` — 统一取数（解密配置 → 插件执行 → max_rows）
+- :func:`_ensure_channels` — 试推时校验渠道
+- :func:`save_job` — 基础 CRUD；Studio 保存会再覆盖 artboard render_spec
+
+主流程
+------
+1. **query_preview**：解析 SQL 参数 → 执行 → 返回列/行与 rendered_sql
+2. **message_preview / image_preview**：design → Message / PNG
+3. **test_push**：成消息后逐渠道 send，可选落 JobRun（trigger=editor_test）
+4. **save_job**：design 写入 ``render_spec.design`` + 派生 parts
+
+与 execution.pipeline 的差异：试推直接在请求线程内发送，不经过 Celery；
+正式调度推送走 pipeline。
+"""
 
 from __future__ import annotations
 
@@ -36,10 +55,12 @@ from app.plugins.registry import plugin_registry
 
 
 def _utcnow() -> datetime:
+    """UTC 当前时间。"""
     return datetime.now(timezone.utc)
 
 
 def _as_design(design: Any) -> dict[str, Any]:
+    """将 Pydantic model / dict / None 统一为 design 字典。"""
     if design is None:
         return {}
     if hasattr(design, "model_dump"):
@@ -50,10 +71,12 @@ def _as_design(design: Any) -> dict[str, Any]:
 
 
 def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
+    """渠道 ID 列表转字符串（PushJob.channel_ids 存 JSON 字符串）。"""
     return [str(i) for i in ids]
 
 
 def _get_data_source(db: Session, data_source_id: UUID) -> DataSource:
+    """加载数据源；不存在则 400。"""
     ds = db.get(DataSource, data_source_id)
     if ds is None:
         raise HTTPException(
@@ -69,6 +92,10 @@ def _ensure_channels(
     *,
     allow_empty: bool = False,
 ) -> list[Channel]:
+    """校验并按请求顺序返回 Channel 实体。
+
+    ``allow_empty=True`` 用于草稿任务保存（可无渠道）。
+    """
     if not channel_ids:
         if allow_empty:
             return []
@@ -86,16 +113,17 @@ def _ensure_channels(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"channel_ids not found: {missing}",
         )
-    # Preserve request order
+    # 保持请求顺序，便于试推结果与 UI 对齐
     return [found[cid] for cid in channel_ids]
 
 
 def _content_preview(part: MessagePart, *, max_len: int = 2000) -> str:
+    """将 MessagePart 压成短文本预览（优先 text/path/url 等字段）。"""
     content = part.content
     if isinstance(content, str):
         text = content
     elif isinstance(content, dict):
-        # Prefer textual fields for preview
+        # 预览优先可读文本字段
         for key in ("text", "path", "url", "filename", "title"):
             if content.get(key):
                 text = str(content[key])
@@ -112,6 +140,7 @@ def _content_preview(part: MessagePart, *, max_len: int = 2000) -> str:
 
 
 def _markdown_from_message(message: Message) -> str:
+    """拼接所有 text part 为 Markdown 字符串。"""
     texts: list[str] = []
     for part in message.parts:
         if part.kind == "text" and part.content is not None:
@@ -127,7 +156,10 @@ def execute_query(
     *,
     max_rows: int = 200,
 ) -> QueryResult:
-    """Load data source, decrypt config, execute SQL, enforce max_rows."""
+    """加载数据源、解密配置、执行 SQL，并截断至 max_rows。
+
+    Studio / Editor / 试推共用此入口，避免重复解密与插件查找逻辑。
+    """
     ds = _get_data_source(db, data_source_id)
     try:
         plugin = plugin_registry.get("datasource", ds.type)
@@ -154,6 +186,7 @@ def query_preview(
     max_rows: int = 200,
     param_defs: list[dict[str, Any]] | None = None,
 ) -> QueryPreviewResponse:
+    """SQL 预览：解析参数 → 执行 → 返回列/行与替换后的 rendered_sql。"""
     from app.modules.studio.sql_params import resolve_sql_params
     from app.plugins.datasource.mysql import substitute_sql_params
 
@@ -180,6 +213,7 @@ def message_preview(
     *,
     max_rows: int = 200,
 ) -> MessagePreviewResponse:
+    """取数 + design 构建 Message，返回 part 预览与 markdown 文本。"""
     result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
     design_dict = _as_design(design)
     message = build_message_from_design(result, design_dict, params=params)
@@ -202,12 +236,12 @@ def image_preview(
     *,
     max_rows: int = 200,
 ) -> ImagePreviewResponse:
-    """Query + render image template; return base64 data URL for UI preview."""
+    """取数 + 强制 image 模板渲染；返回 base64 data URL 供前端 <img>。"""
     import base64
 
     result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
     design_dict = _as_design(design)
-    # Force image mode for this endpoint
+    # 本接口固定图片模式
     design_dict = {**design_dict, "output_mode": "image"}
     if not design_dict.get("template_id"):
         design_dict["template_id"] = "report_v1"
@@ -235,7 +269,7 @@ def test_push(
     max_rows: int = 200,
     push_job_id: UUID | None = None,
 ) -> TestPushResponse:
-    """Query + build message + send to each channel; optionally audit as JobRun."""
+    """取数 + 建消息 + 逐渠道发送；若带 push_job_id 则写入 JobRun/Delivery 审计。"""
     result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
     design_dict = _as_design(design)
     message = build_message_from_design(result, design_dict, params=params)
@@ -312,7 +346,7 @@ def test_push(
                         error=dr.error or "channel send failed",
                     )
                 )
-        except Exception as exc:  # noqa: BLE001 — isolate per channel
+        except Exception as exc:  # noqa: BLE001 — 单渠道隔离
             failures += 1
             if delivery_row is not None:
                 delivery_row.status = DeliveryStatus.FAILED
@@ -354,7 +388,7 @@ def test_push(
 
 
 def save_job(db: Session, payload: SaveJobRequest) -> PushJob:
-    """Create or update a PushJob; store design inside render_spec."""
+    """创建或更新 PushJob；将 design 写入 render_spec.design 并派生 parts。"""
     design_dict = _as_design(payload.design)
     parts = design_to_parts(design_dict)
     render_spec: dict[str, Any] = {
@@ -363,7 +397,7 @@ def save_job(db: Session, payload: SaveJobRequest) -> PushJob:
     }
 
     _get_data_source(db, payload.data_source_id)
-    # Allow empty channel_ids so draft jobs can be saved from the editor.
+    # 允许空 channel_ids，以便编辑器保存草稿
     _ensure_channels(db, payload.channel_ids, allow_empty=True)
 
     if payload.id is not None:

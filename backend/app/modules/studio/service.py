@@ -1,4 +1,21 @@
-"""Studio service: resolve datasets, compile artboard, save job."""
+"""Studio 应用服务：数据集解析、画板编译、试推与任务落库。
+
+架构定位
+--------
+位于 API 层与编译/执行层之间，编排以下步骤：
+
+1. **文档归一化** :func:`ensure_artboard_doc`
+   接受 artboard v3 / 嵌套 render_spec / 旧 design，统一为可编译文档。
+2. **多数据集取数** :func:`resolve_data_context`
+   解析 SQL 参数（auto 日期等），执行各 dataset，产出 ``data_ctx``。
+3. **编译** :func:`~app.modules.studio.compile.compile_artboard`
+4. **试推 / 保存** :func:`studio_test_push` / :func:`save_job_with_artboard`
+
+与旧 Editor 的关系
+------------------
+取数复用 :mod:`app.modules.editor.service`；保存任务时仍写 PushJob，
+但 ``render_spec`` 内嵌完整 ``artboard_doc``（version=3）。
+"""
 
 from __future__ import annotations
 
@@ -23,7 +40,10 @@ def ensure_artboard_doc(
     data_source_id: str | None = None,
     sql: str | None = None,
 ) -> dict[str, Any]:
-    """Normalize incoming payload to artboard v3 document."""
+    """将入参归一为 artboard v3 文档，并同步主数据集 data_source_id / sql。
+
+    识别顺序：完整 artboard → 嵌套 extract → 旧 design 迁移 → 默认日报模板。
+    """
     if isinstance(raw, dict) and is_artboard_spec(raw) and "tree" in raw:
         doc = dict(raw)
     elif isinstance(raw, dict) and extract_artboard(raw):
@@ -38,7 +58,7 @@ def ensure_artboard_doc(
     else:
         doc = default_daily_artboard()
 
-    # Sync primary dataset slots
+    # 同步主数据集槽位（任务级 data_source/sql 覆盖文档内定义）
     datasets = list(doc.get("datasets") or [])
     if not datasets:
         datasets = [{"id": "main", "name": "主查询", "data_source_id": data_source_id, "sql": sql or "SELECT 1"}]
@@ -62,10 +82,18 @@ def resolve_data_context(
     params: dict[str, Any] | None = None,
     max_rows: int = 200,
 ) -> tuple[dict[str, QueryResult], dict[str, dict[str, str]]]:
-    """Execute all datasets on the artboard.
+    """执行画板上全部可运行数据集。
 
-    Returns ``(data_ctx, resolved_params_by_dataset)`` so the workbench can
-    show which SQL params were used for this render (template is dynamic).
+    返回
+    -------
+    (data_ctx, resolved_params_by_dataset)
+        data_ctx 供编译器绑定；params 映射供工作台展示本次实际 SQL 参数
+        （模板含 auto 日期时动态变化）。
+
+    说明
+    ----
+    - main 数据集的 SQL 优先使用任务/请求传入的 ``fallback_sql``。
+    - 次级数据集编译期失败会被吞掉（可选数据）；main 失败则抛 HTTP 异常。
     """
     ctx: dict[str, QueryResult] = {}
     params_by_ds: dict[str, dict[str, str]] = {}
@@ -82,7 +110,7 @@ def resolve_data_context(
     for ds in datasets:
         ds_id = str(ds.get("id") or "main")
         raw_source = ds.get("data_source_id") or fallback_data_source_id
-        # main SQL always prefers explicit fallback_sql from job/editor
+        # main SQL 始终优先任务/编辑器显式 SQL
         if ds_id == "main" and fallback_sql:
             sql = str(fallback_sql).strip()
         else:
@@ -96,16 +124,16 @@ def resolve_data_context(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid data_source_id for dataset {ds_id}",
             ) from exc
-        # Merge request params + dataset param defs (auto yesterday/today/…)
+        # 合并请求参数 + 数据集 param 定义（auto 昨天/今天…）
         param_defs = ds.get("params") if isinstance(ds.get("params"), list) else []
-        # per-dataset overrides: ds.param_values or global params
+        # 数据集级覆盖：param_values 盖过全局 params
         ds_overrides = dict(params or {})
         if isinstance(ds.get("param_values"), dict):
             ds_overrides.update({str(k): v for k, v in ds["param_values"].items()})
         _sql, resolved = resolve_sql_params(
             sql, param_defs=param_defs, overrides=ds_overrides
         )
-        # UI: only names used in SQL or declared on dataset (not every builtin)
+        # UI 仅展示 SQL 用到或声明过的参数名（不全量内置）
         used = set(extract_placeholders(sql))
         for p in param_defs or []:
             if isinstance(p, dict) and p.get("name"):
@@ -121,7 +149,7 @@ def resolve_data_context(
         except HTTPException:
             if ds_id == "main":
                 raise
-            # Secondary datasets optional at compile time
+            # 次级数据集编译期可选
             continue
 
     if not ctx:
@@ -142,6 +170,7 @@ def studio_compile(
     max_rows: int = 200,
     want_image: bool = True,
 ) -> dict[str, Any]:
+    """工作台编译入口：归一文档 → 取数 → 编译 → 组装 API 响应 dict。"""
     doc = ensure_artboard_doc(
         artboard,
         data_source_id=str(data_source_id) if data_source_id else None,
@@ -156,7 +185,7 @@ def studio_compile(
         max_rows=max_rows,
     )
     result = compile_artboard(doc, ctx, want_image=want_image)
-    # Primary flat map for UI: main first, else first dataset
+    # 主平铺参数：优先 main，否则取第一个数据集
     flat = dict(params_by_ds.get("main") or {})
     if not flat and params_by_ds:
         flat = dict(next(iter(params_by_ds.values())))
@@ -186,7 +215,7 @@ def studio_test_push(
     max_rows: int = 200,
     push_job_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Compile artboard message and deliver via existing test_push channel loop."""
+    """编译画板消息并按渠道循环发送（可选写入 JobRun 审计）。"""
     from datetime import datetime, timezone
 
     from sqlalchemy import select
@@ -321,9 +350,14 @@ def save_job_with_artboard(
     schedule_cron: str | None = None,
     schedule_enabled: bool = False,
 ) -> Any:
-    """Persist job with artboard in render_spec."""
+    """持久化推送任务，将完整 artboard 写入 ``render_spec.artboard_doc``。
+
+    先走 editor ``save_job`` 建/改行，再覆盖 render_spec：
+    保留精简 design 兼容字段，并标记 ``parts`` 为 studio_artboard 占位，
+    真正渲染由 pipeline 识别 artboard 后调用 compile。
+    """
     doc = ensure_artboard_doc(artboard, data_source_id=str(data_source_id), sql=sql)
-    # Keep a derived design for partial backward compatibility
+    # 派生精简 design，兼容只读 design 的旧路径
     design_compat = {
         "output_mode": "image"
         if str((doc.get("compose") or {}).get("mode") or "").startswith("image")
@@ -343,7 +377,7 @@ def save_job_with_artboard(
         schedule_cron=schedule_cron,
         schedule_enabled=schedule_enabled,
     )
-    # Use low-level save then overwrite render_spec with full artboard
+    # 底层保存后再用完整 artboard 覆盖 render_spec
     row = editor_service.save_job(db, payload)
     row.render_spec = {
         "version": 3,

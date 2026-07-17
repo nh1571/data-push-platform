@@ -1,3 +1,12 @@
+/**
+ * 通道新建 / 编辑表单。
+ *
+ * 支持钉钉多种模式：群 Webhook、工作通知、OpenAPI 发群/单聊。
+ * 敏感字段（secret / access_token）编辑时以 MASK 脱敏；
+ * 保存时若未改密钥则不提交密钥字段，由后端保留原值。
+ *
+ * 路由：`/channels/new` | `/channels/:id`
+ */
 import { ApiOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { Alert, Button, Form, Input, message, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
@@ -5,8 +14,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { createChannel, getChannel, testChannel, updateChannel } from '../../api'
 import { getErrorMessage } from '../../api/client'
 
+/** 通道提供商（目前仅钉钉） */
 const PROVIDERS = [{ value: 'dingtalk', label: '钉钉' }]
 
+/** 钉钉投递模式；部分模式 disabled 表示即将支持 */
 const MODE_OPTIONS = [
   { value: 'dingtalk.webhook_robot', label: '群自定义机器人 Webhook（纯文/MD，不宜真图）' },
   { value: 'dingtalk.work_notice', label: '工作通知' },
@@ -24,20 +35,23 @@ const MODE_OPTIONS = [
   },
 ]
 
+/** 编辑态敏感字段占位，表示「未修改」 */
 const MASK = '******'
 
-/** Legacy `dingtalk` is treated as webhook robot. */
+/** 兼容历史 type=`dingtalk`，统一视为 webhook 机器人 */
 function normalizeChannelType(type: string): string {
   if (type === 'dingtalk') return 'dingtalk.webhook_robot'
   return type
 }
 
+/** 从 type 推断提供商（当前全部归为 dingtalk） */
 function providerFromType(type: string): string {
   const normalized = normalizeChannelType(type)
   if (normalized.startsWith('dingtalk.')) return 'dingtalk'
   return 'dingtalk'
 }
 
+/** 表单字段：通用 + 各模式专用配置项 */
 interface FormValues {
   name: string
   provider: string
@@ -58,6 +72,7 @@ interface FormValues {
   user_ids?: string
 }
 
+/** 通道表单页：按模式切换字段、校验、保存与测试 */
 export function ChannelFormPage() {
   const { id } = useParams<{ id: string }>()
   const isNew = !id || id === 'new'
@@ -120,6 +135,10 @@ export function ChannelFormPage() {
       .finally(() => setLoading(false))
   }, [form, id, isNew])
 
+  /**
+   * 按通道类型组装 config 对象。
+   * 脱敏占位 MASK 不会写入密钥字段，避免把 ****** 存进数据库。
+   */
   const buildConfig = (values: FormValues): Record<string, unknown> => {
     const type = normalizeChannelType(values.type)
     if (type === 'dingtalk.work_notice') {
@@ -170,6 +189,7 @@ export function ChannelFormPage() {
     return config
   }
 
+  /** 模式级必填校验；返回错误文案或 null */
   const validateModeFields = (values: FormValues): string | null => {
     const type = normalizeChannelType(values.type)
     if (type === 'dingtalk.work_notice') {

@@ -1,4 +1,4 @@
-"""Password hashing and JWT helpers for operator auth."""
+"""操作员认证：密码哈希与 JWT 签发/校验；机器 Token 哈希。"""
 
 from __future__ import annotations
 
@@ -17,10 +17,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
+    """bcrypt 哈希明文密码。"""
     return pwd_context.hash(password)
 
 
 def verify_password(plain: str, password_hash: str) -> bool:
+    """校验明文密码与哈希是否匹配。"""
     return pwd_context.verify(plain, password_hash)
 
 
@@ -30,7 +32,7 @@ def create_access_token(
     expires_delta: timedelta | None = None,
     extra_claims: dict[str, Any] | None = None,
 ) -> str:
-    """Issue a JWT access token for an operator (``type=user``, ``sub`` = operator id)."""
+    """为操作员签发 JWT（``type=user``，``sub`` = operator id）。"""
     expire = datetime.now(timezone.utc) + (
         expires_delta
         if expires_delta is not None
@@ -47,12 +49,12 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    """Decode and validate a JWT; raise ``JWTError`` on failure."""
+    """解码并校验 JWT；失败抛 ``JWTError``。"""
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
 
 
 def hash_api_token(plaintext: str) -> str:
-    """SHA-256 hex digest of a machine API token (stored at rest)."""
+    """机器 API Token 的 SHA-256 十六进制摘要（落库存证，不存明文）。"""
     return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
 
 

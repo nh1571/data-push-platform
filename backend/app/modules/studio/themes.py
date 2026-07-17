@@ -1,10 +1,10 @@
-"""Artboard theme packs and table style CSS (S2)."""
+"""画板主题包与表格样式 CSS 变量（设计器 S2）。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-# Named packs — UI shows these; compile resolves to CSS variables.
+# 命名主题包 — UI 展示；compile 解析为 CSS 变量
 THEME_PACKS: dict[str, dict[str, str]] = {
     "business": {
         "id": "business",
@@ -74,11 +74,11 @@ TABLE_STYLES: dict[str, dict[str, str]] = {
 
 
 def resolve_theme(artboard_meta: dict[str, Any] | None) -> dict[str, str]:
-    """Merge pack + explicit color override into CSS variable set."""
+    """合并主题包与显式 color 覆盖，产出 CSS 变量所需字段。"""
     meta = dict(artboard_meta or {})
     theme = dict(meta.get("theme") or {})
     pack_id = str(theme.get("pack") or theme.get("table_style") and theme.get("pack") or "business")
-    # Prefer explicit pack key
+    # 优先显式 pack 键
     pack_id = str(theme.get("pack") or "business")
     if pack_id not in THEME_PACKS:
         pack_id = "business"
@@ -94,6 +94,7 @@ def resolve_theme(artboard_meta: dict[str, Any] | None) -> dict[str, str]:
 
 
 def theme_css_vars(pack: dict[str, str]) -> str:
+    """将主题 pack 转为 ``:root`` CSS 变量声明字符串。"""
     ts = TABLE_STYLES.get(pack.get("table_style") or "business", TABLE_STYLES["business"])
     return (
         f"--theme: {pack['color']}; "
@@ -106,6 +107,7 @@ def theme_css_vars(pack: dict[str, str]) -> str:
 
 
 def list_theme_packs() -> list[dict[str, str]]:
+    """前端主题包下拉列表。"""
     return [
         {"id": p["id"], "label": p["label"], "color": p["color"]}
         for p in THEME_PACKS.values()
@@ -113,4 +115,5 @@ def list_theme_packs() -> list[dict[str, str]]:
 
 
 def list_table_styles() -> list[dict[str, str]]:
+    """前端表格样式下拉列表。"""
     return [{"id": t["id"], "label": t["label"]} for t in TABLE_STYLES.values()]

@@ -1,19 +1,33 @@
-"""Push-job execution pipeline: query → render → deliver.
+"""推送任务执行管线：查询 → 渲染 → 投递。
 
-``render_spec`` formats (pick any; empty defaults to ``text_md``)::
+架构意图
+--------
+本模块是**正式推送**（手动/定时/重跑）的唯一执行核心，与编辑器试推路径分离：
 
-    # Single renderer as dict
+1. **query**：按 PushJob 主 SQL + artboard 多数据集取数，解析 SQL 参数
+2. **skip_if_empty**：0 行且任务开启跳过时直接 SUCCEEDED
+3. **render**：``render_spec`` → :class:`Message`（artboard / design / 插件 renderer）
+4. **deliver**：按 channel_ids 逐渠道发送，隔离失败（PARTIAL 状态）
+
+``render_spec`` 兼容多种形态（空则默认 ``text_md``）::
+
+    # 单一渲染器
     {"type": "text_md", "config": {"title": "日报"}}
 
-    # List of renderer parts
-    [{"type": "text_md", "config": {}}, {"type": "text_md", "config": {"title": "B"}}]
+    # 多 part 列表
+    [{"type": "text_md", "config": {}}, …]
 
-    # Explicit parts wrapper
-    {"parts": [{"type": "text_md", "config": {}}]}
+    # 显式 parts 包装 / 含 design / 含 artboard_doc（Studio v3）
+    {"parts": […]}  |  {"design": {…}}  |  {"artboard_doc": {…}}
 
-JobRun status lifecycle::
+JobRun 状态机::
 
     pending → running → succeeded | failed | partial
+
+会话模型
+--------
+:func:`run_job_run` 接受已有 Session（同步 API）或 Session 工厂（Celery worker），
+后者自行 commit/rollback/close。
 """
 
 from __future__ import annotations
@@ -48,10 +62,12 @@ SessionFactory = Callable[[], Session]
 
 
 def _utcnow() -> datetime:
+    """UTC 当前时间（写入 started_at / finished_at）。"""
     return datetime.now(timezone.utc)
 
 
 def _as_uuid(value: UUID | str) -> UUID:
+    """UUID 或字符串 → UUID。"""
     return value if isinstance(value, UUID) else UUID(str(value))
 
 
@@ -63,6 +79,7 @@ def _log(
     *,
     level: str = LogLevel.INFO,
 ) -> None:
+    """追加一条结构化 JobRunLog（不单独 commit，由调用方控制事务）。"""
     db.add(
         JobRunLog(
             job_run_id=job_run_id,
@@ -74,7 +91,7 @@ def _log(
 
 
 def build_config_snapshot(job: PushJob) -> dict[str, Any]:
-    """Snapshot job definition fields at run start (no secrets)."""
+    """运行开始时快照任务定义字段（不含密钥）。"""
     return {
         "name": job.name,
         "enabled": job.enabled,
@@ -89,13 +106,10 @@ def build_config_snapshot(job: PushJob) -> dict[str, Any]:
 
 
 def normalize_render_parts(render_spec: Any) -> list[dict[str, Any]]:
-    """Normalize ``render_spec`` into a list of ``{type, config}`` parts.
+    """将 ``render_spec`` 归一为 ``{type, config}`` part 列表。
 
-    Defaults to a single ``text_md`` part when empty / missing.
-
-    When *render_spec* embeds an editor ``design`` key, convert the design
-    into parts (unless an explicit ``parts`` list is also present and preferred
-    via the usual branch order).
+    空/缺失时默认单个 ``text_md``。若仅含 editor ``design`` 而无 ``parts``，
+    则通过 :func:`~app.modules.editor.design.design_to_parts` 转换。
     """
     if render_spec is None or render_spec == {} or render_spec == []:
         return [{"type": "text_md", "config": {}}]
@@ -108,20 +122,20 @@ def normalize_render_parts(render_spec: Any) -> list[dict[str, Any]]:
             rtype = item.get("type") or "text_md"
             cfg = item.get("config")
             if cfg is None:
-                # Allow flat keys next to type (e.g. {"type":"text_md","title":"x"})
+                # 允许 type 旁扁平配置键，如 {"type":"text_md","title":"x"}
                 cfg = {k: v for k, v in item.items() if k not in ("type", "config")}
             parts.append({"type": str(rtype), "config": dict(cfg or {})})
         return parts or [{"type": "text_md", "config": {}}]
 
     if isinstance(render_spec, dict):
-        # Editor design takes priority for part list when no explicit parts.
+        # 无显式 parts 时，editor design 决定 part 列表
         if "design" in render_spec and "parts" not in render_spec:
             from app.modules.editor.design import design_to_parts
 
             return design_to_parts(render_spec["design"] or {})
         if "parts" in render_spec and isinstance(render_spec["parts"], list):
             return normalize_render_parts(render_spec["parts"])
-        # design + parts: prefer explicit parts (already handled above).
+        # design + parts：优先显式 parts（上面分支已处理 list）
         if "design" in render_spec:
             from app.modules.editor.design import design_to_parts
 
@@ -146,14 +160,15 @@ def render_message(
     *,
     data_ctx: dict[str, QueryResult] | None = None,
 ) -> Message:
-    """Apply renderers from *render_spec* and return a composed :class:`Message`.
+    """按 *render_spec* 渲染并合成 :class:`Message`。
 
-    When *render_spec* contains an editor ``design`` key, build the message via
-    :func:`~app.modules.editor.design.build_message_from_design` so header/footer
-    placeholders and table flags are applied against live query data.
+    分支优先级：
 
-    When *render_spec* is a studio artboard (v3), compile the component tree.
-    *data_ctx* maps dataset id → QueryResult for multi-dataset artboards.
+    1. **Studio artboard v3** → :func:`~app.modules.studio.compile.artboard_to_message`
+    2. **Editor design** → :func:`~app.modules.editor.design.build_message_from_design`
+    3. **插件 renderer 链** → 归一 parts 后逐个 ``plugin.render``
+
+    *data_ctx* 为多数据集 artboard 的 dataset_id → QueryResult。
     """
     if isinstance(render_spec, dict):
         from app.modules.studio.migrate import extract_artboard, is_artboard_spec
@@ -180,7 +195,7 @@ def render_message(
 
     parts_out: list[MessagePart] = []
     for part_spec in normalize_render_parts(render_spec):
-        # studio_artboard is not a plugin renderer — already handled above
+        # studio_artboard 不是插件渲染器 — artboard 路径已在上方处理
         if part_spec.get("type") == "studio_artboard":
             continue
         renderer = plugin_registry.get("renderer", part_spec["type"])
@@ -194,7 +209,7 @@ def render_message(
 def _resolve_session(
     db_or_factory: Session | SessionFactory,
 ) -> tuple[Session, bool]:
-    """Return ``(session, owns_session)``."""
+    """返回 ``(session, owns_session)``；owns 时由调用方负责 commit/close。"""
     if isinstance(db_or_factory, Session):
         return db_or_factory, False
     if callable(db_or_factory):
@@ -206,18 +221,17 @@ def run_job_run(
     db_session_factory: Session | SessionFactory,
     job_run_id: UUID | str,
 ) -> None:
-    """Execute a pending (or re-entrant) job run end-to-end.
+    """端到端执行一次 JobRun（pending 或可重入）。
 
-    Parameters
+    参数
     ----------
     db_session_factory:
-        Either a SQLAlchemy :class:`~sqlalchemy.orm.Session` (tests / sync API)
-        or a zero-arg callable that returns a new Session (Celery worker).
+        SQLAlchemy Session（测试/同步 API）或零参工厂（Celery worker）。
     job_run_id:
-        Primary key of the :class:`~app.db.models.job_run.JobRun` to execute.
+        待执行 JobRun 主键。
 
-    Status transitions: ``pending → running → succeeded | failed | partial``.
-    Parallel runs are allowed (no job-level lock).
+    状态流转：``pending → running → succeeded | failed | partial``。
+    不做任务级互斥锁，允许并行多次运行。
     """
     job_run_id = _as_uuid(job_run_id)
     db, owns = _resolve_session(db_session_factory)
@@ -235,6 +249,10 @@ def run_job_run(
 
 
 def _run_pipeline(db: Session, job_run_id: UUID) -> None:
+    """管线主体：load → start → query → [skip] → render → deliver → finish。
+
+    顶层异常捕获后将 JobRun 标 FAILED 并写 error 日志；渠道级异常不中断循环。
+    """
     run = db.get(JobRun, job_run_id)
     if run is None:
         raise ValueError(f"job_run not found: {job_run_id}")
@@ -248,7 +266,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         db.commit()
         return
 
-    # --- start ---
+    # --- 启动 ---
     run.status = JobRunStatus.RUNNING
     run.started_at = run.started_at or _utcnow()
     run.config_snapshot = build_config_snapshot(job)
@@ -259,7 +277,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
     params: dict[str, Any] = dict(run.params or {})
 
     try:
-        # --- query ---
+        # --- 查询 ---
         ds = db.get(DataSource, job.data_source_id)
         if ds is None:
             raise RuntimeError(f"data_source not found: {job.data_source_id}")
@@ -278,7 +296,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         ):
             artboard_doc = job.render_spec
 
-        # Main dataset: job SQL + param defs from artboard main slot
+        # 主数据集：任务 SQL + artboard main 槽的 param 定义
         main_defs: list = []
         if isinstance(artboard_doc, dict):
             for ds_def in artboard_doc.get("datasets") or []:
@@ -300,7 +318,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         )
         db.commit()
 
-        # Multi-dataset artboard: execute additional slots
+        # 多数据集 artboard：执行非 main 槽
         data_ctx: dict[str, QueryResult] = {"main": result}
         if isinstance(artboard_doc, dict):
             for ds_def in artboard_doc.get("datasets") or []:
@@ -343,7 +361,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
                     )
             db.commit()
 
-        # --- skip_if_empty ---
+        # --- 空结果跳过 ---
         if row_count == 0 and job.skip_if_empty:
             _log(
                 db,
@@ -356,7 +374,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
             db.commit()
             return
 
-        # --- render ---
+        # --- 渲染 ---
         _log(db, job_run_id, "render", "rendering message from query result")
         message = render_message(result, job.render_spec, params, data_ctx=data_ctx)
         _log(
@@ -367,7 +385,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         )
         db.commit()
 
-        # --- deliver to each channel ---
+        # --- 逐渠道投递 ---
         channel_ids = [_as_uuid(cid) for cid in (job.channel_ids or [])]
         if not channel_ids:
             raise RuntimeError("push job has no channel_ids")
@@ -434,7 +452,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
                         f"channel {cid} failed: {delivery.error_message}",
                         level=LogLevel.ERROR,
                     )
-            except Exception as exc:  # noqa: BLE001 — per-channel isolation
+            except Exception as exc:  # noqa: BLE001 — 单渠道隔离
                 delivery.status = DeliveryStatus.FAILED
                 delivery.error_message = str(exc)
                 delivery.finished_at = _utcnow()
@@ -448,7 +466,7 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
                 )
             db.commit()
 
-        # --- final status ---
+        # --- 终态 ---
         if failures == 0:
             run.status = JobRunStatus.SUCCEEDED
             run.error_message = None

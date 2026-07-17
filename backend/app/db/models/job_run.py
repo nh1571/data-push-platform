@@ -1,3 +1,5 @@
+"""任务运行实例模型：一次 PushJob 的完整执行记录。"""
+
 import uuid
 from datetime import datetime
 from typing import Any
@@ -9,7 +11,15 @@ from app.db.base import Base
 
 
 class JobRun(Base):
-    """Single execution instance of a push job."""
+    """推送任务的单次执行实例。
+
+    流水线（query → render → deliver）全程围绕 JobRun 落库：
+    - ``status`` / ``error_message``: 整体结果
+    - ``trigger_type`` / ``trigger_meta``: 手动、定时、API 等触发上下文
+    - ``params``: 运行参数（如 biz_date），用于 SQL 占位符替换
+    - ``config_snapshot``: 运行时冻结的任务配置快照，便于事后审计与重跑
+    - ``parent_run_id``: 重试/重跑时指向父运行
+    """
 
     __tablename__ = "job_runs"
 

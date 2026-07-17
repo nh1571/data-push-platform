@@ -1,9 +1,10 @@
-"""DingTalk work-notice (corp conversation) channel plugin.
+"""钉钉工作通知（企业会话）通道插件。
 
-Type: ``dingtalk.work_notice``
+类型：``dingtalk.work_notice``
 
-Uses app-key credentials to obtain an access token, then sends an
-async work-notice (markdown or image) via ``topapi/message/corpconversation/asyncsend_v2``.
+使用 app_key/app_secret 获取 access_token，再通过
+``topapi/message/corpconversation/asyncsend_v2`` 异步发送工作通知
+（markdown 与/或 image）。
 """
 
 from __future__ import annotations
@@ -22,25 +23,27 @@ _MEDIA_UPLOAD_URL = "https://oapi.dingtalk.com/media/upload"
 
 
 class DingTalkWorkNoticePlugin:
-    """ChannelPlugin for DingTalk enterprise work notices.
+    """钉钉企业工作通知通道插件。
 
-    Config:
+    配置：
 
-    - ``app_key`` (required)
-    - ``app_secret`` (required)
-    - ``agent_id`` (required, int or str)
-    - ``userid_list`` (optional, comma-separated user ids)
-    - ``dept_id_list`` (optional, comma-separated dept ids)
-    - ``title`` (optional): markdown title (default ``数据推送``)
+    - ``app_key``（必填）
+    - ``app_secret``（必填）
+    - ``agent_id``（必填，int 或 str）
+    - ``userid_list``（可选，逗号分隔用户 id）
+    - ``dept_id_list``（可选，逗号分隔部门 id）
+    - ``title``（可选）：markdown 标题（默认 ``数据推送``）
 
-    At least one of ``userid_list`` / ``dept_id_list`` is required.
+    ``userid_list`` 与 ``dept_id_list`` 至少填其一。
     """
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "dingtalk.work_notice"
 
     def validate_config(self, config: dict[str, Any]) -> None:
+        """校验凭证与收件人列表。"""
         missing = [k for k in ("app_key", "app_secret", "agent_id") if not config.get(k)]
         if missing:
             raise ValueError(f"missing required config: {', '.join(missing)}")
@@ -51,6 +54,7 @@ class DingTalkWorkNoticePlugin:
 
     @staticmethod
     def _part_path(part: MessagePart) -> str | None:
+        """从 part 提取本地/远程路径。"""
         content = part.content
         if isinstance(content, dict):
             for key in ("path", "url", "download_url"):
@@ -63,6 +67,7 @@ class DingTalkWorkNoticePlugin:
 
     @classmethod
     def _part_to_text(cls, part: MessagePart) -> str:
+        """片段转文本；image 走原生图片消息，此处返回空。"""
         if part.kind == "text":
             return str(part.content) if part.content is not None else ""
         if part.kind == "card":
@@ -83,18 +88,20 @@ class DingTalkWorkNoticePlugin:
             label = f"文件: {name}".rstrip() if name else "文件"
             return f"{label}\n下载路径: {path}" if path else f"{label}: (no path)"
         if part.kind == "image":
-            # Prefer native image msgtype when path exists; text fallback omitted
+            # 有路径时优先原生 image msgtype；不在文本中重复
             return ""
         return f"[{part.kind}]"
 
     @classmethod
     def _message_to_text(cls, message: Message) -> str:
+        """拼接非图片片段为 markdown 正文。"""
         parts = [cls._part_to_text(p) for p in message.parts]
         text = "\n\n".join(p for p in parts if p)
         return text if text else ""
 
     @classmethod
     def _image_paths(cls, message: Message) -> list[str]:
+        """收集 image 片段中的可上传路径。"""
         paths: list[str] = []
         for part in message.parts:
             if part.kind != "image":
@@ -105,6 +112,7 @@ class DingTalkWorkNoticePlugin:
         return paths
 
     def _fetch_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
+        """调用 gettoken 获取 oapi access_token。"""
         resp = client.get(
             _TOKEN_URL,
             params={
@@ -126,6 +134,7 @@ class DingTalkWorkNoticePlugin:
         return str(token)
 
     def _upload_image(self, client: httpx.Client, access_token: str, path: str) -> str:
+        """上传本地图片到 media/upload，返回 media_id。"""
         file_path = Path(path)
         if not file_path.is_file():
             raise RuntimeError(f"image file not found: {path}")
@@ -149,6 +158,7 @@ class DingTalkWorkNoticePlugin:
         return str(media_id)
 
     def _base_body(self, config: dict[str, Any], msg: dict[str, Any]) -> dict[str, Any]:
+        """组装 asyncsend_v2 请求体（agent + 收件人 + msg）。"""
         body: dict[str, Any] = {
             "agent_id": config["agent_id"],
             "msg": msg,
@@ -165,6 +175,7 @@ class DingTalkWorkNoticePlugin:
         access_token: str,
         body: dict[str, Any],
     ) -> DeliveryResult:
+        """POST 一次工作通知发送并解析 errcode / task_id。"""
         resp = client.post(
             _SEND_URL,
             params={"access_token": access_token},
@@ -196,7 +207,7 @@ class DingTalkWorkNoticePlugin:
         return DeliveryResult(success=True, provider_msg_id=None)
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
-        """Obtain access token then async-send markdown and/or image work notices."""
+        """获取 token 后异步发送 markdown 与/或 image 工作通知。"""
         try:
             self.validate_config(config)
         except ValueError as exc:
@@ -241,7 +252,7 @@ class DingTalkWorkNoticePlugin:
                         provider_ids.append(last.provider_msg_id)
 
                 if last is None:
-                    # No text and no images — send a placeholder markdown
+                    # 无文本且无图 — 发送占位 markdown
                     title = str(config.get("title") or "数据推送")
                     body = self._base_body(
                         config,

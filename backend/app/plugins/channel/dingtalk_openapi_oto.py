@@ -1,18 +1,18 @@
-"""DingTalk OpenAPI one-to-one (OTO) robot channel plugin.
+"""钉钉 OpenAPI 单聊（OTO）机器人通道插件。
 
-Type: ``dingtalk.openapi_oto_robot``
+类型：``dingtalk.openapi_oto_robot``
 
-Aligns with legacy pythonProject4 ``singleshot`` / BatchSendOTO:
-send markdown and/or images to a list of userIds via application robot.
+对齐遗留 pythonProject4 的 ``singleshot`` / BatchSendOTO：
+通过应用机器人向一组 userId 发送 markdown 与/或图片。
 
-Config:
+配置：
 
-- ``app_key`` (required)
-- ``app_secret`` (required)
-- ``robot_code`` (required)
-- ``user_ids`` (required): list[str] or comma-separated string
-- ``title`` (optional): markdown title (default ``数据推送``)
-- ``batch_size`` (optional): max users per request (default 20, legacy split)
+- ``app_key``（必填）
+- ``app_secret``（必填）
+- ``robot_code``（必填）
+- ``user_ids``（必填）：list[str] 或逗号分隔字符串
+- ``title``（可选）：markdown 标题（默认 ``数据推送``）
+- ``batch_size``（可选）：每批用户数（默认 20，与遗留分片一致）
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ _OAPI_TOKEN_URL = "https://oapi.dingtalk.com/gettoken"
 
 
 def _parse_user_ids(config: dict[str, Any]) -> list[str]:
+    """解析 user_ids / userid_list 为去空白后的字符串列表。"""
     raw = config.get("user_ids") or config.get("userid_list")
     if raw is None:
         return []
@@ -44,19 +45,22 @@ def _parse_user_ids(config: dict[str, Any]) -> list[str]:
 
 
 def _chunked(items: list[str], size: int) -> list[list[str]]:
+    """将列表按 size 分片（size < 1 时回退默认批大小）。"""
     if size < 1:
         size = _DEFAULT_BATCH
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 class DingTalkOpenAPIOtoRobotPlugin:
-    """ChannelPlugin for DingTalk application robot → users (OTO batch)."""
+    """钉钉应用机器人 → 用户（OTO 批量）通道插件。"""
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "dingtalk.openapi_oto_robot"
 
     def validate_config(self, config: dict[str, Any]) -> None:
+        """校验凭证、robot_code 与 user_ids。"""
         missing = [k for k in ("app_key", "app_secret", "robot_code") if not config.get(k)]
         if missing:
             raise ValueError(f"missing required config: {', '.join(missing)}")
@@ -65,6 +69,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
 
     @staticmethod
     def _part_path(part: MessagePart) -> str | None:
+        """从 part 提取 path/url。"""
         content = part.content
         if isinstance(content, dict):
             for key in ("path", "url", "download_url"):
@@ -77,6 +82,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
 
     @classmethod
     def _part_to_text(cls, part: MessagePart) -> str:
+        """片段转文本；image 单独 sampleImageMsg 发送。"""
         if part.kind == "text":
             return str(part.content) if part.content is not None else ""
         if part.kind == "card":
@@ -98,15 +104,18 @@ class DingTalkOpenAPIOtoRobotPlugin:
 
     @classmethod
     def _message_to_text(cls, message: Message) -> str:
+        """拼接非图片片段正文。"""
         parts = [cls._part_to_text(p) for p in message.parts]
         text = "\n\n".join(p for p in parts if p)
         return text if text else "(empty message)"
 
     @classmethod
     def _image_parts(cls, message: Message) -> list[MessagePart]:
+        """筛选 image 片段。"""
         return [p for p in message.parts if p.kind == "image"]
 
     def _fetch_new_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
+        """新版 API accessToken（OTO batchSend 用）。"""
         resp = client.post(
             _OAUTH_URL,
             json={
@@ -124,6 +133,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
         return str(token)
 
     def _fetch_oapi_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
+        """旧版 oapi token（media/upload 用）。"""
         resp = client.get(
             _OAPI_TOKEN_URL,
             params={
@@ -145,6 +155,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
         return str(token)
 
     def _upload_image(self, client: httpx.Client, oapi_token: str, path: str) -> str:
+        """上传本地图片，返回 media_id。"""
         file_path = Path(path)
         if not file_path.is_file():
             raise RuntimeError(f"image file not found: {path}")
@@ -176,6 +187,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
         msg_key: str,
         msg_param: dict[str, Any],
     ) -> dict[str, Any]:
+        """调用 oToMessages/batchSend 向一批用户发消息。"""
         payload = {
             "robotCode": str(config["robot_code"]),
             "userIds": user_ids,
@@ -201,6 +213,7 @@ class DingTalkOpenAPIOtoRobotPlugin:
         return data if isinstance(data, dict) else {"result": data}
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
+        """按批向 user_ids 发送 markdown 与图片 OTO 消息。"""
         try:
             self.validate_config(config)
         except ValueError as exc:

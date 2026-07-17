@@ -1,4 +1,33 @@
-"""Compile artboard component tree → HTML / Markdown / PNG / Message."""
+"""画板编译器：组件树 → HTML / Markdown / PNG / 出站 Message。
+
+架构职责
+--------
+Studio 的**核心渲染引擎**。输入为 artboard v3 文档 + 多数据集查询结果
+（``data_ctx: dataset_id → QueryResult``），输出：
+
+1. **HTML**：完整可截图的文档（含主题 CSS、顶栏 chrome、组件树）
+2. **Markdown**：组件树投影的纯文本（钉钉等渠道备用）
+3. **PNG**：Playwright / wkhtmltoimage 对 ``#artboard`` 节点截图
+4. **Message**：推送外壳（compose）+ 画板图/文，供 channel 插件发送
+
+组件类型
+--------
+``Text`` / ``Kpi`` / ``Table`` / ``Chart`` / ``Alert`` / ``Container`` / ``Divider``。
+
+布局
+----
+- **流式**（默认）：Container 按 column/row + gap 排布
+- **自由画布**：子节点带 ``compose_x/y/w/h`` 时切换 absolute 定位
+
+可见性
+------
+``visible`` 布尔 + ``visible_when`` 表达式（如 ``row_count>0``），按绑定数据集求值。
+
+与 pipeline 的衔接
+------------------
+``execution.pipeline.render_message`` 在识别 artboard 后调用
+:func:`artboard_to_message`；工作台预览走 :func:`compile_artboard`。
+"""
 
 from __future__ import annotations
 
@@ -12,8 +41,11 @@ from typing import Any
 from app.modules.studio.themes import resolve_theme, theme_css_vars
 from app.plugins.base import Message, MessagePart, QueryResult
 
+# 占位符：{{列名}}，允许内部空白；用于文本/KPI/顶栏等首行替换
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+# 百分比单元格着色（同比/环比等）
 _PERCENT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
+# 表格默认截断行数，避免超长 HTML 拖垮截图
 _MAX_ROWS = 50
 
 _CSS = """
@@ -174,12 +206,14 @@ table.comp-table.style-compact th, table.comp-table.style-compact td { max-width
 
 
 def _esc(value: Any) -> str:
+    """HTML 转义；None 视为空串。"""
     if value is None:
         return ""
     return html.escape(str(value))
 
 
 def _ratio_class(cell: str, *, enabled: bool) -> str:
+    """百分比单元格 CSS 类：强正/正/负/强负（阈值 ±20%）。"""
     if not enabled:
         return ""
     m = _PERCENT_RE.match(cell.strip())
@@ -198,6 +232,10 @@ def _ratio_class(cell: str, *, enabled: bool) -> str:
 
 
 def substitute_first_row(template: str, result: QueryResult | None) -> str:
+    """用查询结果**首行**替换模板中的 ``{{列名}}`` 占位符。
+
+    无数据或未知列 → 空串。画板文本、KPI 标签、chrome 标题、compose 外壳均依赖此逻辑。
+    """
     if not template:
         return template
     if result is None or not result.rows:
@@ -223,6 +261,26 @@ def substitute_first_row(template: str, result: QueryResult | None) -> str:
 
 @dataclass
 class CompileResult:
+    """一次完整编译的产物，供工作台预览 API 序列化。
+
+    属性
+    ----------
+    html:
+        可直接 iframe / 截图的完整 HTML 文档。
+    markdown:
+        组件树投影的 Markdown（不含 compose 外壳）。
+    message:
+        含 compose 推送外壳的最终 Message（图+文）。
+    image_base64 / image_path:
+        PNG data URL 与本地存储路径；成图失败时为 None。
+    row_count:
+        主数据集（main）行数。
+    parts_preview:
+        Message 各 part 的短预览，便于 UI 列表展示。
+    image_error:
+        成图失败时的用户可读原因（如未装 Playwright）。
+    """
+
     html: str
     markdown: str
     message: Message
@@ -238,6 +296,7 @@ def _get_dataset(
     binding: dict[str, Any] | None,
     default_id: str = "main",
 ) -> QueryResult | None:
+    """按节点 binding.dataset_id 取数；缺失时回退 data_ctx 中第一个数据集。"""
     binding = binding or {}
     ds_id = str(binding.get("dataset_id") or default_id)
     if ds_id in data_ctx:
@@ -248,14 +307,18 @@ def _get_dataset(
 
 
 def _eval_visible_when(expr: str, data_ctx: dict[str, QueryResult], binding: dict[str, Any]) -> bool:
-    """Safe subset of visibility conditions.
+    """安全子集可见性表达式求值（禁止任意代码执行）。
 
-    Supported::
-        always / true / ""
-        never / false
-        row_count>0  row_count==0  row_count>=N  row_count<=N  row_count!=N
-        empty / not_empty  (alias of row_count)
-    Evaluated against the node's bound dataset (default main).
+    支持::
+
+        always / true / ""          → 始终显示
+        never / false / hidden      → 始终隐藏
+        row_count>0 / not_empty     → 有数据
+        row_count==0 / empty        → 无数据
+        row_count>=N / <=N / !=N 等  → 与行数比较
+
+    针对节点绑定的数据集（默认 main）。未知表达式 **fail-open**（显示），
+    避免设计者写错条件导致整板空白。
     """
     raw = (expr or "").strip().lower().replace(" ", "")
     if raw in ("", "always", "true", "1"):
@@ -292,11 +355,12 @@ def _eval_visible_when(expr: str, data_ctx: dict[str, QueryResult], binding: dic
 
 
 def _visible(node: dict[str, Any], data_ctx: dict[str, QueryResult] | None = None) -> bool:
+    """节点是否渲染：visible=false 优先；否则解析 visible_when。"""
     if node.get("visible", True) is False:
         return False
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
-    # Prefer props.visible_when, then top-level visible_when
+    # props.visible_when 优先于节点顶层 visible_when
     expr = props.get("visible_when")
     if expr is None:
         expr = node.get("visible_when")
@@ -306,6 +370,7 @@ def _visible(node: dict[str, Any], data_ctx: dict[str, QueryResult] | None = Non
 
 
 def _looks_like_html(s: str) -> bool:
+    """粗判是否富文本 HTML（含常见标签），用于 Text 组件分支。"""
     t = (s or "").strip().lower()
     return "<" in t and any(
         tag in t
@@ -328,11 +393,12 @@ def _looks_like_html(s: str) -> bool:
 
 
 def _strip_html(s: str) -> str:
+    """去掉 HTML 标签，供 Markdown 投影使用。"""
     return re.sub(r"<[^>]+>", "", s or "")
 
 
 def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """Render plain or rich (HTML) text; placeholders {{col}} resolved first."""
+    """渲染文本组件 HTML：先做 {{列}} 替换；富文本原样嵌入，纯文本按 variant 套样式。"""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -354,6 +420,7 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
 
 
 def _render_text_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """文本组件的 Markdown 投影；富文本先剥标签，标题用 ##。"""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -370,6 +437,11 @@ def _render_text_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> s
 def _resolve_kpi(
     node: dict[str, Any], data_ctx: dict[str, QueryResult]
 ) -> tuple[str, str]:
+    """解析 KPI 标签与数值。
+
+    绑定优先级：显式 value_column → auto_index 列序 → 首列。
+    无行时返回破折号占位。
+    """
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -404,6 +476,7 @@ def _resolve_kpi(
 
 
 def _render_kpi_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """KPI 卡片 HTML。"""
     label, value = _resolve_kpi(node, data_ctx)
     return (
         f"<div class='comp-kpi'><div class='label'>{_esc(label)}</div>"
@@ -412,11 +485,13 @@ def _render_kpi_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
 
 
 def _render_kpi_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """KPI 的 Markdown 一行：``**标签**: 值``。"""
     label, value = _resolve_kpi(node, data_ctx)
     return f"**{label}**: {value}"
 
 
 def _render_table_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """数据表 HTML：可选列筛选、行截断、百分比着色、style 变体。"""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -453,6 +528,7 @@ def _render_table_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 
 def _render_table_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """数据表 Markdown（复用 text_md 渲染器）。"""
     from app.plugins.renderer.text_md import render_markdown_table
 
     binding = dict(node.get("binding") or {})
@@ -468,7 +544,7 @@ def _render_table_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
     return render_markdown_table(trimmed, title=None)
 
 
-# Palette for multi-series charts (print-friendly)
+# 多系列图表调色板（打印友好、对比度足够）
 _CHART_COLORS = [
     "#1677ff",
     "#52c41a",
@@ -484,6 +560,7 @@ _CHART_COLORS = [
 
 
 def _to_float(value: Any) -> float | None:
+    """宽松数值解析：去千分位逗号与百分号；失败返回 None。"""
     if value is None:
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -500,7 +577,13 @@ def _to_float(value: Any) -> float | None:
 def _chart_series(
     node: dict[str, Any], data_ctx: dict[str, QueryResult]
 ) -> tuple[list[str], list[float], str, list[dict[str, Any]]]:
-    """Return (labels, primary_values, chart_type, multi_series)."""
+    """从绑定列抽取图表序列。
+
+    返回
+    -------
+    labels, primary_values, chart_type, multi_series
+        multi_series 为 ``[{name, values}, ...]``，多 Y 列时使用。
+    """
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -568,6 +651,7 @@ def _chart_series(
 
 
 def _render_bar_svg(labels: list[str], values: list[float], *, width: int = 680, height: int = 260) -> str:
+    """柱状图 SVG 回退（ECharts 截图失败时使用）。"""
     if not values:
         return "<p class='comp-empty'>（图表无有效数值）</p>"
     max_v = max(values) or 1.0
@@ -591,12 +675,12 @@ def _render_bar_svg(labels: list[str], values: list[float], *, width: int = 680,
             f"<rect x='{x:.1f}' y='{y:.1f}' width='{bar_w:.1f}' height='{bh:.1f}' "
             f"fill='{color}' rx='3'/>"
         )
-        # value label
+        # 柱顶数值
         parts.append(
             f"<text x='{x + bar_w / 2:.1f}' y='{y - 4:.1f}' text-anchor='middle' "
             f"font-size='11' fill='#666'>{_esc(_fmt_num(val))}</text>"
         )
-        # category under axis
+        # 轴下分类标签（超长截断）
         short = lab if len(lab) <= 8 else lab[:7] + "…"
         parts.append(
             f"<text x='{x + bar_w / 2:.1f}' y='{pad_t + plot_h + 16}' text-anchor='middle' "
@@ -607,12 +691,14 @@ def _render_bar_svg(labels: list[str], values: list[float], *, width: int = 680,
 
 
 def _fmt_num(v: float) -> str:
+    """整数去小数位，否则保留一位小数。"""
     if abs(v - round(v)) < 1e-9:
         return str(int(round(v)))
     return f"{v:.1f}"
 
 
 def _render_line_svg(labels: list[str], values: list[float], *, width: int = 680, height: int = 260) -> str:
+    """折线图 SVG 回退。"""
     if not values:
         return "<p class='comp-empty'>（图表无有效数值）</p>"
     max_v = max(values) or 1.0
@@ -651,6 +737,7 @@ def _render_line_svg(labels: list[str], values: list[float], *, width: int = 680
 
 
 def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) -> str:
+    """饼图 SVG 回退（含图例与占比）。"""
     if not values:
         return "<p class='comp-empty'>（图表无有效数值）</p>"
     total = sum(values)
@@ -661,7 +748,7 @@ def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) 
     parts = [
         f"<svg xmlns='http://www.w3.org/2000/svg' width='{size}' height='{size}' viewBox='0 0 {size} {size}'>"
     ]
-    angle = -math.pi / 2  # start at top
+    angle = -math.pi / 2  # 从 12 点方向起画
     for i, val in enumerate(values):
         sweep = (val / total) * 2 * math.pi
         if sweep <= 0:
@@ -673,7 +760,7 @@ def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) 
         y2 = cy + r * math.sin(angle2)
         large = 1 if sweep > math.pi else 0
         color = _CHART_COLORS[i % len(_CHART_COLORS)]
-        # full circle special case
+        # 整圆无法用 arc 路径，特殊处理
         if abs(sweep - 2 * math.pi) < 1e-9:
             parts.append(f"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{color}'/>")
         else:
@@ -701,6 +788,7 @@ def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) 
 
 
 def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """图表 HTML：优先 ECharts+Playwright 出 PNG，失败则内嵌 SVG。"""
     props = dict(node.get("props") or {})
     labels, values, chart_type, multi = _chart_series(node, data_ctx)
     title = str(props.get("title") or "")
@@ -710,7 +798,7 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
             f"（请绑定分类列与数值列，并先取数）</p></div>"
         )
 
-    # Apache ECharts (via option JSON + Playwright) — mainstream BI path
+    # 主路径：Apache ECharts option → Playwright 截图 → data URL 嵌入
     try:
         from app.modules.studio.charts import chart_img_html, chart_to_png_data_url
 
@@ -740,6 +828,7 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 
 def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """图表 Markdown：标题 + 键值列表（不嵌入图片）。"""
     props = dict(node.get("props") or {})
     labels, values, chart_type, multi = _chart_series(node, data_ctx)
     type_label = {
@@ -763,6 +852,7 @@ def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
 
 
 def _render_alert_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """告警条 HTML；level 决定 info/success/warning/error 配色。"""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -775,6 +865,7 @@ def _render_alert_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 
 def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """告警条 Markdown 引用块。"""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -783,6 +874,7 @@ def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
 
 
 def _as_int(value: Any, default: int) -> int:
+    """安全 int 转换，失败返回 default。"""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -790,11 +882,12 @@ def _as_int(value: Any, default: int) -> int:
 
 
 def _has_free_layout(props: dict[str, Any]) -> bool:
-    """True when assembly used free-canvas coords (compose_x / compose_y)."""
+    """是否使用自由画布坐标（存在 compose_x / compose_y）。"""
     return props.get("compose_x") is not None or props.get("compose_y") is not None
 
 
 def _children_use_free_layout(children: list[Any]) -> bool:
+    """任一子节点带自由坐标则整容器切到 freeboard。"""
     for ch in children:
         if isinstance(ch, dict) and _has_free_layout(dict(ch.get("props") or {})):
             return True
@@ -802,6 +895,7 @@ def _children_use_free_layout(children: list[Any]) -> bool:
 
 
 def _free_board_height(children: list[Any], canvas_width: int = 750) -> int:
+    """按子节点 y+h 估算自由画布最小高度，避免裁切。"""
     bottom = 200
     for i, ch in enumerate(children):
         if not isinstance(ch, dict):
@@ -818,7 +912,7 @@ def _free_board_height(children: list[Any], canvas_width: int = 750) -> int:
 
 
 def _wrap_compose_layout(node: dict[str, Any], inner: str, *, canvas_width: int = 750) -> str:
-    """Assembly layout: free absolute (x/y/w/h + style) or legacy width %."""
+    """装配层布局包装：自由绝对定位（x/y/w/h+样式）或旧版宽度百分比。"""
     if not inner:
         return ""
     props = dict(node.get("props") or {})
@@ -864,7 +958,7 @@ def _wrap_compose_layout(node: dict[str, Any], inner: str, *, canvas_width: int 
             f"</div>"
         )
 
-    # Legacy: width percent + optional accent
+    # 旧版：宽度百分比 + 可选主题色强调
     styles: list[str] = []
     w = _as_int(props.get("compose_width"), 100)
     if w != 100:
@@ -885,6 +979,7 @@ def _walk_html(
     *,
     canvas_width: int = 750,
 ) -> str:
+    """递归遍历组件树生成 HTML 片段（含可见性与装配布局）。"""
     if not _visible(node, data_ctx):
         return ""
     ntype = str(node.get("type") or "")
@@ -925,6 +1020,7 @@ def _walk_html(
 
 
 def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str]:
+    """递归遍历组件树，收集 Markdown 段落列表。"""
     if not _visible(node, data_ctx):
         return []
     ntype = str(node.get("type") or "")
@@ -952,6 +1048,10 @@ def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str
 
 
 def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """组装完整 HTML 文档：主题 CSS + chrome 顶栏 + 组件树 body。
+
+    输出含 ``id='artboard'`` 根节点，供 Playwright 精确截图。
+    """
     ab = dict(doc.get("artboard") or {})
     pack = resolve_theme(ab)
     width = int(ab.get("width") or 750)
@@ -963,7 +1063,7 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     )
     body_cls = "artboard-body free" if free else "artboard-body"
     chrome_title = str(ab.get("chrome_title") or doc.get("scene_id") or "数据推送")
-    # Allow first-row sub on chrome title from main dataset
+    # chrome 标题也支持 {{列}}，默认取 main 数据集首行
     main = data_ctx.get("main") or (next(iter(data_ctx.values())) if data_ctx else None)
     if main:
         chrome_title = substitute_first_row(chrome_title, main)
@@ -983,13 +1083,17 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 
 def build_artboard_markdown(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """组件树 → 单一 Markdown 字符串（段落间空行分隔）。"""
     tree = doc.get("tree") or {}
     parts = _walk_md(tree if isinstance(tree, dict) else {}, data_ctx)
     return "\n\n".join(p for p in parts if p)
 
 
 def _html_to_png(html_doc: str, width: int = 750) -> tuple[bytes | None, str | None]:
-    """Screenshot artboard HTML; return (png_bytes, path) with path via LocalStorage."""
+    """将画板 HTML 截为 PNG，经 LocalStorage 落盘。
+
+    后端优先级：Playwright Chromium → wkhtmltoimage → 失败返回 (None, None)。
+    """
     import os
     import subprocess
     import tempfile
@@ -1049,6 +1153,7 @@ def _html_to_png(html_doc: str, width: int = 750) -> tuple[bytes | None, str | N
 
 
 def _main_query_result(data_ctx: dict[str, QueryResult]) -> QueryResult | None:
+    """取主数据集；无 main 键时回退 data_ctx 第一个。"""
     if "main" in data_ctx:
         return data_ctx["main"]
     if data_ctx:
@@ -1057,26 +1162,25 @@ def _main_query_result(data_ctx: dict[str, QueryResult]) -> QueryResult | None:
 
 
 def _resolve_compose_text(template: Any, data_ctx: dict[str, QueryResult]) -> str:
-    """Resolve push-shell rich text / markdown with first-row {{字段}}.
+    """解析推送外壳富文本/Markdown，并做首行 ``{{字段}}`` 替换。
 
-    Editors store HTML (Quill); outbound DingTalk text is converted to
-    DingTalk-friendly markdown (bold/headers/lists/font color).
+    编辑器存 Quill HTML；出站钉钉文本会转为钉钉友好 Markdown（加粗/标题/列表/字体色）。
     """
     from app.modules.studio.html_md import is_empty_rich_text, rich_to_push_text
 
     raw = str(template or "")
     if not raw.strip() or is_empty_rich_text(raw):
         return ""
-    # Substitute fields first so tokens inside HTML / markdown are filled
+    # 先替换字段，再 HTML→Markdown，避免标签打断占位符
     resolved = substitute_first_row(raw, _main_query_result(data_ctx))
     return rich_to_push_text(resolved)
 
 
 def _compose_include_component_md(compose: dict[str, Any], *, has_shell_text: bool) -> bool:
-    """Whether to append auto markdown projected from component tree.
+    """是否附加组件树自动生成的 Markdown。
 
-    Explicit ``include_component_md`` wins. Otherwise legacy:
-    ``markdown_caption`` (default True) only when no user shell text.
+    显式 ``include_component_md`` 优先；否则兼容旧逻辑：
+    仅在无用户外壳文案时按 ``markdown_caption``（默认 True）附加。
     """
     if "include_component_md" in compose:
         return bool(compose.get("include_component_md"))
@@ -1091,14 +1195,16 @@ def artboard_to_message(
     *,
     with_image: bool = True,
 ) -> Message:
-    """Build Message from artboard + push shell (text around canvas image).
+    """画板 + 推送外壳 → 出站 :class:`Message`。
 
-    Compose fields (``doc.compose``)::
+    compose 字段（``doc.compose``）::
 
         mode: image_primary | markdown_primary | mixed | image_only
-        text_before / text_after: markdown outside the canvas image
-        title: DingTalk markdown title
-        include_component_md / markdown_caption: optional auto MD from tree
+        text_before / text_after: 画板图前后的外壳文案
+        title: 钉钉等渠道的消息标题
+        include_component_md / markdown_caption: 是否附带组件树 MD
+
+    成图失败时按 mode 降级为纯文本，保证渠道仍可收到内容。
     """
     md_auto = build_artboard_markdown(doc, data_ctx)
     compose = dict(doc.get("compose") or {})
@@ -1123,7 +1229,7 @@ def artboard_to_message(
         parts.append(MessagePart(kind="text", content=body or "（空内容）"))
         return Message(parts=parts)
 
-    # image_primary / mixed / image_only: optional text → image → optional text
+    # image_primary / mixed / image_only：可选文案 → 图 → 可选文案
     _append_text(text_before)
 
     image_added = False
@@ -1140,14 +1246,14 @@ def artboard_to_message(
             parts.append(MessagePart(kind="text", content="（成图失败）"))
             return Message(parts=parts)
         elif mode != "mixed" and not has_shell and not auto_md:
-            # no image engine and nothing else — fall back to component md
+            # 无截图引擎且无其它内容 — 回退组件 MD
             parts.append(MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）"))
             return Message(parts=parts)
 
     if text_after:
         _append_text(text_after)
     elif auto_md and (mode == "mixed" or include_auto or not image_added):
-        # Legacy / mixed: component markdown as caption when user did not set text_after
+        # 兼容/混合：用户未设 text_after 时用组件 MD 作图注
         _append_text(auto_md)
 
     if not parts:
@@ -1162,7 +1268,11 @@ def compile_artboard(
     *,
     want_image: bool = True,
 ) -> CompileResult:
-    """Full compile for preview APIs."""
+    """完整编译：HTML + Markdown + Message +（可选）PNG 预览。
+
+    工作台 ``POST /editor/studio/compile`` 与定时推送预览均走此入口。
+    ``want_image=False`` 可跳过截图以加速纯 HTML/MD 预览。
+    """
     html_doc = build_artboard_html(doc, data_ctx)
     md = build_artboard_markdown(doc, data_ctx)
     main = data_ctx.get("main") or (next(iter(data_ctx.values())) if data_ctx else None)

@@ -1,3 +1,12 @@
+/**
+ * 推送任务「高级/原始」表单页。
+ *
+ * 以 Tabs 编辑基本信息、SQL、render_spec JSON、通道与调度；
+ * 日常内容编排推荐走 `/editor`，本页适合直接改 JSON 规格或运维开关。
+ * 「立即执行」使用**已保存**配置，未点保存的表单修改不生效。
+ *
+ * 路由：`/push-jobs/:id`（新建入口已重定向到列表）
+ */
 import { ArrowLeftOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   Button,
@@ -24,6 +33,7 @@ import {
 import { getErrorMessage } from '../../api/client'
 import type { Channel, DataSource, PushJob } from '../../api/types'
 
+/** 表单值；render_spec 以文本编辑，提交前再 JSON.parse */
 interface FormValues {
   name: string
   enabled: boolean
@@ -36,10 +46,12 @@ interface FormValues {
   schedule_enabled: boolean
 }
 
+/** 新建时的默认 render_spec 文本 */
 function defaultRenderSpec(): string {
   return JSON.stringify({ type: 'text_md', title: '数据推送' }, null, 2)
 }
 
+/** 解析并校验 render_spec 必须为对象或数组 */
 function parseRenderSpec(text: string): Record<string, unknown> | unknown[] {
   const parsed: unknown = JSON.parse(text)
   if (parsed === null || (typeof parsed !== 'object' && !Array.isArray(parsed))) {
@@ -48,6 +60,7 @@ function parseRenderSpec(text: string): Record<string, unknown> | unknown[] {
   return parsed as Record<string, unknown> | unknown[]
 }
 
+/** 推送任务表单页（基本 / 取数 / 渲染 / 通道 / 调度 / 运行） */
 export function PushJobFormPage() {
   const { id } = useParams<{ id: string }>()
   const isNew = !id || id === 'new'
@@ -100,6 +113,7 @@ export function PushJobFormPage() {
       .finally(() => setLoading(false))
   }, [form, id, isNew, loadMeta])
 
+  /** 校验表单并组装创建/更新 payload；失败时切换到对应 Tab */
   const collectPayload = async () => {
     const values = await form.validateFields()
     let render_spec: Record<string, unknown> | unknown[]

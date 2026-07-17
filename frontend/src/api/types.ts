@@ -1,16 +1,38 @@
-/** Shared API response types matching backend schemas. */
+/**
+ * 前后端共享的 API 类型定义。
+ *
+ * 字段命名与后端 Pydantic / JSON schema 对齐（snake_case）。
+ * 分区：
+ * - 认证 / 通用结果
+ * - 数据源、通道、推送任务、执行记录、API Token
+ * - 旧版编辑器（DesignSpec + message/image preview）
+ * - Studio 画板（ArtboardDoc / StudioNode / compile）
+ *
+ * 仅类型，无运行时逻辑。
+ */
 
+// ---------------------------------------------------------------------------
+// 认证与通用
+// ---------------------------------------------------------------------------
+
+/** 登录成功返回的 Bearer Token */
 export interface TokenResponse {
   access_token: string
   token_type: 'bearer'
 }
 
+/** 数据源/通道「测试连接」统一结果 */
 export interface TestConnectionResult {
   ok: boolean
   message?: string | null
   detail?: unknown
 }
 
+// ---------------------------------------------------------------------------
+// 数据源
+// ---------------------------------------------------------------------------
+
+/** 数据源实体（MySQL / Doris / SQLite / SQL Server 等） */
 export interface DataSource {
   id: string
   name: string
@@ -20,18 +42,25 @@ export interface DataSource {
   updated_at: string
 }
 
+/** 创建数据源请求体 */
 export interface DataSourceCreate {
   name: string
   type: string
   config: Record<string, unknown>
 }
 
+/** 更新数据源请求体（全可选） */
 export interface DataSourceUpdate {
   name?: string
   type?: string
   config?: Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// 通道（钉钉等投递目标）
+// ---------------------------------------------------------------------------
+
+/** 通道实体；type 如 dingtalk.webhook_robot / openapi_group_robot */
 export interface Channel {
   id: string
   name: string
@@ -41,18 +70,28 @@ export interface Channel {
   updated_at: string
 }
 
+/** 创建通道请求体 */
 export interface ChannelCreate {
   name: string
   type: string
   config: Record<string, unknown>
 }
 
+/** 更新通道请求体（全可选） */
 export interface ChannelUpdate {
   name?: string
   type?: string
   config?: Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// 推送任务
+// ---------------------------------------------------------------------------
+
+/**
+ * 推送任务：绑定数据源 + SQL + 渲染规格（含 Studio artboard）+ 通道列表。
+ * 调度字段控制 cron 是否生效。
+ */
 export interface PushJob {
   id: string
   name: string
@@ -60,6 +99,7 @@ export interface PushJob {
   skip_if_empty: boolean
   data_source_id: string
   query_sql: string
+  /** 旧 DesignSpec 或 Studio ArtboardDoc 等 */
   render_spec: Record<string, unknown> | unknown[]
   channel_ids: string[]
   schedule_cron: string | null
@@ -71,6 +111,7 @@ export interface PushJob {
   last_run_at?: string | null
 }
 
+/** 完整创建推送任务 */
 export interface PushJobCreate {
   name: string
   enabled?: boolean
@@ -83,12 +124,14 @@ export interface PushJobCreate {
   schedule_enabled?: boolean
 }
 
+/** 草稿任务（仅名称+数据源，随后进内容工作台完善） */
 export interface PushJobDraftCreate {
   name: string
   data_source_id: string
   enabled?: boolean
 }
 
+/** 更新推送任务（全可选） */
 export interface PushJobUpdate {
   name?: string
   enabled?: boolean
@@ -101,6 +144,11 @@ export interface PushJobUpdate {
   schedule_enabled?: boolean
 }
 
+// ---------------------------------------------------------------------------
+// 执行记录（JobRun）
+// ---------------------------------------------------------------------------
+
+/** 单次任务运行摘要 */
 export interface JobRun {
   id: string
   push_job_id: string
@@ -116,6 +164,7 @@ export interface JobRun {
   created_at: string
 }
 
+/** 单次通道投递结果 */
 export interface Delivery {
   id: string
   job_run_id: string
@@ -127,6 +176,7 @@ export interface Delivery {
   finished_at?: string | null
 }
 
+/** 运行步骤日志 */
 export interface JobRunLog {
   id: string
   job_run_id: string
@@ -136,11 +186,13 @@ export interface JobRunLog {
   created_at: string
 }
 
+/** 运行详情 = 摘要 + 投递列表 + 日志 */
 export interface JobRunDetail extends JobRun {
   deliveries: Delivery[]
   logs: JobRunLog[]
 }
 
+/** 列表筛选查询参数 */
 export interface JobRunListParams {
   status?: string
   push_job_id?: string
@@ -149,6 +201,11 @@ export interface JobRunListParams {
   offset?: number
 }
 
+// ---------------------------------------------------------------------------
+// API Token（机器调用）
+// ---------------------------------------------------------------------------
+
+/** Token 列表项（不含明文 token） */
 export interface ApiToken {
   id: string
   name: string
@@ -156,6 +213,7 @@ export interface ApiToken {
   revoked_at?: string | null
 }
 
+/** 创建 Token 时一次性返回完整 token 明文 */
 export interface ApiTokenCreated {
   id: string
   name: string
@@ -163,9 +221,10 @@ export interface ApiTokenCreated {
 }
 
 // ---------------------------------------------------------------------------
-// Editor
+// 旧版编辑器：DesignSpec + 预览/试推
 // ---------------------------------------------------------------------------
 
+/** 传统设计规格（非 Studio 画板时使用） */
 export interface DesignSpec {
   header_text?: string | null
   footer_text?: string | null
@@ -176,23 +235,29 @@ export interface DesignSpec {
   template_id?: 'report_v1' | 'alert_v1' | 'kpi_v1' | string | null
   theme_color?: string | null
   show_table?: boolean
-  /** Color percentage-like cells (legacy report style). */
+  /** 是否对百分比类单元格着色（旧日报风格） */
   color_ratios?: boolean
   kpi_columns?: string[]
 }
 
+/**
+ * SQL 参数定义。
+ * source=auto 时由服务端按 auto 种类（yesterday/today/now…）解析；
+ * static 用 value；runtime 运行时注入。
+ */
 export interface SqlParamDef {
   name: string
   label?: string
   /** auto | static | runtime */
   source?: 'auto' | 'static' | 'runtime' | string
-  /** when source=auto: yesterday | today | now | … */
+  /** source=auto 时：yesterday | today | now | … */
   auto?: string
   value?: string
   default?: string
   format?: string
 }
 
+/** 查询预览请求 */
 export interface QueryPreviewRequest {
   data_source_id: string
   sql: string
@@ -201,6 +266,7 @@ export interface QueryPreviewRequest {
   max_rows?: number
 }
 
+/** 查询预览响应：列 + 行矩阵 */
 export interface QueryPreviewResponse {
   columns: string[]
   rows: unknown[][]
@@ -209,6 +275,7 @@ export interface QueryPreviewResponse {
   rendered_sql?: string | null
 }
 
+/** 消息（Markdown）预览请求 */
 export interface MessagePreviewRequest {
   data_source_id: string
   sql: string
@@ -217,16 +284,19 @@ export interface MessagePreviewRequest {
   max_rows?: number
 }
 
+/** 消息分段预览 */
 export interface MessagePartPreview {
   kind: string
   content_preview: string
 }
 
+/** 消息预览响应 */
 export interface MessagePreviewResponse {
   parts: MessagePartPreview[]
   markdown_text: string
 }
 
+/** 图片预览请求 */
 export interface ImagePreviewRequest {
   data_source_id: string
   sql: string
@@ -235,12 +305,14 @@ export interface ImagePreviewRequest {
   max_rows?: number
 }
 
+/** 图片预览：base64 与可选路径 */
 export interface ImagePreviewResponse {
   image_base64: string
   path?: string | null
   content_type?: string
 }
 
+/** 试推请求 */
 export interface TestPushRequest {
   data_source_id: string
   sql: string
@@ -251,6 +323,7 @@ export interface TestPushRequest {
   push_job_id?: string | null
 }
 
+/** 单通道发送结果 */
 export interface ChannelSendResult {
   channel_id: string
   success: boolean
@@ -258,6 +331,7 @@ export interface ChannelSendResult {
   error?: string | null
 }
 
+/** 试推汇总结果 */
 export interface TestPushResponse {
   row_count: number
   markdown_text: string
@@ -266,6 +340,7 @@ export interface TestPushResponse {
   success: boolean
 }
 
+/** 旧版保存任务请求 */
 export interface SaveJobRequest {
   id?: string | null
   name: string
@@ -280,9 +355,10 @@ export interface SaveJobRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Studio artboard
+// Studio 画板（内容工作台）
 // ---------------------------------------------------------------------------
 
+/** 画板组件类型枚举 */
 export type StudioComponentType =
   | 'Container'
   | 'Text'
@@ -292,6 +368,10 @@ export type StudioComponentType =
   | 'Alert'
   | 'Divider'
 
+/**
+ * 画板节点树节点。
+ * props 存展示/布局属性；binding 存数据集与列绑定；children 形成树。
+ */
 export interface StudioNode {
   id: string
   type: StudioComponentType | string
@@ -301,17 +381,22 @@ export interface StudioNode {
   children?: StudioNode[]
 }
 
+/** 画板内一个可独立 SQL 取数的数据集 */
 export interface StudioDataset {
   id: string
   name?: string
   data_source_id?: string | null
   sql?: string
-  /** SQL parameter definitions (auto date etc.) */
+  /** SQL 参数定义（自动日期等） */
   params?: SqlParamDef[]
-  /** Optional static overrides for preview */
+  /** 预览时可选的静态参数覆盖 */
   param_values?: Record<string, string>
 }
 
+/**
+ * 完整画板文档，序列化进 PushJob.render_spec。
+ * 含主题/画布尺寸、多数据集、组件树，以及推送外壳 compose。
+ */
 export interface ArtboardDoc {
   version?: number
   kind?: string
@@ -326,30 +411,34 @@ export interface ArtboardDoc {
   }
   datasets?: StudioDataset[]
   tree?: StudioNode
-  /** Push message shell: canvas image + optional rich text around it. */
+  /**
+   * 推送消息外壳：画布图 + 图上下方可选富文本。
+   * 正式推送时 text_before/after（HTML）会转成钉钉 Markdown。
+   */
   compose?: {
     mode?: 'image_primary' | 'markdown_primary' | 'mixed' | 'image_only' | string
-    /** @deprecated use include_component_md / text_before|after */
+    /** @deprecated 请用 include_component_md / text_before|after */
     markdown_caption?: boolean
-    /** Auto-append markdown projected from component tree */
+    /** 是否自动追加组件树投影出的 Markdown */
     include_component_md?: boolean
-    /** DingTalk markdown title (plain text) */
+    /** 钉钉 markdown 标题（纯文本） */
     title?: string
     /**
-     * Rich text above the canvas image (HTML from Quill; supports {{字段}}).
-     * Converted to DingTalk markdown on send.
+     * 画布图上方富文本（Quill HTML；支持 {{字段}}）。
+     * 发送时转换为钉钉 Markdown。
      */
     text_before?: string
     /**
-     * Rich text below the canvas image (HTML from Quill; supports {{字段}}).
-     * Converted to DingTalk markdown on send.
+     * 画布图下方富文本（Quill HTML；支持 {{字段}}）。
+     * 发送时转换为钉钉 Markdown。
      */
     text_after?: string
-    /** Content format of text_before/after — default html when using rich editor */
+    /** text_before/after 的内容格式；使用富文本编辑器时默认为 html */
     text_format?: 'html' | 'markdown' | string
   }
 }
 
+/** Studio 元数据：主题包、表样式、图表类型、组件清单 */
 export interface StudioMeta {
   theme_packs: { id: string; label: string; color: string }[]
   table_styles: { id: string; label: string }[]
@@ -357,6 +446,7 @@ export interface StudioMeta {
   components: { type: string; label: string }[]
 }
 
+/** 用户/系统保存的画板模板 */
 export interface StudioTemplate {
   id: string
   name: string
@@ -369,6 +459,7 @@ export interface StudioTemplate {
   updated_at?: string | null
 }
 
+/** 创建 Studio 模板请求体 */
 export interface StudioTemplateCreate {
   name: string
   description?: string | null
@@ -376,6 +467,7 @@ export interface StudioTemplateCreate {
   artboard: ArtboardDoc
 }
 
+/** Studio 编译请求：取数 + 渲染 HTML/图/Markdown */
 export interface StudioCompileRequest {
   artboard: ArtboardDoc
   data_source_id?: string | null
@@ -384,6 +476,7 @@ export interface StudioCompileRequest {
   want_image?: boolean
 }
 
+/** Studio 编译响应：预览素材 + 解析后的参数 */
 export interface StudioCompileResponse {
   html: string
   markdown_text: string
@@ -394,11 +487,12 @@ export interface StudioCompileResponse {
   artboard: ArtboardDoc
   image_error?: string | null
   ok?: boolean
-  /** Params used for this compile (e.g. yesterday → 2026-07-16) */
+  /** 本次编译使用的参数（如 yesterday → 2026-07-16） */
   resolved_params?: Record<string, string>
   resolved_params_by_dataset?: Record<string, Record<string, string>>
 }
 
+/** Studio 保存任务请求 */
 export interface StudioSaveJobRequest {
   id?: string | null
   name: string
@@ -412,6 +506,7 @@ export interface StudioSaveJobRequest {
   schedule_enabled?: boolean
 }
 
+/** Studio 试推请求 */
 export interface StudioTestPushRequest {
   artboard: ArtboardDoc
   data_source_id: string

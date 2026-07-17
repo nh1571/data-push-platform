@@ -1,7 +1,13 @@
-"""Local-profile bootstrap: dirs, secrets, schema, demo business DB + meta seed.
+"""本地 profile 引导：目录、密钥、Schema、演示业务库与元数据种子。
 
-Called on API startup when ``APP_ENV`` is local/dev. Production should use
-Alembic + real MySQL and must NOT depend on this module for secrets.
+在 API 启动且 ``APP_ENV`` 为 local/dev 时调用。生产环境应使用
+Alembic + 真实 MySQL，**不得**依赖本模块生成密钥或演示数据。
+
+主要职责：
+- 创建 ``data/``、``storage/`` 等本地目录
+- 确保 Fernet 密钥可用（环境变量或 ``data/.fernet_key``）
+- ``create_all`` / Alembic 建表
+- 可选创建 ``demo_biz.db`` 并注册演示 DataSource
 """
 
 from __future__ import annotations
@@ -22,12 +28,17 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 logger = logging.getLogger(__name__)
 
+# 演示业务库相对 backend 根的路径；Fernet 密钥落盘路径
 _DEMO_BIZ_REL = "data/demo_biz.db"
 _FERNET_FILE = "data/.fernet_key"
 
 
 def ensure_local_runtime() -> None:
-    """Prepare filesystem + secrets for local profile (idempotent)."""
+    """准备本地文件系统与密钥（幂等，可重复调用）。
+
+    创建 data/、storage 根目录；必要时初始化 Fernet 密钥文件；
+    SQLite 模式下确保库文件父目录存在；若开启演示数据则创建 demo 业务库。
+    """
     data_dir = _BACKEND_ROOT / "data"
     storage = Path(settings.storage_root)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -35,7 +46,7 @@ def ensure_local_runtime() -> None:
 
     _ensure_fernet_key_file()
     if settings.is_sqlite:
-        # Ensure parent of sqlite file exists
+        # 确保 sqlite 库文件父目录存在
         url = settings.database_url
         if ":///" in url:
             path_part = url.split("sqlite:///", 1)[1]
@@ -50,7 +61,11 @@ def ensure_local_runtime() -> None:
 
 
 def _ensure_fernet_key_file() -> None:
-    """If TOKEN_FERNET_KEY empty/invalid, load or create ``data/.fernet_key``."""
+    """若 TOKEN_FERNET_KEY 为空或非法，则从 ``data/.fernet_key`` 加载或新建。
+
+    通过 ``object.__setattr__`` 写回 settings，绕过 pydantic 模型冻结/校验限制，
+    使后续 ``encrypt_dict`` 等能读到有效密钥。
+    """
     from cryptography.fernet import Fernet
 
     key = (settings.token_fernet_key or "").strip()
@@ -80,10 +95,11 @@ def _ensure_fernet_key_file() -> None:
 
 
 def ensure_schema() -> None:
-    """Create tables (local) or run alembic when configured.
+    """创建表结构（本地）或在已配置时运行 alembic。
 
-    Local SQLite: ``create_all`` is enough for collaborators (no MySQL required).
-    Production: prefer ``alembic upgrade head`` in entrypoint; this is a safety net.
+    - 本地 SQLite：``create_all`` 即可，协作者无需 MySQL
+    - 生产：优先入口脚本执行 ``alembic upgrade head``；此处为安全兜底
+    - ``auto_migrate=False`` 时直接返回，不改动 schema
     """
     if not settings.auto_migrate:
         return
@@ -95,7 +111,7 @@ def ensure_schema() -> None:
         logger.info("Schema ensured via create_all (%s)", settings.profile_label)
         return
 
-    # External MySQL: try alembic
+    # 外部 MySQL：尝试 alembic 升级到 head
     try:
         from alembic import command
         from alembic.config import Config
@@ -114,7 +130,11 @@ def ensure_schema() -> None:
 
 
 def ensure_demo_business_db() -> Path:
-    """Create demo_biz.db with sample hospital metrics if missing."""
+    """若不存在则创建带医院运营演示指标的 ``demo_biz.db``。
+
+    含 ``daily_ops``（院区门诊/住院）与 ``trend``（周趋势）样例表，
+    供本地数据源插件与前端预览使用。已存在非空文件则原样返回路径。
+    """
     path = _BACKEND_ROOT / _DEMO_BIZ_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file() and path.stat().st_size > 0:
@@ -154,7 +174,11 @@ def ensure_demo_business_db() -> Path:
 
 
 def seed_demo_datasource_if_empty(db: Session) -> None:
-    """Register a sqlite demo DataSource when none exist (local only)."""
+    """本地且开启演示数据时，若尚无 DataSource 则注册一条 sqlite 演示源。
+
+    配置经 Fernet 加密写入 ``config_enc``；路径使用相对 backend CWD 的
+    ``data/demo_biz.db``，便于跨机器克隆仓库后仍可相对定位。
+    """
     if not settings.seed_demo_data or not settings.is_local_profile:
         return
 
@@ -165,7 +189,7 @@ def seed_demo_datasource_if_empty(db: Session) -> None:
         return
 
     demo_path = ensure_demo_business_db()
-    # Store path relative to backend CWD for portability
+    # 存相对路径，提升可移植性
     rel = "data/demo_biz.db"
     try:
         config_enc = encrypt_dict({"path": rel, "max_rows": 10000})
@@ -184,6 +208,7 @@ def seed_demo_datasource_if_empty(db: Session) -> None:
 
 
 def log_runtime_banner() -> None:
+    """启动时打印 profile、数据库摘要与是否同步执行的一行 INFO 日志。"""
     logger.info(
         "Data Push Platform profile=%s database=%s execution_sync=%s",
         settings.profile_label,
@@ -193,7 +218,10 @@ def log_runtime_banner() -> None:
 
 
 def health_deps() -> dict:
-    """Lightweight dependency status for /health?detail=1."""
+    """为 ``/health?detail=1`` 提供轻量依赖状态字典。
+
+    探测元数据库 ``SELECT 1``，并检查 Playwright 是否可导入（截图类渲染可选依赖）。
+    """
     out: dict = {
         "app_env": settings.app_env,
         "profile": settings.profile_label,

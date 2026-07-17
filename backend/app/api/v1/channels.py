@@ -1,4 +1,4 @@
-"""Channel CRUD + config validation test endpoints (auth via router dependencies)."""
+"""渠道 CRUD 与配置校验测试端点（鉴权由路由 dependencies 注入）。"""
 
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ router = APIRouter()
 
 
 def _to_out(row: Channel) -> ChannelOut:
+    """将 Channel 行转为脱敏后的 ChannelOut。"""
     plain = decrypt_dict(row.config_enc)
     return ChannelOut(
         id=row.id,
@@ -37,6 +38,7 @@ def _to_out(row: Channel) -> ChannelOut:
 
 
 def _get_or_404(db: Session, channel_id: UUID) -> Channel:
+    """按 id 取渠道，不存在 404。"""
     row = db.get(Channel, channel_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="channel not found")
@@ -45,12 +47,14 @@ def _get_or_404(db: Session, channel_id: UUID) -> Channel:
 
 @router.get("", response_model=list[ChannelOut])
 def list_channels(db: Session = Depends(get_db)) -> list[ChannelOut]:
+    """列出全部渠道。"""
     rows = db.scalars(select(Channel).order_by(Channel.created_at.desc())).all()
     return [_to_out(r) for r in rows]
 
 
 @router.post("", response_model=ChannelOut, status_code=status.HTTP_201_CREATED)
 def create_channel(body: ChannelCreate, db: Session = Depends(get_db)) -> ChannelOut:
+    """创建渠道（config 加密存储）。"""
     row = Channel(
         name=body.name,
         type=body.type,
@@ -64,6 +68,7 @@ def create_channel(body: ChannelCreate, db: Session = Depends(get_db)) -> Channe
 
 @router.get("/{channel_id}", response_model=ChannelOut)
 def get_channel(channel_id: UUID, db: Session = Depends(get_db)) -> ChannelOut:
+    """获取单个渠道。"""
     return _to_out(_get_or_404(db, channel_id))
 
 
@@ -73,6 +78,7 @@ def update_channel(
     body: ChannelUpdate,
     db: Session = Depends(get_db),
 ) -> ChannelOut:
+    """更新渠道名称/类型/配置。"""
     row = _get_or_404(db, channel_id)
     data = body.model_dump(exclude_unset=True)
     if "name" in data:
@@ -89,6 +95,7 @@ def update_channel(
 
 @router.delete("/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_channel(channel_id: UUID, db: Session = Depends(get_db)) -> None:
+    """删除渠道。"""
     row = _get_or_404(db, channel_id)
     db.delete(row)
     db.commit()
@@ -96,7 +103,7 @@ def delete_channel(channel_id: UUID, db: Session = Depends(get_db)) -> None:
 
 @router.post("/{channel_id}/test", response_model=TestConnectionResult)
 def test_channel(channel_id: UUID, db: Session = Depends(get_db)) -> TestConnectionResult:
-    """Decrypt config and run plugin ``validate_config`` (and mock send if available)."""
+    """解密配置并执行插件 ``validate_config``。"""
     row = _get_or_404(db, channel_id)
     try:
         plugin = plugin_registry.get("channel", row.type)

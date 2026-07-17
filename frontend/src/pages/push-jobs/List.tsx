@@ -1,3 +1,10 @@
+/**
+ * 推送任务列表（任务管理）。
+ *
+ * - 新建：弹窗填名称+数据源 → createDraft → 跳转内容工作台 `/editor/:id`
+ * - 编辑内容：进 Studio 编辑器；立即执行：runPushJob 后跳转运行详情
+ * 日常取数与版式请用「内容工作台」，本页侧重调度/启用/最近运行。
+ */
 import { DeleteOutlined, EditOutlined, PlusOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { Button, Form, Input, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,6 +17,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime, RunStatusTag } from '../../utils/status'
 
+/** 任务管理列表页 */
 export function PushJobListPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<PushJob[]>([])
@@ -35,6 +43,7 @@ export function PushJobListPage() {
     void load()
   }, [load])
 
+  /** 打开新建弹窗并加载数据源选项；仅一个数据源时自动选中 */
   const openCreate = async () => {
     setCreateOpen(true)
     try {
@@ -48,6 +57,7 @@ export function PushJobListPage() {
     }
   }
 
+  /** 创建草稿任务并进入内容编辑器 */
   const onCreateOk = async () => {
     try {
       const values = await form.validateFields()
@@ -69,6 +79,7 @@ export function PushJobListPage() {
     }
   }
 
+  /** 确认后立即执行任务，成功则跳转 JobRun 详情 */
   const onRun = (row: PushJob) => {
     Modal.confirm({
       title: '立即执行',

@@ -1,4 +1,4 @@
-"""CRUD for studio_templates + seed built-ins."""
+"""Studio 模板表 CRUD，并在列表时种子化系统内置模板。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from app.modules.studio.defaults import (
 
 
 def seed_system_templates(db: Session) -> int:
-    """Insert built-in templates if missing (by scene_id). Returns inserted count."""
+    """按 scene_id 幂等插入内置模板；返回本次插入条数。"""
     builtins = [
         ("daily_report", "院区/业务日报", "KPI + 表 + 柱状/折线", default_daily_artboard()),
         ("alert", "指标告警", "告警条 + 异常表", default_alert_artboard()),
@@ -51,6 +51,7 @@ def seed_system_templates(db: Session) -> int:
 
 
 def list_templates(db: Session, *, include_disabled: bool = False) -> list[StudioTemplate]:
+    """列出模板（先种子化系统模板）；默认不含禁用项。"""
     seed_system_templates(db)
     q = select(StudioTemplate).order_by(
         StudioTemplate.is_system.desc(),
@@ -62,6 +63,7 @@ def list_templates(db: Session, *, include_disabled: bool = False) -> list[Studi
 
 
 def get_template(db: Session, template_id: UUID) -> StudioTemplate:
+    """按 id 取模板；不存在 404。"""
     row = db.get(StudioTemplate, template_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="template not found")
@@ -77,6 +79,7 @@ def create_template(
     scene_id: str | None = None,
     is_system: bool = False,
 ) -> StudioTemplate:
+    """创建用户（或系统）模板。"""
     row = StudioTemplate(
         name=name.strip(),
         description=description,
@@ -100,9 +103,10 @@ def update_template(
     artboard: dict[str, Any] | None = None,
     enabled: bool | None = None,
 ) -> StudioTemplate:
+    """更新模板字段；系统模板也可改 artboard。"""
     row = get_template(db, template_id)
     if row.is_system and artboard is not None:
-        # Allow rename/desc on system; replacing artboard of system is ok for ops
+        # 系统模板允许改名/描述；运维可覆盖 artboard
         pass
     if name is not None:
         row.name = name.strip()
@@ -119,6 +123,7 @@ def update_template(
 
 
 def delete_template(db: Session, template_id: UUID) -> None:
+    """删除非系统模板；系统模板请禁用。"""
     row = get_template(db, template_id)
     if row.is_system:
         raise HTTPException(
@@ -130,6 +135,7 @@ def delete_template(db: Session, template_id: UUID) -> None:
 
 
 def to_out(row: StudioTemplate) -> dict[str, Any]:
+    """ORM 行 → API 字典（id 字符串化，时间 ISO）。"""
     return {
         "id": str(row.id),
         "name": row.name,

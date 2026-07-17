@@ -1,9 +1,25 @@
+/**
+ * Studio 画板工具集（内容工作台核心纯函数）。
+ *
+ * 职责概览：
+ * 1. 默认/空画板模板（日报、告警、空白）
+ * 2. 组件树不可变操作：查找、更新、删除、移动、克隆、挂到父节点
+ * 3. 大纲/标签/绑定提示（UI 文案）
+ * 4. 新建组件工厂 newComponent、字段拖放 applyColumnToNode
+ * 5. 本地取数结果解析：firstRowMap / substituteRow / liveComponentView
+ * 6. 从 PushJob.render_spec 还原 ArtboardDoc、同步主数据集
+ *
+ * 无 React 依赖；状态变更由 EditorPage 调用后 setArtboard。
+ */
+
 import type { ArtboardDoc, StudioDataset, StudioNode } from '../../api/types'
 
+/** 生成短随机节点 id（非 UUID，仅前端临时/持久化均可） */
 export function nid(): string {
   return Math.random().toString(16).slice(2, 14)
 }
 
+/** 主题色包：写入 artboard.theme.pack / color */
 export const THEME_PACKS = [
   { id: 'business', label: '商务蓝', color: '#1677ff' },
   { id: 'alert', label: '告警红', color: '#ff4d4f' },
@@ -12,6 +28,7 @@ export const THEME_PACKS = [
   { id: 'slate', label: '沉稳灰', color: '#434343' },
 ]
 
+/** 表格视觉风格选项 */
 export const TABLE_STYLES = [
   { id: 'business', label: '商务' },
   { id: 'compact', label: '紧凑' },
@@ -26,6 +43,7 @@ const DEMO_TREND_SQL =
   "SELECT '周一' AS 日, 100 AS 量 UNION ALL SELECT '周二', 120 " +
   "UNION ALL SELECT '周三', 90 UNION ALL SELECT '周四', 140 UNION ALL SELECT '周五', 130"
 
+/** 运营日报默认画板（主查询 + 趋势数据集，含 KPI/表/图） */
 export function defaultDailyArtboard(): ArtboardDoc {
   const t1 = nid()
   const k1 = nid()
@@ -135,6 +153,7 @@ export function defaultDailyArtboard(): ArtboardDoc {
   }
 }
 
+/** 指标告警默认画板 */
 export function defaultAlertArtboard(): ArtboardDoc {
   return {
     version: 3,
@@ -201,6 +220,7 @@ export function defaultAlertArtboard(): ArtboardDoc {
   }
 }
 
+/** 空白画板（仅 root 容器 + 空主数据集） */
 export function emptyArtboard(): ArtboardDoc {
   return {
     version: 3,
@@ -232,6 +252,7 @@ export function emptyArtboard(): ArtboardDoc {
   }
 }
 
+/** 在组件树中按 id 深度优先查找节点 */
 export function findNode(root: StudioNode | undefined, id: string): StudioNode | null {
   if (!root) return null
   if (root.id === id) return root
@@ -242,6 +263,10 @@ export function findNode(root: StudioNode | undefined, id: string): StudioNode |
   return null
 }
 
+/**
+ * 不可变更新节点：合并 props/binding，其余字段浅覆盖。
+ * 返回新树根。
+ */
 export function updateNode(
   root: StudioNode,
   id: string,
@@ -262,6 +287,7 @@ export function updateNode(
   }
 }
 
+/** 从树中移除指定 id 节点（不可删 root 自身时保持原样） */
 export function removeNode(root: StudioNode, id: string): StudioNode {
   if (root.id === id) return root
   return {
@@ -272,6 +298,7 @@ export function removeNode(root: StudioNode, id: string): StudioNode {
   }
 }
 
+/** 同级内上下移动节点（dir=-1 上移，1 下移） */
 export function moveSibling(root: StudioNode, id: string, dir: -1 | 1): StudioNode {
   const children = [...(root.children || [])]
   const idx = children.findIndex((c) => c.id === id)
@@ -290,6 +317,7 @@ export function moveSibling(root: StudioNode, id: string, dir: -1 | 1): StudioNo
   return { ...root, children: next }
 }
 
+/** 将 node 追加为 parentId 的最后一个子节点 */
 export function appendChild(root: StudioNode, parentId: string, node: StudioNode): StudioNode {
   if (root.id === parentId) {
     return { ...root, children: [...(root.children || []), node] }
@@ -300,7 +328,7 @@ export function appendChild(root: StudioNode, parentId: string, node: StudioNode
   }
 }
 
-/** Deep-clone a node tree with new ids (for duplicate). */
+/** 深拷贝节点树并重新生成所有 id（用于复制组件） */
 export function cloneNode(node: StudioNode): StudioNode {
   return {
     ...node,
@@ -311,6 +339,10 @@ export function cloneNode(node: StudioNode): StudioNode {
   }
 }
 
+/**
+ * 从树中摘下节点（不删除 root）。
+ * @returns 新树 + 被摘下的节点（找不到则为 null）
+ */
 export function detachNode(
   root: StudioNode,
   id: string,
@@ -339,8 +371,8 @@ export function detachNode(
 }
 
 /**
- * Move node to a new parent at index.
- * parentId = 'root' for top-level. Refuses moving a node into its own descendant.
+ * 将节点移动到新父节点的指定下标。
+ * parentId 为父节点 id；禁止移入自身或后代，防止成环。
  */
 export function moveNodeTo(
   root: StudioNode,
@@ -369,6 +401,7 @@ export function moveNodeTo(
   return insert(without)
 }
 
+/** 查找节点的父 id 与在兄弟中的下标 */
 export function parentAndIndex(
   root: StudioNode,
   id: string,
@@ -383,6 +416,7 @@ export function parentAndIndex(
   return null
 }
 
+/** 将组件树展平为大纲列表（跳过 root 自身） */
 export function flattenOutline(
   node: StudioNode,
   depth = 0,
@@ -395,6 +429,7 @@ export function flattenOutline(
   return [...self, ...kids]
 }
 
+/** 节点在清单/大纲中的可读短标签 */
 export function nodeLabel(node: StudioNode): string {
   const t = String(node.type)
   if (t === 'Text') return String(node.props?.text || '文本').slice(0, 24)
@@ -414,6 +449,7 @@ export function nodeLabel(node: StudioNode): string {
   return t
 }
 
+/** 当前绑定状态的中文提示（做组件属性面板） */
 export function bindingHint(node: StudioNode, _columns: string[] = []): string {
   const t = String(node.type)
   const b = node.binding || {}
@@ -444,6 +480,10 @@ export function bindingHint(node: StudioNode, _columns: string[] = []): string {
   return '布局/装饰组件，不直接绑列。'
 }
 
+/**
+ * 按类型创建带默认 props/binding 的新节点。
+ * ChartBar/Pie/Line 等别名统一落到 type=Chart + chart_type。
+ */
 export function newComponent(type: string): StudioNode {
   const id = nid()
   switch (type) {
@@ -520,9 +560,13 @@ export function newComponent(type: string): StudioNode {
   }
 }
 
+/** 字段拖放到组件槽位时的角色 */
 export type FieldBindRole = 'category' | 'value' | 'text' | 'dataset' | 'auto'
 
-/** FanRuan-style: drag a field (column) from a dataset onto a component slot. */
+/**
+ * 帆软式字段绑定：将列拖到组件槽，返回应 merge 的 partial 节点。
+ * Chart 的 auto 模式：先填分类列，再填数值列。
+ */
 export function applyColumnToNode(
   node: StudioNode,
   column: string,
@@ -578,7 +622,7 @@ export function applyColumnToNode(
   return {}
 }
 
-/** Drop-zone labels shown while dragging a field (帆软式槽位). */
+/** 拖字段时展示的落点槽位（按组件类型不同） */
 export function fieldDropSlots(node: StudioNode): { role: FieldBindRole; label: string }[] {
   const t = String(node.type)
   if (t === 'Chart') {
@@ -593,19 +637,25 @@ export function fieldDropSlots(node: StudioNode): { role: FieldBindRole; label: 
   return []
 }
 
+/** 字段拖放 MIME 类型（HTML5 DnD dataTransfer） */
 export const FIELD_DND_MIME = 'application/x-studio-field'
 
 // ---------------------------------------------------------------------------
-// Live data resolution (绑定后显示「值」不是「列名」)
+// 实时数据解析：绑定后显示「值」而不是「列名」
 // ---------------------------------------------------------------------------
 
+/** 单数据集预览：列名 + 行矩阵 */
 export type DatasetPreview = {
   columns: string[]
   rows: unknown[][]
 }
 
+/** dataset_id → 预览数据 */
 export type DataPreviewCtx = Record<string, DatasetPreview>
 
+/**
+ * 将指定数据集第一行转为 { 列名: 值 } 映射；无数据返回 null。
+ */
 export function firstRowMap(
   ctx: DataPreviewCtx,
   datasetId: string,
@@ -620,6 +670,9 @@ export function firstRowMap(
   return out
 }
 
+/**
+ * 将模板中的 `{{列名}}` 替换为 row 中的值；缺列则保留占位符。
+ */
 export function substituteRow(template: string, row: Record<string, unknown> | null): string {
   if (!template) return ''
   return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name: string) => {
@@ -630,7 +683,7 @@ export function substituteRow(template: string, row: Record<string, unknown> | n
   })
 }
 
-/** Whether a content component has enough binding to show data. */
+/** 内容组件是否已具备基本绑定（可展示数据） */
 export function isComponentBound(node: StudioNode): boolean {
   const t = String(node.type)
   const b = node.binding || {}
@@ -644,15 +697,19 @@ export function isComponentBound(node: StudioNode): boolean {
   return t === 'Divider' || t === 'Container'
 }
 
+/** 清单/属性侧「活预览」摘要结构 */
 export type LiveComponentView = {
   title: string
   bound: boolean
-  /** Real data line(s) for UI — never just the column name as fake value */
+  /** 主展示文案：真实数据或未绑定提示，禁止只显示列名当假值 */
   primary: string
   secondary?: string
   warning?: string
 }
 
+/**
+ * 根据节点类型与本地预览数据生成摘要视图（清单卡片用）。
+ */
 export function liveComponentView(
   node: StudioNode,
   ctx: DataPreviewCtx,
@@ -784,7 +841,7 @@ export function liveComponentView(
   return { title: typeLabel, bound: isComponentBound(node), primary: typeLabel }
 }
 
-/** Flat list of content components for the 「组件」 step (includes containers). */
+/** 展平组件实例列表（含容器，不含 root），供清单使用 */
 export function listComponentInstances(root: StudioNode | undefined): StudioNode[] {
   if (!root) return []
   const out: StudioNode[] = []
@@ -796,6 +853,10 @@ export function listComponentInstances(root: StudioNode | undefined): StudioNode
   return out
 }
 
+/**
+ * 从 PushJob.render_spec 尝试还原 ArtboardDoc。
+ * 支持 kind=artboard 顶层，或嵌套 artboard_doc / studio。
+ */
 export function extractArtboardFromJob(renderSpec: unknown): ArtboardDoc | null {
   if (!renderSpec || typeof renderSpec !== 'object' || Array.isArray(renderSpec)) return null
   const spec = renderSpec as Record<string, unknown>
@@ -808,6 +869,7 @@ export function extractArtboardFromJob(renderSpec: unknown): ArtboardDoc | null 
   return null
 }
 
+/** 将主数据集（id=main）与编辑器顶部数据源/SQL 同步 */
 export function syncMainDataset(
   board: ArtboardDoc,
   dataSourceId: string | undefined,
@@ -826,6 +888,7 @@ export function syncMainDataset(
   return { ...board, datasets }
 }
 
+/** 插入或按 id 合并数据集定义 */
 export function upsertDataset(board: ArtboardDoc, ds: StudioDataset): ArtboardDoc {
   const datasets = [...(board.datasets || [])]
   const i = datasets.findIndex((d) => d.id === ds.id)
@@ -834,6 +897,7 @@ export function upsertDataset(board: ArtboardDoc, ds: StudioDataset): ArtboardDo
   return { ...board, datasets }
 }
 
+/** 若只有 main，则追加演示用第二数据集 trend */
 export function ensureSecondaryDataset(board: ArtboardDoc): ArtboardDoc {
   const has = (board.datasets || []).some((d) => d.id !== 'main')
   if (has) return board

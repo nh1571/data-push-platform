@@ -1,3 +1,8 @@
+/**
+ * 数据源列表页。
+ *
+ * 支持测试连接、编辑、删除；新建跳转 `/data-sources/new`。
+ */
 import { DeleteOutlined, EditOutlined, PlusOutlined, ApiOutlined } from '@ant-design/icons'
 import { Button, message, Popconfirm, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,6 +15,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime } from '../../utils/status'
 
+/** 数据源列表：测试连接 / 编辑 / 删除 */
 export function DataSourceListPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<DataSource[]>([])

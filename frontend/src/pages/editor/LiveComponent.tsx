@@ -1,6 +1,12 @@
 /**
- * Live in-canvas preview of a studio node (chart/kpi/table/text…).
- * Uses local dataset rows — same path as maker preview, not server screenshots.
+ * 画布内「活」组件预览。
+ *
+ * 根据 StudioNode.type 用本地数据集行（DatasetMaps）即时渲染：
+ * Chart → LiveChart；Kpi/Table/Text/Alert/Divider 各自布局。
+ * 与「做组件」预览同一数据通路，**不是**服务端截图。
+ *
+ * 文案/告警通过 substituteRow 将 `{{列名}}` 替换为数据集第一行实值。
+ * 供 ComposeCanvas 在自由布局壳内嵌入使用。
  */
 import { Table, Typography } from 'antd'
 import type { StudioNode } from '../../api/types'
@@ -8,6 +14,7 @@ import { seriesFromTable, type ChartStyle } from './chartOption'
 import { LiveChart } from './LiveChart'
 import { firstRowMap, substituteRow, type DataPreviewCtx } from './studioUtils'
 
+/** 按 dataset_id 索引的列名与行矩阵（来自 queryPreview 缓存） */
 export type DatasetMaps = {
   fieldsByDataset: Record<string, string[]>
   rowsByDataset: Record<string, unknown[][]>
@@ -16,11 +23,12 @@ export type DatasetMaps = {
 type Props = {
   node: StudioNode
   data: DatasetMaps
-  /** Available pixel height inside the shell (excluding chrome bar). */
+  /** 壳内可用像素高度（不含编辑把手） */
   height: number
   themeColor?: string
 }
 
+/** 从节点 props 提取 ChartStyle，供 LiveChart 使用 */
 function chartStyleFromNode(props: Record<string, unknown>, vcols: string[]): ChartStyle {
   return {
     chart_type: String(props.chart_type || 'bar'),
@@ -42,6 +50,10 @@ function chartStyleFromNode(props: Record<string, unknown>, vcols: string[]): Ch
   }
 }
 
+/**
+ * 按节点类型渲染实时预览。
+ * 未绑定数据时显示 EmptyHint 引导用户回「做组件」。
+ */
 export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Props) {
   const props = (node.props || {}) as Record<string, unknown>
   const binding = (node.binding || {}) as Record<string, unknown>
@@ -51,7 +63,9 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
   const ctx: DataPreviewCtx = { [dsId]: { columns: cols, rows } }
   const h = Math.max(40, height)
 
+  // —— 图表 ——
   if (node.type === 'Chart') {
+    // 兼容 value_columns 数组与单 value_column
     const vcols = Array.isArray(binding.value_columns)
       ? (binding.value_columns as unknown[]).map(String)
       : Array.isArray(props.value_columns)
@@ -72,12 +86,14 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
     )
   }
 
+  // —— KPI：取绑定列第一行 ——
   if (node.type === 'Kpi') {
     const col = String(binding.value_column || '')
     const row = firstRowMap(ctx, dsId)
     const val = row && col ? row[col] : null
     const label = String(props.label || binding.label || col || '指标')
     const value = val === null || val === undefined ? '—' : String(val)
+    // 字号随容器高度缩放
     const fontSize = Math.max(22, Math.min(42, Math.floor(h * 0.28)))
     return (
       <div
@@ -111,6 +127,7 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
     )
   }
 
+  // —— 表格：最多预览 30 行 ——
   if (node.type === 'Table') {
     if (!cols.length) {
       return <EmptyHint text="表格未绑定数据" h={h} />
@@ -142,6 +159,7 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
     )
   }
 
+  // —— 文案：支持 HTML 或纯文本 + {{字段}} ——
   if (node.type === 'Text') {
     const row = firstRowMap(ctx, dsId)
     const raw = String(props.html || props.text || '')
@@ -181,6 +199,7 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
     )
   }
 
+  // —— 告警条：按 level 着色 ——
   if (node.type === 'Alert') {
     const row = firstRowMap(ctx, dsId)
     const text = substituteRow(String(props.text || ''), row)
@@ -232,6 +251,7 @@ export function LiveComponent({ node, data, height, themeColor = '#1677ff' }: Pr
   return <EmptyHint text={`暂不支持预览：${node.type}`} h={h} />
 }
 
+/** 未绑定/无数据时的居中提示 */
 function EmptyHint({ text, h }: { text: string; h: number }) {
   return (
     <div

@@ -1,3 +1,9 @@
+/**
+ * 后台主布局：左侧导航 + 顶栏 + 内容区 Outlet。
+ *
+ * 菜单项与 App.tsx 路由一一对应；根据 pathname 前缀高亮当前菜单。
+ * 顶栏提供退出登录（清 token 并跳转 /login）。
+ */
 import {
   ApiOutlined,
   CloudServerOutlined,
@@ -17,6 +23,7 @@ import { useAuth } from '../auth/AuthContext'
 
 const { Header, Sider, Content } = Layout
 
+/** 侧栏菜单定义：key 即路由 path */
 const MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: '工作台' },
   { key: '/editor', icon: <FormOutlined />, label: '内容工作台' },
@@ -27,6 +34,10 @@ const MENU_ITEMS = [
   { key: '/settings', icon: <SettingOutlined />, label: '系统' },
 ]
 
+/**
+ * 根据 pathname 选择应高亮的菜单 key。
+ * 子路径（如 /data-sources/new）匹配最长公共前缀（排除首页 `/`）。
+ */
 function selectedKey(pathname: string): string {
   if (pathname === '/') return '/'
   const match = MENU_ITEMS.find(
@@ -35,6 +46,7 @@ function selectedKey(pathname: string): string {
   return match?.key ?? '/'
 }
 
+/** 带侧栏的主布局组件，内容通过 Outlet 渲染子路由 */
 export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()

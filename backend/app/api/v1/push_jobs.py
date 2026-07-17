@@ -1,4 +1,4 @@
-"""PushJob CRUD + manual run endpoints (auth via router dependencies)."""
+"""推送任务 CRUD 与手动触发运行端点（鉴权由路由 dependencies 注入）。"""
 
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ DEFAULT_DRAFT_RENDER_SPEC: dict[str, Any] = {
 
 
 def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
+    """渠道 ID 列表转字符串。"""
     return [str(i) for i in ids]
 
 
@@ -51,6 +52,7 @@ def _to_out(
     *,
     last_run: JobRun | None = None,
 ) -> PushJobOut:
+    """将 PushJob 数据库行转为 PushJobOut（可选附带最近一次运行）。"""
     raw_ids = row.channel_ids or []
     return PushJobOut(
         id=row.id,
@@ -72,6 +74,7 @@ def _to_out(
 
 
 def _get_or_404(db: Session, job_id: UUID) -> PushJob:
+    """按 id 取任务，不存在 404。"""
     row = db.get(PushJob, job_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="push job not found")
@@ -79,6 +82,7 @@ def _get_or_404(db: Session, job_id: UUID) -> PushJob:
 
 
 def _ensure_data_source(db: Session, data_source_id: UUID) -> None:
+    """校验 data_source_id 存在。"""
     if db.get(DataSource, data_source_id) is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -87,7 +91,7 @@ def _ensure_data_source(db: Session, data_source_id: UUID) -> None:
 
 
 def _ensure_channels(db: Session, channel_ids: list[UUID]) -> None:
-    """Validate channel IDs when provided. Empty list is allowed (draft jobs)."""
+    """校验渠道 ID（可为空，支持草稿任务）。"""
     if not channel_ids:
         return
     found = set(
@@ -103,6 +107,7 @@ def _ensure_channels(db: Session, channel_ids: list[UUID]) -> None:
 
 @router.get("", response_model=list[PushJobOut])
 def list_push_jobs(db: Session = Depends(get_db)) -> list[PushJobOut]:
+    """列出推送任务（附带各任务最近一次运行摘要）。"""
     rows = list(db.scalars(select(PushJob).order_by(PushJob.created_at.desc())).all())
     if not rows:
         return []
@@ -126,7 +131,7 @@ def create_draft_push_job(
     body: PushJobDraftCreate,
     db: Session = Depends(get_db),
 ) -> PushJobOut:
-    """Create a draft job with defaults; content is edited in the push editor."""
+    """用默认 SQL/design 创建草稿任务，内容在推送编辑器中完善。"""
     _ensure_data_source(db, body.data_source_id)
 
     row = PushJob(
@@ -148,6 +153,7 @@ def create_draft_push_job(
 
 @router.post("", response_model=PushJobOut, status_code=status.HTTP_201_CREATED)
 def create_push_job(body: PushJobCreate, db: Session = Depends(get_db)) -> PushJobOut:
+    """完整创建推送任务。"""
     _ensure_data_source(db, body.data_source_id)
     _ensure_channels(db, body.channel_ids)
 
@@ -170,6 +176,7 @@ def create_push_job(body: PushJobCreate, db: Session = Depends(get_db)) -> PushJ
 
 @router.get("/{job_id}", response_model=PushJobOut)
 def get_push_job(job_id: UUID, db: Session = Depends(get_db)) -> PushJobOut:
+    """获取单个推送任务。"""
     return _to_out(_get_or_404(db, job_id))
 
 
@@ -179,6 +186,7 @@ def update_push_job(
     body: PushJobUpdate,
     db: Session = Depends(get_db),
 ) -> PushJobOut:
+    """部分更新推送任务字段。"""
     row = _get_or_404(db, job_id)
     data = body.model_dump(exclude_unset=True)
 
@@ -209,6 +217,7 @@ def update_push_job(
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_push_job(job_id: UUID, db: Session = Depends(get_db)) -> None:
+    """删除推送任务。"""
     row = _get_or_404(db, job_id)
     db.delete(row)
     db.commit()
@@ -220,11 +229,10 @@ def run_push_job(
     body: PushJobRunRequest | None = None,
     db: Session = Depends(get_db),
 ) -> JobRunOut:
-    """Create a JobRun and execute it (sync) or enqueue via Celery.
+    """创建 JobRun 并同步执行或经 Celery 入队。
 
-    When ``settings.execution_sync`` is True (default), the pipeline runs
-    in-process before the response is returned. Otherwise a Celery task is
-    enqueued and the response reflects the initial ``pending`` status.
+    ``settings.execution_sync=True``（默认）时在响应前进程内跑管线；
+    否则入队 Celery，响应中状态为初始 ``pending``。
     """
     job = _get_or_404(db, job_id)
     req = body or PushJobRunRequest()
