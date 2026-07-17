@@ -1,3 +1,11 @@
+/**
+ * 数据源新建 / 编辑表单。
+ *
+ * 类型：SQLite（本地 path）或 MySQL / Doris / SQL Server（主机连接信息）。
+ * 密码编辑时脱敏；修改连接配置需重新输入密码。
+ *
+ * 路由：`/data-sources/new` | `/data-sources/:id`
+ */
 import { ArrowLeftOutlined, ApiOutlined } from '@ant-design/icons'
 import { Button, Form, Input, InputNumber, message, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
@@ -10,6 +18,7 @@ import {
 } from '../../api'
 import { getErrorMessage } from '../../api/client'
 
+/** 支持的数据源类型（与后端驱动对齐） */
 const SOURCE_TYPES = [
   { value: 'sqlite', label: 'SQLite（本地演示 / 文件）' },
   { value: 'mysql', label: 'MySQL' },
@@ -17,6 +26,7 @@ const SOURCE_TYPES = [
   { value: 'sqlserver', label: 'SQL Server（院区 HIS）' },
 ]
 
+/** 表单字段：SQLite 用 path，其余用 host/port/user/password/database */
 interface FormValues {
   name: string
   type: string
@@ -29,8 +39,10 @@ interface FormValues {
   path?: string
 }
 
+/** 编辑态密码占位，表示未修改 */
 const MASK = '******'
 
+/** 数据源表单页：按类型切换字段并保存/测试 */
 export function DataSourceFormPage() {
   const { id } = useParams<{ id: string }>()
   const isNew = !id || id === 'new'
@@ -72,6 +84,10 @@ export function DataSourceFormPage() {
       .finally(() => setLoading(false))
   }, [form, id, isNew])
 
+  /**
+   * 组装后端 config。
+   * 返回 null 表示校验失败或编辑态未带密码（调用方需特殊处理）。
+   */
   const buildConfig = (values: FormValues): Record<string, unknown> | null => {
     if (values.type === 'sqlite') {
       if (!values.path?.trim()) {

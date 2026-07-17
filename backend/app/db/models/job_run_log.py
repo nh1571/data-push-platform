@@ -1,3 +1,5 @@
+"""任务运行结构化日志模型：流水线各步骤的可读日志行。"""
+
 import uuid
 from datetime import datetime
 
@@ -8,7 +10,12 @@ from app.db.base import Base
 
 
 class JobRunLog(Base):
-    """Structured log line emitted during a job run."""
+    """JobRun 执行过程中产生的一条结构化日志。
+
+    - ``step``: 流水线步骤名（如 query / render / deliver）
+    - ``level``: debug/info/warning/error
+    - ``message``: 人类可读说明（含错误摘要、行数统计等）
+    """
 
     __tablename__ = "job_run_logs"
 

@@ -1,14 +1,29 @@
 /**
- * Build Apache ECharts options from bound data + style.
- * Same mental model as DataEase / Superset chart config (ECharts-based).
+ * ECharts 配置构建工具。
+ *
+ * 将「绑定后的表格数据 + ChartStyle 样式」转换为 Apache ECharts option。
+ * 心智模型对齐 DataEase / Superset 一类 BI 图表配置（底层同为 ECharts）。
+ *
+ * 主要导出：
+ * - `ChartStyle` / `SeriesInput`：样式与序列类型
+ * - `prepareAxisData`：排序 / TopN 预处理
+ * - `buildEchartsOption`：按 chart_type 生成柱/折/面积/饼/条形 option
+ * - `seriesFromTable`：从 queryPreview 行列矩阵抽取 labels + series
+ *
+ * 被 LiveChart、LiveComponent、EditorPage「做组件」本地预览共用。
  */
 import type { EChartsOption } from 'echarts'
 
+/**
+ * 图表样式/行为配置（存在节点 props 中，与后端渲染约定一致）。
+ * theme 字段仅客户端背景参考；真正配色用 color_palette。
+ */
 export type ChartStyle = {
   chart_type?: string
   title?: string
   subtitle?: string
-  theme?: string // used client-side for bg only; option colors below
+  /** 客户端主题背景参考；option 颜色见 color_palette */
+  theme?: string
   color_palette?: string[]
   show_label?: boolean
   show_legend?: boolean
@@ -29,11 +44,13 @@ export type ChartStyle = {
   series_name?: string
 }
 
+/** 单条数据序列：名称 + 与 labels 等长的数值数组（缺失为 null） */
 export type SeriesInput = {
   name: string
   values: (number | null)[]
 }
 
+/** ECharts 默认色板 */
 const DEFAULT_PALETTE = [
   '#5470c6',
   '#91cc75',
@@ -46,6 +63,10 @@ const DEFAULT_PALETTE = [
   '#ea7ccc',
 ]
 
+/**
+ * 按 style.sort / style.top_n 对分类轴数据做预处理。
+ * 排序以第一条 series 的值为键；TopN 在排序后截断。
+ */
 export function prepareAxisData(
   labels: string[],
   seriesList: SeriesInput[],
@@ -77,6 +98,11 @@ export function prepareAxisData(
   }
 }
 
+/**
+ * 根据 chart_type 构建完整 ECharts option。
+ * - pie：单序列 → 饼/环/玫瑰
+ * - bar / hbar / line / area：笛卡尔坐标系；hbar 或 horizontal 时交换轴
+ */
 export function buildEchartsOption(
   labelsIn: string[],
   seriesIn: SeriesInput[],
@@ -129,6 +155,7 @@ export function buildEchartsOption(
           },
   }
 
+  // —— 饼图分支 ——
   if (ct === 'pie') {
     const data = labels.map((name, i) => ({
       name,
@@ -159,11 +186,13 @@ export function buildEchartsOption(
     }
   }
 
+  // —— 笛卡尔：柱/折/面积/条形 ——
   const isH = ct === 'hbar' || style.horizontal
   const categoryAxis = {
     type: 'category' as const,
     data: labels,
     axisLabel: {
+      // 分类过多时自动倾斜，避免重叠
       rotate: isH ? 0 : style.x_label_rotate ?? (labels.length > 8 ? 30 : 0),
       fontSize: 11,
     },
@@ -229,7 +258,10 @@ export function buildEchartsOption(
   }
 }
 
-/** Extract labels + series from tabular preview rows */
+/**
+ * 从表格预览（columns + rows）按分类列/数值列抽取 ECharts 输入。
+ * 数值会去掉千分位逗号与百分号再 Number 化；无法解析则为 null。
+ */
 export function seriesFromTable(
   columns: string[],
   rows: unknown[][],

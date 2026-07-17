@@ -1,5 +1,12 @@
+/**
+ * 状态展示工具：JobRun / Delivery 的 Tag 与时间格式化。
+ *
+ * 将后端英文状态码映射为中文文案 + Ant Design Tag 颜色，
+ * 供工作台、执行记录列表与详情页复用。
+ */
 import { Tag } from 'antd'
 
+/** JobRun.status → Tag color */
 const RUN_STATUS_COLOR: Record<string, string> = {
   pending: 'default',
   running: 'processing',
@@ -10,6 +17,7 @@ const RUN_STATUS_COLOR: Record<string, string> = {
   skipped: 'default',
 }
 
+/** Delivery.status → Tag color */
 const DELIVERY_STATUS_COLOR: Record<string, string> = {
   pending: 'default',
   running: 'processing',
@@ -18,6 +26,7 @@ const DELIVERY_STATUS_COLOR: Record<string, string> = {
   skipped: 'default',
 }
 
+/** JobRun.status → 中文标签 */
 const RUN_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
   running: '运行中',
@@ -28,6 +37,7 @@ const RUN_STATUS_LABEL: Record<string, string> = {
   skipped: '已跳过',
 }
 
+/** Delivery.status → 中文标签 */
 const DELIVERY_STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
   running: '投递中',
@@ -36,6 +46,7 @@ const DELIVERY_STATUS_LABEL: Record<string, string> = {
   skipped: '已跳过',
 }
 
+/** 任务运行状态 Tag */
 export function RunStatusTag({ status }: { status: string }) {
   return (
     <Tag color={RUN_STATUS_COLOR[status] ?? 'default'}>
@@ -44,6 +55,7 @@ export function RunStatusTag({ status }: { status: string }) {
   )
 }
 
+/** 通道投递状态 Tag */
 export function DeliveryStatusTag({ status }: { status: string }) {
   return (
     <Tag color={DELIVERY_STATUS_COLOR[status] ?? 'default'}>
@@ -52,6 +64,9 @@ export function DeliveryStatusTag({ status }: { status: string }) {
   )
 }
 
+/**
+ * 将 ISO 时间字符串格式化为中文本地时间；空值显示 `-`。
+ */
 export function formatDateTime(value?: string | null): string {
   if (!value) return '-'
   try {

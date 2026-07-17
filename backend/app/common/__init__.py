@@ -1,1 +1,1 @@
-"""Shared utilities (crypto, etc.)."""
+"""通用工具子包：加密等与业务模块解耦的共享能力。"""

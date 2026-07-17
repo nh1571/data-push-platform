@@ -1,3 +1,18 @@
+/**
+ * 富文本编辑器封装（ReactQuill / Quill snow 主题）。
+ *
+ * 用途：
+ * - 文案组件内容
+ * - 步骤 4「组装推送」图外 text_before / text_after 外壳
+ *
+ * 存储格式为 HTML；推送时由后端转钉钉 Markdown。
+ * 支持 `{{字段名}}` 占位，预览时用数据集第一行替换。
+ *
+ * 附带工具：
+ * - isEmptyRichHtml：判断是否空壳
+ * - appendFieldToken：在 HTML 末尾插入 {{col}}
+ * - looksLikeHtml：预览时是否按 HTML 渲染
+ */
 import { useMemo } from 'react'
 import ReactQuill from 'react-quill'
 import 'react-quill/dist/quill.snow.css'
@@ -7,11 +22,12 @@ type Props = {
   onChange: (html: string) => void
   placeholder?: string
   minHeight?: number
-  /** Compact toolbar for push-shell (still full formatting). */
+  /** 精简工具栏（推送外壳仍保留常用格式） */
   compact?: boolean
   className?: string
 }
 
+/** 完整工具栏：标题、加粗、颜色背景、列表、对齐、链接 */
 const MODULES_FULL = {
   toolbar: [
     [{ header: [1, 2, 3, false] }],
@@ -24,7 +40,7 @@ const MODULES_FULL = {
   ],
 }
 
-/** DingTalk-oriented: headers, bold/italic/strike, color, lists, link */
+/** 钉钉向精简工具栏：去掉背景色与对齐，降低 Markdown 转换损失 */
 const MODULES_PUSH = {
   toolbar: [
     [{ header: [1, 2, 3, false] }],
@@ -36,6 +52,7 @@ const MODULES_PUSH = {
   ],
 }
 
+/** Quill formats 白名单（与 toolbar 对应） */
 const FORMATS = [
   'header',
   'bold',
@@ -50,7 +67,10 @@ const FORMATS = [
   'link',
 ]
 
-/** Free-form rich text (HTML stored). Used by 文案组件 and 组装推送 shell. */
+/**
+ * 自由富文本编辑器（HTML 存储）。
+ * compact=true 时用于推送外壳，工具栏更贴合钉钉能力。
+ */
 export function RichTextEditor({
   value,
   onChange,
@@ -84,6 +104,7 @@ export function RichTextEditor({
         }
         style={{ minHeight }}
       />
+      {/* 局部样式：保证编辑区最小高度与圆角 */}
       <style>{`
         .studio-rich-editor .ql-container,
         .push-shell .ql-container {
@@ -111,7 +132,7 @@ export function RichTextEditor({
   )
 }
 
-/** True when Quill empty shell or blank string. */
+/** 判断 Quill 空壳或纯空白（去标签后无可见字符） */
 export function isEmptyRichHtml(html: string | undefined | null): boolean {
   if (!html || !String(html).trim()) return true
   const plain = String(html)
@@ -122,7 +143,10 @@ export function isEmptyRichHtml(html: string | undefined | null): boolean {
   return !plain
 }
 
-/** Append ``{{col}}`` into rich HTML (end of last paragraph when possible). */
+/**
+ * 在富文本 HTML 末尾插入 `{{col}}`。
+ * 若以 `</p>` 结尾则塞进最后一段，否则追加新段落。
+ */
 export function appendFieldToken(html: string, col: string): string {
   const token = `{{${col}}}`
   const cur = html || ''
@@ -133,7 +157,7 @@ export function appendFieldToken(html: string, col: string): string {
   return `${cur}<p>${token}</p>`
 }
 
-/** Detect HTML-ish content for preview rendering. */
+/** 粗略判断内容是否像 HTML（预览分支选择） */
 export function looksLikeHtml(text: string): boolean {
   return /<[a-z][\s\S]*>/i.test(text || '')
 }

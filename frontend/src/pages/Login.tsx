@@ -1,3 +1,9 @@
+/**
+ * 登录页。
+ *
+ * 已登录用户直接跳转首页；否则展示用户名/密码表单。
+ * 登录成功后优先跳回 `location.state.from` 或 `?redirect=` 指定路径。
+ */
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography } from 'antd'
 import { useState } from 'react'
@@ -5,11 +11,13 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { getErrorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
+/** 登录表单字段 */
 interface LoginForm {
   username: string
   password: string
 }
 
+/** 登录页面组件 */
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth()
   const navigate = useNavigate()
@@ -17,10 +25,12 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // 已登录则无需再看登录页
   if (isAuthenticated) {
     return <Navigate to="/" replace />
   }
 
+  // 回跳目标：RequireAuth 的 state.from 或 401 拦截器写入的 redirect 参数
   const from =
     (location.state as { from?: string } | null)?.from ||
     new URLSearchParams(location.search).get('redirect') ||

@@ -1,19 +1,18 @@
-"""DingTalk OpenAPI group robot channel plugin.
+"""钉钉 OpenAPI 群机器人通道插件。
 
-Type: ``dingtalk.openapi_group_robot``
+类型：``dingtalk.openapi_group_robot``
 
-Sends messages to an enterprise group via the robot OpenAPI
-(``/v1.0/robot/groupMessages/send``), with support for markdown text and
-images (upload media via oapi, then sampleImageMsg).
+通过机器人 OpenAPI（``/v1.0/robot/groupMessages/send``）向企业群发消息，
+支持 markdown 文本与图片（经 oapi media/upload 上传后 sampleImageMsg）。
 
-Config:
+配置：
 
-- ``app_key`` (required)
-- ``app_secret`` (required)
-- ``robot_code`` (required)
-- ``open_conversation_id`` (required) — group conversation id
-- ``title`` (optional): markdown title (default ``数据推送``)
-- ``webhook_url`` (optional): fallback webhook for text when OpenAPI fails
+- ``app_key``（必填）
+- ``app_secret``（必填）
+- ``robot_code``（必填）
+- ``open_conversation_id``（必填）— 群会话 id
+- ``title``（可选）：markdown 标题（默认 ``数据推送``）
+- ``webhook_url``（可选）：OpenAPI 失败时文本消息的 Webhook 回退
 """
 
 from __future__ import annotations
@@ -34,13 +33,15 @@ _OAPI_TOKEN_URL = "https://oapi.dingtalk.com/gettoken"
 
 
 class DingTalkOpenAPIGroupRobotPlugin:
-    """ChannelPlugin for DingTalk application robot → group (OpenAPI)."""
+    """钉钉应用机器人 → 群（OpenAPI）通道插件。"""
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "dingtalk.openapi_group_robot"
 
     def validate_config(self, config: dict[str, Any]) -> None:
+        """校验 app 凭证、robot_code 与群会话 id。"""
         missing = [
             k
             for k in ("app_key", "app_secret", "robot_code", "open_conversation_id")
@@ -51,6 +52,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
 
     @staticmethod
     def _part_path(part: MessagePart) -> str | None:
+        """从 part 提取 path/url。"""
         content = part.content
         if isinstance(content, dict):
             for key in ("path", "url", "download_url"):
@@ -63,6 +65,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
 
     @classmethod
     def _part_to_text(cls, part: MessagePart) -> str:
+        """片段转 markdown 文本；image 单独发送，此处返回空。"""
         if part.kind == "text":
             return str(part.content) if part.content is not None else ""
         if part.kind == "card":
@@ -83,22 +86,24 @@ class DingTalkOpenAPIGroupRobotPlugin:
             label = f"文件: {name}".rstrip() if name else "文件"
             return f"{label}\n下载路径: {path}" if path else f"{label}: (no path)"
         if part.kind == "image":
-            # Image is sent separately via sampleImageMsg
+            # 图片通过 sampleImageMsg 单独发送
             return ""
         return f"[{part.kind}]"
 
     @classmethod
     def _message_to_text(cls, message: Message) -> str:
+        """拼接非图片片段正文。"""
         parts = [cls._part_to_text(p) for p in message.parts]
         text = "\n\n".join(p for p in parts if p)
         return text if text else "(empty message)"
 
     @classmethod
     def _image_parts(cls, message: Message) -> list[MessagePart]:
+        """筛选 image 类型片段。"""
         return [p for p in message.parts if p.kind == "image"]
 
     def _fetch_new_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
-        """App access token via new DingTalk API (for robot group messages)."""
+        """新版钉钉 API 应用 accessToken（群消息接口用）。"""
         resp = client.post(
             _OAUTH_URL,
             json={
@@ -116,7 +121,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         return str(token)
 
     def _fetch_oapi_access_token(self, client: httpx.Client, config: dict[str, Any]) -> str:
-        """Legacy oapi token (for media/upload)."""
+        """旧版 oapi token（media/upload 用）。"""
         resp = client.get(
             _OAPI_TOKEN_URL,
             params={
@@ -143,6 +148,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         oapi_token: str,
         path: str,
     ) -> str:
+        """上传图片媒体，返回 media_id。"""
         file_path = Path(path)
         if not file_path.is_file():
             raise RuntimeError(f"image file not found: {path}")
@@ -173,6 +179,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         msg_key: str,
         msg_param: dict[str, Any],
     ) -> dict[str, Any]:
+        """调用 groupMessages/send（msg_key 如 sampleMarkdown / sampleImageMsg）。"""
         payload = {
             "robotCode": str(config["robot_code"]),
             "openConversationId": str(config["open_conversation_id"]),
@@ -191,7 +198,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         if resp.status_code >= 400:
             raise RuntimeError(f"groupMessages HTTP {resp.status_code}: {data}")
         if isinstance(data, dict) and data.get("code") and str(data.get("code")) not in ("0", ""):
-            # New API may return code/message on business error
+            # 新 API 业务错误可能带 code/message
             if data.get("message") or data.get("msg"):
                 raise RuntimeError(
                     f"groupMessages error: {data.get('code')} {data.get('message') or data.get('msg')}"
@@ -204,6 +211,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         config: dict[str, Any],
         text: str,
     ) -> DeliveryResult | None:
+        """OpenAPI 文本发送失败时的可选 Webhook 回退；未配置则返回 None。"""
         webhook = config.get("webhook_url")
         if not webhook:
             return None
@@ -232,6 +240,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
         return DeliveryResult(success=True, provider_msg_id=None)
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
+        """发送群 markdown（可回退 Webhook）与图片 sampleImageMsg。"""
         try:
             self.validate_config(config)
         except ValueError as exc:
@@ -246,7 +255,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
             with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
                 access_token = self._fetch_new_access_token(client, config)
 
-                # Text / markdown first
+                # 先发文本 / markdown
                 if text and text != "(empty message)":
                     try:
                         data = self._send_group_msg(
@@ -260,7 +269,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
                         if pid is not None:
                             provider_ids.append(str(pid))
                     except RuntimeError as exc:
-                        # Optional webhook fallback for text
+                        # 可选 Webhook 回退文本
                         fallback = self._send_webhook_fallback(client, config, text)
                         if fallback is not None:
                             if not fallback.success:
@@ -268,7 +277,7 @@ class DingTalkOpenAPIGroupRobotPlugin:
                         else:
                             return DeliveryResult(success=False, error=str(exc))
 
-                # Images: upload media then sampleImageMsg (photoURL = media_id / URL)
+                # 图片：先 media/upload 再 sampleImageMsg（photoURL = media_id）
                 if images:
                     oapi_token = self._fetch_oapi_access_token(client, config)
                     for part in images:

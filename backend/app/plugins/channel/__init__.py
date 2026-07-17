@@ -1,4 +1,4 @@
-"""Built-in channel plugins (DingTalk webhook / work notice / OpenAPI group & OTO)."""
+"""内置通道插件：钉钉 Webhook / 工作通知 / OpenAPI 群与单聊机器人。"""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ __all__ = [
 
 
 def register_builtin_channels(registry: PluginRegistry) -> None:
-    """Register built-in channel plugins on *registry*."""
-    # Primary type + backward-compatible alias share the same webhook impl.
+    """将内置通道插件注册到 *registry*。"""
+    # 主 type + 向后兼容别名共享同一 webhook 实现
     registry.register(DingTalkWebhookRobotPlugin())
     registry.register(DingTalkChannelPlugin())
     registry.register(DingTalkWorkNoticePlugin())

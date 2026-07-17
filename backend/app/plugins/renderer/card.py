@@ -1,20 +1,19 @@
-"""Card summary renderer (``type="card"``).
+"""卡片摘要渲染器（``type="card"``）。
 
-Produces a channel-agnostic card :class:`~app.plugins.base.MessagePart`
-(``kind="card"``) with:
+产出通道无关的 card 类型 :class:`~app.plugins.base.MessagePart`
+（``kind="card"``），content 为字典，包含：
 
-- ``title``: card title
-- ``text``: short markdown/plain summary body
-- ``rows``: list of row dicts (column → value) capped for display
+- ``title``: 卡片标题
+- ``text``: 简短 markdown/纯文本摘要正文
+- ``rows``: 行 dict 列表（列名→值），展示行数有上限
 
-Channels map this dict to provider-specific formats (e.g. DingTalk
-``actionCard`` or markdown fallback).
+各通道再将此 dict 映射为厂商格式（如钉钉 ``actionCard`` 或 markdown 回退）。
 
-Config keys (all optional):
+配置键（均可选）：
 
-- ``title``: card title (default ``数据卡片``)
-- ``max_rows``: rows included in summary (default 10)
-- ``text``: override body text (otherwise auto-built from the result)
+- ``title``: 卡片标题（默认 ``数据卡片``）
+- ``max_rows``: 摘要中包含的行数（默认 10）
+- ``text``: 覆盖正文（否则根据结果自动生成）
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ from app.plugins.base import MessagePart, QueryResult
 
 
 def _row_to_dict(columns: list[str], row: list[Any]) -> dict[str, Any]:
+    """将一行 list 按列名映射为 dict。"""
     out: dict[str, Any] = {}
     for i, col in enumerate(columns):
         out[str(col)] = row[i] if i < len(row) else None
@@ -38,7 +38,7 @@ def build_card_content(
     max_rows: int = 10,
     text: str | None = None,
 ) -> dict[str, Any]:
-    """Build a channel-agnostic card dict from *result*."""
+    """由 *result* 构建通道无关的卡片字典。"""
     columns = list(result.columns or [])
     rows = list(result.rows or [])
     if not columns and rows:
@@ -73,10 +73,11 @@ def build_card_content(
 
 
 class CardRenderer:
-    """RendererPlugin that produces a card MessagePart (``type="card"``)."""
+    """产出 card MessagePart 的渲染器（``type="card"``）。"""
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "card"
 
     def render(
@@ -85,6 +86,7 @@ class CardRenderer:
         config: dict[str, Any],
         params: dict[str, Any],
     ) -> list[MessagePart]:
+        """根据 config 生成单条 card 片段。"""
         del params
         title = str(config.get("title") or "数据卡片")
         max_rows = int(config.get("max_rows") or 10)

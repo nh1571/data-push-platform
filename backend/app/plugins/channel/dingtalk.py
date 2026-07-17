@@ -1,9 +1,9 @@
-"""DingTalk robot channel plugins (webhook text / markdown / actionCard).
+"""钉钉自定义机器人通道插件（Webhook text / markdown / actionCard）。
 
-Registered types:
+注册类型：
 
-- ``dingtalk.webhook_robot`` — primary webhook robot plugin
-- ``dingtalk`` — backward-compatible alias of the same implementation
+- ``dingtalk.webhook_robot`` — 主 Webhook 机器人插件
+- ``dingtalk`` — 同一实现的向后兼容别名
 """
 
 from __future__ import annotations
@@ -19,35 +19,36 @@ _DINGTALK_ROBOT_BASE = "https://oapi.dingtalk.com/robot/send"
 
 
 class DingTalkWebhookRobotPlugin:
-    """ChannelPlugin for DingTalk custom robots (``type="dingtalk.webhook_robot"``).
+    """钉钉自定义机器人通道（``type="dingtalk.webhook_robot"``）。
 
-    Config:
+    配置：
 
-    - ``webhook_url``: full robot webhook URL, **or**
-    - ``access_token``: used to build the standard robot webhook URL
-    - ``title`` (optional): markdown title (default ``数据推送``)
-    - ``msgtype`` (optional): ``markdown`` (default) or ``text``
+    - ``webhook_url``: 完整机器人 Webhook URL，**或**
+    - ``access_token``: 用于拼装标准 robot/send URL
+    - ``title``（可选）: markdown 标题（默认 ``数据推送``）
+    - ``msgtype``（可选）: ``markdown``（默认）或 ``text``
 
-    Part mapping:
+    片段映射：
 
-    - ``text`` → body text / markdown
-    - ``card`` → single pure card → ``actionCard``; otherwise markdown fallback
-    - ``file`` / ``image`` → path/url appended as text (webhooks cannot upload
-      binary attachments in most robot setups)
+    - ``text`` → 正文 / markdown
+    - ``card`` → 仅单卡片时用 ``actionCard``；否则 markdown 回退
+    - ``file`` / ``image`` → 以路径/url 文本追加（Webhook 多数场景无法传二进制）
     """
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "dingtalk.webhook_robot"
 
     def validate_config(self, config: dict[str, Any]) -> None:
-        """Require ``webhook_url`` or ``access_token`` (DingTalk robot auth)."""
+        """要求提供 ``webhook_url`` 或 ``access_token``（钉钉机器人鉴权）。"""
         webhook = config.get("webhook_url")
         token = config.get("access_token")
         if not webhook and not token:
             raise ValueError("webhook_url or access_token is required")
 
     def _resolve_webhook(self, config: dict[str, Any]) -> str:
+        """解析最终 POST 的 Webhook URL。"""
         webhook = config.get("webhook_url")
         if webhook:
             return str(webhook)
@@ -58,6 +59,7 @@ class DingTalkWebhookRobotPlugin:
 
     @staticmethod
     def _part_path(part: MessagePart) -> str | None:
+        """从 part.content 提取 path / url / download_url。"""
         content = part.content
         if isinstance(content, dict):
             for key in ("path", "url", "download_url"):
@@ -70,6 +72,7 @@ class DingTalkWebhookRobotPlugin:
 
     @classmethod
     def _card_to_markdown(cls, content: Any) -> str:
+        """将 card dict 转为简易 markdown 标题+正文。"""
         if not isinstance(content, dict):
             return str(content) if content is not None else ""
         title = content.get("title") or "卡片"
@@ -81,6 +84,7 @@ class DingTalkWebhookRobotPlugin:
 
     @classmethod
     def _part_to_text(cls, part: MessagePart) -> str:
+        """单片段转可发送文本（含文件/图片路径说明）。"""
         if part.kind == "text":
             return str(part.content) if part.content is not None else ""
         if part.kind == "card":
@@ -95,18 +99,19 @@ class DingTalkWebhookRobotPlugin:
         if part.kind == "image":
             path = cls._part_path(part)
             return f"图片路径: {path}" if path else "图片: (no path)"
-        # Unknown kinds: short placeholder so delivery is not empty.
+        # 未知 kind：占位，避免整条消息为空
         return f"[{part.kind}]"
 
     @classmethod
     def _message_to_text(cls, message: Message) -> str:
+        """拼接全部片段为一段正文。"""
         parts = [cls._part_to_text(p) for p in message.parts]
         text = "\n\n".join(p for p in parts if p)
         return text if text else "(empty message)"
 
     @classmethod
     def _pure_single_card(cls, message: Message) -> dict[str, Any] | None:
-        """Return card content when message is exactly one card part (no others)."""
+        """当消息恰好只有一个 card 片段时返回其 content dict，否则 None。"""
         if len(message.parts) != 1:
             return None
         part = message.parts[0]
@@ -117,19 +122,19 @@ class DingTalkWebhookRobotPlugin:
 
     @classmethod
     def _build_payload(cls, config: dict[str, Any], message: Message) -> dict[str, Any]:
-        """Build DingTalk webhook JSON body from *message*."""
+        """由 *message* 构建钉钉 Webhook JSON 体。"""
         pure_card = cls._pure_single_card(message)
-        # Prefer actionCard for a standalone card part.
+        # 独立 card 片段优先使用 actionCard
         if pure_card is not None:
             title = str(pure_card.get("title") or config.get("title") or "数据推送")
             text = str(pure_card.get("text") or "")
-            # Include title in markdown body for better mobile display.
+            # 正文中带上标题，移动端展示更好
             body = f"### {title}\n\n{text}".rstrip() if text else f"### {title}"
             action: dict[str, Any] = {
                 "title": title,
                 "text": body,
             }
-            # Optional single button if URL provided on card content.
+            # 卡片上可选单按钮 URL
             btn_url = pure_card.get("url") or pure_card.get("single_url")
             btn_title = pure_card.get("btn_title") or pure_card.get("single_title")
             if btn_url:
@@ -152,7 +157,7 @@ class DingTalkWebhookRobotPlugin:
         }
 
     def send(self, config: dict[str, Any], message: Message) -> DeliveryResult:
-        """POST text/markdown/actionCard to the DingTalk robot webhook."""
+        """POST text/markdown/actionCard 到钉钉机器人 Webhook。"""
         try:
             self.validate_config(config)
             webhook = self._resolve_webhook(config)
@@ -167,7 +172,7 @@ class DingTalkWebhookRobotPlugin:
         except httpx.HTTPError as exc:
             return DeliveryResult(success=False, error=f"http error: {exc}")
 
-        # DingTalk may return HTTP 200 with errcode != 0 in JSON body.
+        # 钉钉可能 HTTP 200 但 JSON 中 errcode != 0
         try:
             data = resp.json()
         except ValueError:
@@ -185,7 +190,7 @@ class DingTalkWebhookRobotPlugin:
             if errcode not in (0, "0", None):
                 errmsg = data.get("errmsg") or str(data)
                 return DeliveryResult(success=False, error=f"dingtalk errcode={errcode}: {errmsg}")
-            # Some responses include a processQueryKey / messageId
+            # 部分响应含 processQueryKey / messageId
             msg_id = data.get("processQueryKey") or data.get("messageId") or data.get("msgid")
             return DeliveryResult(
                 success=True,
@@ -196,8 +201,9 @@ class DingTalkWebhookRobotPlugin:
 
 
 class DingTalkChannelPlugin(DingTalkWebhookRobotPlugin):
-    """Backward-compatible alias registered as ``type="dingtalk"``."""
+    """向后兼容别名，注册为 ``type="dingtalk"``。"""
 
     @property
     def type(self) -> str:
+        """兼容旧配置中的 type 名。"""
         return "dingtalk"

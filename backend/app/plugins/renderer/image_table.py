@@ -1,15 +1,15 @@
-"""Table-as-image renderer (``type="image_table"``).
+"""表格转图片渲染器（``type="image_table"``）。
 
-Renders a :class:`~app.plugins.base.QueryResult` into a simple PNG table image
-via Pillow, saves it with :class:`~app.storage.local.LocalStorage`, and returns
-a :class:`~app.plugins.base.MessagePart` with ``kind="image"``.
+使用 Pillow 将 :class:`~app.plugins.base.QueryResult` 画成简易 PNG 表格图，
+经 :class:`~app.storage.local.LocalStorage` 落盘，并返回
+``kind="image"`` 的 :class:`~app.plugins.base.MessagePart`。
 
-Config keys (all optional):
+配置键（均可选）：
 
-- ``title``: heading drawn above the table
-- ``filename``: output basename (default ``table.png``)
-- ``max_rows``: cap rows rendered (default 50)
-- ``storage_root``: override local storage root
+- ``title``: 表格上方标题
+- ``filename``: 输出文件名（默认 ``table.png``）
+- ``max_rows``: 最多绘制行数（默认 50）
+- ``storage_root``: 覆盖本地存储根
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 from app.plugins.base import MessagePart, QueryResult
 from app.storage.local import LocalStorage
 
+# 布局与配色常量
 _PAD_X = 10
 _PAD_Y = 6
 _CELL_MIN_W = 48
@@ -34,6 +35,7 @@ _TITLE_FG = (20, 20, 20)
 
 
 def _cell_text(value: Any) -> str:
+    """单元格显示文本：截断过长内容并压平换行。"""
     if value is None:
         return ""
     text = str(value).replace("\n", " ")
@@ -43,17 +45,19 @@ def _cell_text(value: Any) -> str:
 
 
 def _font(size: int = 14) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
+    """尝试加载 TrueType 字体，失败则回退系统/默认位图字体。"""
     try:
         return ImageFont.truetype("DejaVuSans.ttf", size=size)
     except OSError:
         try:
-            # Common macOS fallback
+            # macOS 常见回退字体
             return ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=size)
         except OSError:
             return ImageFont.load_default()
 
 
 def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
+    """测量文本宽高（基于 textbbox）。"""
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
@@ -64,7 +68,7 @@ def render_table_png(
     title: str | None = None,
     max_rows: int = 50,
 ) -> bytes:
-    """Render *result* as a PNG table image and return raw bytes."""
+    """将 *result* 渲染为 PNG 表格图，返回原始字节。"""
     columns = list(result.columns or [])
     rows = list(result.rows or [])[: max(0, max_rows)]
 
@@ -85,7 +89,7 @@ def render_table_png(
     font = _font(14)
     title_font = _font(16)
 
-    # Probe metrics with a throwaway image
+    # 用临时图探测文字度量
     probe = Image.new("RGB", (10, 10), _BG)
     draw = ImageDraw.Draw(probe)
 
@@ -119,16 +123,16 @@ def render_table_png(
         y0 += title_h
 
     x0 = _PAD_X
-    # Header background
+    # 表头背景
     draw.rectangle([x0, y0, x0 + table_w, y0 + row_h], fill=_HEADER_BG)
 
-    # Grid + text
+    # 网格 + 文字
     all_rows = [header] + display_rows
     for r_i, row in enumerate(all_rows):
         y = y0 + r_i * row_h
         x = x0
         for c_i, cell in enumerate(row):
-            # cell border
+            # 单元格边框
             draw.rectangle(
                 [x, y, x + col_widths[c_i], y + row_h],
                 outline=_GRID,
@@ -143,10 +147,11 @@ def render_table_png(
 
 
 class ImageTableRenderer:
-    """RendererPlugin that produces a PNG table image (``type="image_table"``)."""
+    """产出 PNG 表格图的渲染器（``type="image_table"``）。"""
 
     @property
     def type(self) -> str:
+        """插件类型标识。"""
         return "image_table"
 
     def render(
@@ -155,6 +160,7 @@ class ImageTableRenderer:
         config: dict[str, Any],
         params: dict[str, Any],
     ) -> list[MessagePart]:
+        """生成 PNG、落盘，返回 kind=image 且 content 含 path 的片段。"""
         del params
         title = config.get("title")
         if title is not None:

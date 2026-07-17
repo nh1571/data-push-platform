@@ -1,3 +1,9 @@
+/**
+ * 通道列表页。
+ *
+ * 展示全部投递通道，支持测试连通性、编辑与删除。
+ * 新建跳转 `/channels/new`。
+ */
 import { ApiOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, message, Popconfirm, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -8,12 +14,14 @@ import { getErrorMessage } from '../../api/client'
 import type { Channel } from '../../api/types'
 import { formatDateTime } from '../../utils/status'
 
+/** 通道列表：测试 / 编辑 / 删除 */
 export function ChannelListPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<Channel[]>([])
   const [loading, setLoading] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
 
+  /** 刷新通道列表 */
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -29,6 +37,7 @@ export function ChannelListPage() {
     void load()
   }, [load])
 
+  /** 调用后端测试通道配置 */
   const onTest = async (id: string) => {
     setTestingId(id)
     try {

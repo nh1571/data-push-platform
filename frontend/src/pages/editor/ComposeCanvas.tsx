@@ -1,6 +1,13 @@
 /**
- * Free-form compose canvas: drag position, resize, style presets.
- * Renders live components (not screenshots) so resize reflows charts/tables.
+ * 自由布局组装画布（步骤 3「组装画布」）。
+ *
+ * 对清单中的 Studio 节点做绝对定位：拖拽移动、右下角缩放、卡片风格预设。
+ * 内容区嵌入 LiveComponent（活组件，非截图），改尺寸时图表/表格可 reflow。
+ *
+ * 布局属性写在 node.props 的 compose_* 字段（见 ComposeLayout）。
+ * 顶部把手仅编辑器可见，不进入最终推送图。
+ *
+ * 导出 `ensureComposeLayouts`：进入组装步时为缺失坐标的节点补默认位置。
  */
 import {
   useCallback,
@@ -14,6 +21,7 @@ import { Empty, Typography } from 'antd'
 import type { StudioNode } from '../../api/types'
 import { LiveComponent, type DatasetMaps } from './LiveComponent'
 
+/** 自由布局相关 props 字段（存于 StudioNode.props） */
 export type ComposeLayout = {
   compose_x: number
   compose_y: number
@@ -27,6 +35,7 @@ export type ComposeLayout = {
   compose_opacity?: number
 }
 
+/** 编辑器顶部拖拽把手高度（像素） */
 const HANDLE_H = 26
 
 type Props = {
@@ -42,10 +51,13 @@ type Props = {
   typeLabel: (type: string, chart?: string) => string
 }
 
+/**
+ * 从节点 props 读取布局；缺失时按 index 竖排，并兼容旧版 compose_width 百分比。
+ */
 function readLayout(node: StudioNode, canvasWidth: number, index: number): ComposeLayout {
   const p = node.props || {}
   const defaultY = 12 + index * 220
-  // migrate legacy width %
+  // 兼容旧版宽度百分比 compose_width
   let w = Number(p.compose_w)
   if (!Number.isFinite(w) || w <= 0) {
     const pct = Number(p.compose_width)
@@ -66,6 +78,10 @@ function readLayout(node: StudioNode, canvasWidth: number, index: number): Compo
   }
 }
 
+/**
+ * 根据 compose_style 预设（plain/border/shadow/card）生成外壳 CSS。
+ * 选中时统一加蓝边高亮。
+ */
 function shellStyle(layout: ComposeLayout, selected: boolean): CSSProperties {
   const preset = layout.compose_style || 'card'
   const base: CSSProperties = {
@@ -92,7 +108,7 @@ function shellStyle(layout: ComposeLayout, selected: boolean): CSSProperties {
     base.border = selected ? '2px solid #1677ff' : 'none'
     base.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'
   } else {
-    // card
+    // card 默认
     base.border = selected
       ? '2px solid #1677ff'
       : `1px solid ${layout.compose_color || '#e8e8e8'}`
@@ -103,6 +119,9 @@ function shellStyle(layout: ComposeLayout, selected: boolean): CSSProperties {
 
 type DragMode = 'move' | 'resize' | null
 
+/**
+ * 组装画布主组件：画板 + 可拖拽节点 + 选中缩放手柄。
+ */
 export function ComposeCanvas({
   canvasWidth,
   canvasMinHeight,
@@ -129,6 +148,7 @@ export function ComposeCanvas({
     layout: readLayout(n, canvasWidth, i),
   }))
 
+  // 画板高度随最底节点自动撑开
   const maxBottom = layouts.reduce(
     (m, { layout }) => Math.max(m, layout.compose_y + layout.compose_h + 24),
     canvasMinHeight,
@@ -154,6 +174,7 @@ export function ComposeCanvas({
 
   const onPointerUp = useCallback(() => setDrag(null), [])
 
+  // 拖拽期间在 window 上监听，避免指针移出节点丢失事件
   useEffect(() => {
     if (!drag) return
     window.addEventListener('pointermove', onPointerMove)
@@ -209,6 +230,7 @@ export function ComposeCanvas({
           overflow: 'hidden',
         }}
       >
+        {/* 画板顶栏 chrome（对应 artboard.show_chrome） */}
         {chrome?.show ? (
           <div
             style={{
@@ -239,6 +261,7 @@ export function ComposeCanvas({
           ) : (
             layouts.map(({ node, layout }, index) => {
               const selected = selectedId === node.id
+              // 内容区高度 = 总高 − 把手 − padding
               const contentH = Math.max(40, layout.compose_h - HANDLE_H - (layout.compose_padding || 0) * 2)
               return (
                 <div
@@ -258,7 +281,7 @@ export function ComposeCanvas({
                   }}
                 >
                   <div style={shellStyle(layout, selected)}>
-                    {/* editor-only handle — not part of final push image */}
+                    {/* 仅编辑器可见的拖拽把手，不进入最终推送图 */}
                     <div
                       onPointerDown={(e) => startDrag(e, node.id, 'move', layout)}
                       style={{
@@ -332,7 +355,11 @@ export function ComposeCanvas({
   )
 }
 
-/** Initialize free-layout coords for nodes missing them. */
+/**
+ * 为尚未设置 compose 坐标的节点补默认自由布局。
+ * 按类型给默认高度，竖向堆叠；已有坐标的节点只推进 y 游标。
+ * @returns 需要写回 props 的 patch 列表
+ */
 export function ensureComposeLayouts(
   nodes: StudioNode[],
   canvasWidth: number,
@@ -349,7 +376,7 @@ export function ensureComposeLayouts(
       continue
     }
     const w = canvasWidth - 24
-    // default height by type
+    // 按组件类型给合理默认高度
     let h = 200
     if (n.type === 'Kpi') h = 120
     else if (n.type === 'Text' || n.type === 'Alert') h = 140
