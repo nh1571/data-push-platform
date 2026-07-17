@@ -453,19 +453,20 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：模板/运行态语义已写入 HANDOFF + 工作台文案（用户确认整体思路）
+进行中：本地零依赖协作模式（SQLite）已落地
 阻塞：无
 上次完成：
-  - 5 步工作台 + 自由画布 + 组装推送富文本壳
-  - 明确：工作台=模板；每次推送按参数动态取数成图
-  - 运行路径 pipeline 已每次 resolve 参数 + 实时 query + artboard 成图
+  - APP_ENV=local 默认 SQLite 元库 + EXECUTION_SYNC + 演示业务库
+  - scripts/dev.sh / docs/DEPLOYMENT.md / .env.example
+  - 生产/Docker 仍用外置 MySQL+Redis（compose APP_ENV=docker）
 建议下一动作：
-  1) 用户走一遍「样例预览 vs 改参数再预览」感受动态性
-  2) 参数体系整体调整（用户此前搁置）时强化 runtime overrides UI
-  3) 可选：预览页展示「本次解析参数」清单
+  1) 新同事按 ./scripts/dev.sh 验收
+  2) 参数 UI 后期整体调
+  3) 可选：CI 默认 APP_ENV=test + sqlite
 
-环境：mysql+redis；API :8000 / 前端 :5173 应在跑
-参考：Obsidian 22（模板与运行时）+ 20–21
+本地：./scripts/dev.sh（无需 docker）
+外置：docker compose up
+参考：docs/DEPLOYMENT.md、Obsidian 22
 ```
 
 

@@ -11,6 +11,7 @@ import {
 import { getErrorMessage } from '../../api/client'
 
 const SOURCE_TYPES = [
+  { value: 'sqlite', label: 'SQLite（本地演示 / 文件）' },
   { value: 'mysql', label: 'MySQL' },
   { value: 'doris', label: 'Doris' },
   { value: 'sqlserver', label: 'SQL Server（院区 HIS）' },
@@ -19,12 +20,13 @@ const SOURCE_TYPES = [
 interface FormValues {
   name: string
   type: string
-  host: string
-  port: number
-  user: string
-  password: string
-  database: string
+  host?: string
+  port?: number
+  user?: string
+  password?: string
+  database?: string
   charset?: string
+  path?: string
 }
 
 const MASK = '******'
@@ -37,11 +39,14 @@ export function DataSourceFormPage() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const dsType = Form.useWatch('type', form)
+  const isSqlite = dsType === 'sqlite'
 
   useEffect(() => {
     if (isNew) {
       form.setFieldsValue({
-        type: 'mysql',
+        type: 'sqlite',
+        path: 'data/demo_biz.db',
         port: 3306,
         charset: 'utf8mb4',
       })
@@ -60,6 +65,7 @@ export function DataSourceFormPage() {
           password: String(cfg.password ?? ''),
           database: String(cfg.database ?? ''),
           charset: cfg.charset ? String(cfg.charset) : 'utf8mb4',
+          path: String(cfg.path ?? cfg.database ?? ''),
         })
       })
       .catch((err) => message.error(getErrorMessage(err)))
@@ -67,7 +73,14 @@ export function DataSourceFormPage() {
   }, [form, id, isNew])
 
   const buildConfig = (values: FormValues): Record<string, unknown> | null => {
-    // On update, skip re-sending masked password so user can leave it blank/masked
+    if (values.type === 'sqlite') {
+      if (!values.path?.trim()) {
+        message.error('请填写 SQLite 文件路径')
+        return null
+      }
+      return { path: values.path.trim(), max_rows: 10000 }
+    }
+
     const password =
       !isNew && (!values.password || values.password === MASK) ? undefined : values.password
 
@@ -85,11 +98,7 @@ export function DataSourceFormPage() {
     if (password) config.password = password
     if (values.charset) config.charset = values.charset
 
-    // Edit without password change: must include full config with password from form
-    // Backend replaces entire config_enc when config is provided. If password is masked,
-    // require user to re-enter password when updating config fields.
     if (!isNew && !password) {
-      // Only name/type update — omit config entirely
       return null
     }
     return config
@@ -119,7 +128,9 @@ export function DataSourceFormPage() {
           name: values.name,
           type: values.type,
         }
-        if (config) {
+        if (values.type === 'sqlite') {
+          if (config) body.config = config
+        } else if (config) {
           body.config = config
         } else if (values.password && values.password !== MASK) {
           body.config = {
@@ -131,8 +142,6 @@ export function DataSourceFormPage() {
             charset: values.charset,
           }
         } else {
-          // When updating connection fields without new password, still need full config
-          // If password is still mask, require re-entry for config update
           const dirty = form.isFieldsTouched([
             'host',
             'port',
@@ -203,38 +212,53 @@ export function DataSourceFormPage() {
         onFinish={() => void onSave()}
       >
         <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-          <Input placeholder="例如：生产订单库" />
+          <Input placeholder="例如：生产订单库 / 本地演示" />
         </Form.Item>
         <Form.Item name="type" label="类型" rules={[{ required: true }]}>
           <Select options={SOURCE_TYPES} />
         </Form.Item>
-        <Form.Item name="host" label="主机" rules={[{ required: true, message: '请输入主机' }]}>
-          <Input placeholder="localhost" />
-        </Form.Item>
-        <Form.Item name="port" label="端口" rules={[{ required: true, message: '请输入端口' }]}>
-          <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="user" label="用户" rules={[{ required: true, message: '请输入用户' }]}>
-          <Input autoComplete="off" />
-        </Form.Item>
-        <Form.Item
-          name="password"
-          label="密码"
-          rules={isNew ? [{ required: true, message: '请输入密码' }] : []}
-          extra={!isNew ? '已脱敏显示；修改连接配置时请重新输入密码' : undefined}
-        >
-          <Input.Password autoComplete="new-password" placeholder={isNew ? '' : '******'} />
-        </Form.Item>
-        <Form.Item
-          name="database"
-          label="数据库"
-          rules={[{ required: true, message: '请输入数据库名' }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item name="charset" label="字符集">
-          <Input placeholder="utf8mb4" />
-        </Form.Item>
+
+        {isSqlite ? (
+          <Form.Item
+            name="path"
+            label="SQLite 文件路径"
+            rules={[{ required: true, message: '请输入路径' }]}
+            extra="相对 backend 工作目录，如 data/demo_biz.db（本地启动会自动生成演示库）"
+          >
+            <Input placeholder="data/demo_biz.db" />
+          </Form.Item>
+        ) : (
+          <>
+            <Form.Item name="host" label="主机" rules={[{ required: true, message: '请输入主机' }]}>
+              <Input placeholder="localhost" />
+            </Form.Item>
+            <Form.Item name="port" label="端口" rules={[{ required: true, message: '请输入端口' }]}>
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="user" label="用户" rules={[{ required: true, message: '请输入用户' }]}>
+              <Input autoComplete="off" />
+            </Form.Item>
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={isNew ? [{ required: true, message: '请输入密码' }] : []}
+              extra={!isNew ? '已脱敏显示；修改连接配置时请重新输入密码' : undefined}
+            >
+              <Input.Password autoComplete="new-password" placeholder={isNew ? '' : '******'} />
+            </Form.Item>
+            <Form.Item
+              name="database"
+              label="数据库"
+              rules={[{ required: true, message: '请输入数据库名' }]}
+            >
+              <Input />
+            </Form.Item>
+            <Form.Item name="charset" label="字符集">
+              <Input placeholder="utf8mb4" />
+            </Form.Item>
+          </>
+        )}
+
         <Space>
           <Button type="primary" htmlType="submit" loading={saving}>
             保存

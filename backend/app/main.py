@@ -1,6 +1,7 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
@@ -12,13 +13,32 @@ from app.plugins.datasource import register_builtin_datasources
 from app.plugins.registry import plugin_registry
 from app.plugins.renderer import register_builtin_renderers
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """On startup: bootstrap default admin if no operators exist."""
+    """On startup: local bootstrap (optional) + admin user if empty."""
+    from app.local_bootstrap import (
+        ensure_local_runtime,
+        ensure_schema,
+        log_runtime_banner,
+        seed_demo_datasource_if_empty,
+    )
+
+    # Local-first: dirs, fernet, demo biz DB. Safe no-op-ish for production
+    # except ensure_schema may run alembic when auto_migrate=true.
+    if settings.is_local_profile or settings.auto_migrate:
+        ensure_local_runtime()
+        ensure_schema()
+
+    log_runtime_banner()
+
     db = SessionLocal()
     try:
         ensure_bootstrap_admin(db)
+        if settings.is_local_profile:
+            seed_demo_datasource_if_empty(db)
     finally:
         db.close()
     yield
@@ -43,5 +63,10 @@ app.include_router(api_router)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(detail: bool = Query(False, description="Include dependency profile")):
+    body: dict = {"status": "ok", "app_env": settings.app_env}
+    if detail:
+        from app.local_bootstrap import health_deps
+
+        body["deps"] = health_deps()
+    return body

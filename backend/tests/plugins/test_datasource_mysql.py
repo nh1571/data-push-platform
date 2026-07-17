@@ -150,7 +150,13 @@ class TestRegisterBuiltinDatasources:
         registry = PluginRegistry()
         register_builtin_datasources(registry)
 
-        assert set(registry.list_types("datasource")) == {"doris", "mysql", "sqlserver"}
+        assert set(registry.list_types("datasource")) == {
+            "doris",
+            "mysql",
+            "sqlserver",
+            "sqlite",
+        }
         assert registry.get("datasource", "mysql").type == "mysql"
         assert registry.get("datasource", "doris").type == "doris"
         assert registry.get("datasource", "sqlserver").type == "sqlserver"
+        assert registry.get("datasource", "sqlite").type == "sqlite"

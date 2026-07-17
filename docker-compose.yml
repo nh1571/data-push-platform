@@ -51,6 +51,8 @@ services:
     ports:
       - "8000:8000"
     environment: &backend_env
+      # Full stack profile: external MySQL + Redis (not the zero-dep local SQLite mode)
+      APP_ENV: docker
       DATABASE_URL: mysql+pymysql://push:push@mysql:3306/push
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: change-me-in-production
@@ -60,6 +62,8 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin123
       EXECUTION_SYNC: "true"
+      AUTO_MIGRATE: "true"
+      SEED_DEMO_DATA: "false"
       STORAGE_ROOT: /app/storage
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173","http://127.0.0.1:5173"]'
       RUN_MIGRATIONS: "1"

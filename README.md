@@ -57,7 +57,36 @@ Data push middleware for configuring sources, SQL/templates, delivery channels (
 
 ---
 
-## 快速启动（Docker Compose）
+## 快速启动（协作开发 · 推荐，零外部依赖）
+
+**不需要** Docker / MySQL / Redis。元库用 SQLite，任务默认同进程执行。
+
+```bash
+# 前置：Python 3.11+、Node 18+
+./scripts/dev.sh
+```
+
+| 入口 | |
+|------|--|
+| 管理台 | http://localhost:5173 |
+| API | http://localhost:8000/docs |
+| 账号 | `admin` / `admin123` |
+| 依赖详情 | http://localhost:8000/health?detail=true |
+
+首次启动自动：SQLite 元库、Fernet 密钥文件、演示业务库 `data/demo_biz.db`、演示数据源。
+
+完整说明见 **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**（local vs production 依赖对照）。
+
+可选成图引擎：
+
+```bash
+cd backend && source .venv/bin/activate
+python -m playwright install chromium
+```
+
+---
+
+## 快速启动（Docker Compose · 外置 MySQL/Redis）
 
 ### 前置
 
@@ -125,13 +154,15 @@ npm run dev
 
 ### 环境变量一览
 
-| 变量 | 含义 | 默认（compose） |
-|------|------|-----------------|
-| `DATABASE_URL` | SQLAlchemy URL | `mysql+pymysql://push:push@mysql:3306/push` |
-| `REDIS_URL` | Redis / Celery | `redis://redis:6379/0` |
-| `SECRET_KEY` | JWT 签名 | `change-me-in-production` |
-| `TOKEN_FERNET_KEY` | 配置加密 Fernet 密钥 | 见 compose 内演示值 |
-| `ADMIN_USERNAME` | 初始管理员 | `admin` |
+| 变量 | 含义 | Local 默认 | Compose |
+|------|------|------------|---------|
+| `APP_ENV` | 配置档 `local` / `production` / `docker` | `local` | `docker` |
+| `DATABASE_URL` | 元库 | SQLite `backend/data/meta.db` | MySQL |
+| `REDIS_URL` | Celery | 未使用（sync） | redis 服务 |
+| `EXECUTION_SYNC` | 进程内执行 | `true` | `true` |
+| `SECRET_KEY` | JWT 签名 | 开发默认值 | 需更换 |
+| `TOKEN_FERNET_KEY` | 配置加密 | 自动生成文件 | compose 演示值 |
+| `ADMIN_USERNAME` | 初始管理员 | `admin` | `admin` |
 | `ADMIN_PASSWORD` | 初始密码 | `admin123` |
 | `EXECUTION_SYNC` | `true` 同步执行 / `false` Celery | `true` |
 | `STORAGE_ROOT` | 图片/文件导出目录 | `/app/storage` |
