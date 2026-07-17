@@ -4,13 +4,17 @@
 
 Data push middleware for configuring sources, SQL/templates, delivery channels (e.g. DingTalk), and triggers (manual / cron / HTTP for DS orchestrators), with full job-run observability.
 
+**GitHub（Private）:** https://github.com/nh1571/data-push-platform  
+协作与代管说明：[`docs/GITHUB_OPS.md`](docs/GITHUB_OPS.md)
+
 > **多 Agent / 跨会话继续开发（必读）**  
 > 0. **技能** `continue-data-push-dev` — **启动/继续** 与 **停止/收工**（说「继续开发推送中台」或「停止开发/收工」）  
 > 1. [`docs/DEVELOPMENT_HANDOFF.md`](docs/DEVELOPMENT_HANDOFF.md) — 进度、架构、下一优先级、开场白  
 > 2. [`docs/CONTINUE_CHECKLIST.md`](docs/CONTINUE_CHECKLIST.md) — 下次开工 5 分钟清单  
-> 3. [`docs/COLLAB_MODULES.md`](docs/COLLAB_MODULES.md) — **功能拆分与协同边界（多人认领用）**  
+> 3. [`docs/COLLAB_MODULES.md`](docs/COLLAB_MODULES.md) — **三人分工**  
 > 4. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — 本地零依赖 / 生产外置依赖  
-> 5. Obsidian：`20_项目/企业数据推送中台/`
+> 5. [`docs/GITHUB_OPS.md`](docs/GITHUB_OPS.md) — **GitHub 发布与代管**  
+> 6. Obsidian：`20_项目/企业数据推送中台/`
 
 ---
 
