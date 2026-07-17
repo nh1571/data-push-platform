@@ -48,6 +48,21 @@ def _prepare(
     return list(labs), list(vals)
 
 
+def _as_font_size(props: dict[str, Any], *keys: str, default: int) -> int:
+    """读取组件样式字号（做组件/组装画布写入的 props）。"""
+    for k in keys:
+        v = props.get(k)
+        if v is None or v == "":
+            continue
+        try:
+            n = int(float(v))
+            if 6 <= n <= 96:
+                return n
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
 def build_echarts_option(
     labels: list[str],
     values: list[float],
@@ -55,7 +70,10 @@ def build_echarts_option(
     *,
     multi_series: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """构建 ECharts option 字典（与前端 chartOption.ts 对齐）。"""
+    """构建 ECharts option 字典（与前端 chartOption.ts 对齐）。
+
+    字号等样式来自组件 props（做组件环节配置），最终截图必须读取这些字段。
+    """
     props = dict(props or {})
     labels, values = _prepare(labels, values, props)
     ct = str(props.get("chart_type") or "bar").lower()
@@ -67,6 +85,11 @@ def build_echarts_option(
     subtitle = str(props.get("subtitle") or "")
     series_name = str(props.get("series_name") or title or "数值")
 
+    title_fs = _as_font_size(props, "title_font_size", "content_font_size", default=15)
+    label_fs = _as_font_size(props, "chart_label_size", "label_font_size", default=10)
+    axis_fs = _as_font_size(props, "axis_font_size", default=11)
+    legend_fs = _as_font_size(props, "legend_font_size", default=max(10, axis_fs))
+
     option: dict[str, Any] = {
         "color": palette,
         "backgroundColor": "transparent",
@@ -75,7 +98,13 @@ def build_echarts_option(
             "axisPointer": {"type": "shadow"} if ct != "pie" else None,
         },
         "legend": (
-            {"show": True, "bottom": 4, "left": "center", "type": "scroll"}
+            {
+                "show": True,
+                "bottom": 4,
+                "left": "center",
+                "type": "scroll",
+                "textStyle": {"fontSize": legend_fs},
+            }
             if show_legend or (multi_series and len(multi_series) > 1)
             else {"show": False}
         ),
@@ -86,7 +115,11 @@ def build_echarts_option(
             "subtext": subtitle or None,
             "left": "center",
             "top": 6,
-            "textStyle": {"fontSize": 15, "fontWeight": 600},
+            "textStyle": {"fontSize": title_fs, "fontWeight": 600},
+            "subtextStyle": {
+                "fontSize": max(10, int(title_fs * 0.8)),
+                "color": "#888",
+            },
         }
 
     if ct == "pie":
@@ -102,7 +135,7 @@ def build_echarts_option(
                 "label": {
                     "show": show_label,
                     "formatter": "{b}\n{d}%",
-                    "fontSize": 11,
+                    "fontSize": label_fs + 1,
                 },
                 "data": data,
             }
@@ -110,16 +143,18 @@ def build_echarts_option(
         return option
 
     is_h = ct == "hbar" or bool(props.get("horizontal"))
+    rotate = 0 if is_h else int(props.get("x_label_rotate") or (30 if len(labels) > 8 else 0))
     cat_axis = {
         "type": "category",
         "data": labels,
         "axisLabel": {
-            "rotate": 0 if is_h else (30 if len(labels) > 8 else int(props.get("x_label_rotate") or 0)),
-            "fontSize": 11,
+            "rotate": rotate,
+            "fontSize": axis_fs,
         },
     }
     val_axis = {
         "type": "value",
+        "axisLabel": {"fontSize": axis_fs},
         "splitLine": {
             "show": show_grid,
             "lineStyle": {"type": "dashed", "opacity": 0.5},
@@ -153,7 +188,7 @@ def build_echarts_option(
                     "stack": "total" if props.get("stack") else None,
                     "symbol": "circle",
                     "symbolSize": 6,
-                    "lineStyle": {"width": int(props.get("line_width") or 2.5)},
+                    "lineStyle": {"width": float(props.get("line_width") or 2.5)},
                     "areaStyle": (
                         {"opacity": float(props.get("area_opacity") or 0.28)}
                         if ct == "area"
@@ -162,26 +197,31 @@ def build_echarts_option(
                     "label": {
                         "show": show_label,
                         "position": str(props.get("label_position") or "top"),
-                        "fontSize": 10,
+                        "fontSize": label_fs,
                     },
                 }
             )
         else:
             br = int(props.get("bar_border_radius") or 4)
+            bar_max = props.get("bar_max_width")
+            try:
+                bar_max_w = int(bar_max) if bar_max is not None else 48
+            except (TypeError, ValueError):
+                bar_max_w = 48
             series_out.append(
                 {
                     "name": name,
                     "type": "bar",
                     "data": data,
                     "stack": "total" if props.get("stack") else None,
-                    "barMaxWidth": 48,
+                    "barMaxWidth": bar_max_w,
                     "itemStyle": {
                         "borderRadius": [0, br, br, 0] if is_h else [br, br, 0, 0],
                     },
                     "label": {
                         "show": show_label,
                         "position": "right" if is_h else str(props.get("label_position") or "top"),
-                        "fontSize": 10,
+                        "fontSize": label_fs,
                     },
                 }
             )

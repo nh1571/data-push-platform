@@ -128,7 +128,8 @@ const COMPOSE_STYLE_OPTIONS = [
   { value: 'shadow', label: '阴影' },
 ]
 
-const COMPOSE_PROP_KEYS = [
+/** 仅布局壳（更新组件数据/样式时保留画布坐标） */
+const COMPOSE_LAYOUT_KEYS = [
   'compose_x',
   'compose_y',
   'compose_w',
@@ -141,7 +142,11 @@ const COMPOSE_PROP_KEYS = [
   'compose_opacity',
   'compose_width',
   'preview_image',
-  // 内容样式（组装画布可调）
+] as const
+
+/** 布局 + 内容样式（做组件确认时整体保留旧布局用） */
+const COMPOSE_PROP_KEYS = [
+  ...COMPOSE_LAYOUT_KEYS,
   'content_font_size',
   'content_font_weight',
   'content_color',
@@ -153,9 +158,12 @@ const COMPOSE_PROP_KEYS = [
   'title_font_size',
   'chart_label_size',
   'axis_font_size',
+  'legend_font_size',
   'show_label',
   'show_legend',
   'show_grid',
+  'bar_max_width',
+  'color_palette',
 ] as const
 
 function colorToHex(color: Color | string): string {
@@ -190,13 +198,13 @@ type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
 /** Steps 组件展示用元数据 */
 const STEPS = [
   { key: 'data' as const, title: '1. 数据', desc: 'SQL/参数模板' },
-  { key: 'make' as const, title: '2. 做组件', desc: '绑定字段' },
-  { key: 'compose' as const, title: '3. 组装画布', desc: '多图画布' },
+  { key: 'make' as const, title: '2. 做组件', desc: '数据+样式' },
+  { key: 'compose' as const, title: '3. 组装画布', desc: '排版布局' },
   { key: 'message' as const, title: '4. 组装推送', desc: '文案+多图' },
   { key: 'preview' as const, title: '5. 预览推送', desc: '样例预演' },
 ]
 
-/** 「做组件」步骤中的临时表单（确认前未写入 tree） */
+/** 「做组件」步骤中的临时表单（确认前未写入 tree）——含数据绑定与组件级样式 */
 type DraftForm = {
   type: string
   dataset_id: string
@@ -224,6 +232,20 @@ type DraftForm = {
   bar_border_radius?: number
   line_width?: number
   area_opacity?: number
+  bar_max_width?: number
+  /** 组件样式（写入 props，成图引擎读取） */
+  content_font_size?: number
+  content_font_weight?: string
+  content_color?: string
+  content_align?: 'left' | 'center' | 'right'
+  content_line_height?: number
+  label_font_size?: number
+  label_color?: string
+  title_font_size?: number
+  chart_label_size?: number
+  axis_font_size?: number
+  legend_font_size?: number
+  color_palette?: string[]
 }
 
 /** 按组件类型生成空 draft 表单默认值 */
@@ -249,6 +271,11 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
     bar_border_radius: 4,
     line_width: 2.5,
     area_opacity: 0.28,
+    bar_max_width: 48,
+    title_font_size: 15,
+    chart_label_size: 10,
+    axis_font_size: 11,
+    legend_font_size: 11,
   }
   if (type === 'ChartBar') return { ...chartBase, chart_type: 'bar', title: '柱状图' }
   if (type === 'ChartLine') return { ...chartBase, chart_type: 'line', title: '折线图' }
@@ -265,8 +292,23 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
       text: '<p>在此编写推送文案，可用工具栏设置<strong>加粗</strong>、颜色、列表等。</p><p>插入字段：{{列名}}</p>',
     }
   if (type === 'Alert') return { ...base, type: 'Alert', level: 'error', text: '请注意异常指标' }
-  if (type === 'Kpi') return { ...base, type: 'Kpi', label: '指标' }
-  if (type === 'Table') return { ...base, type: 'Table', table_style: 'business' }
+  if (type === 'Kpi')
+    return {
+      ...base,
+      type: 'Kpi',
+      label: '指标',
+      content_font_size: 28,
+      content_font_weight: '700',
+      content_align: 'center',
+      label_font_size: 12,
+    }
+  if (type === 'Table')
+    return {
+      ...base,
+      type: 'Table',
+      table_style: 'business',
+      content_font_size: 12,
+    }
   if (type === 'Divider') return { ...base, type: 'Divider' }
   return base
 }
@@ -307,7 +349,49 @@ function nodeToDraft(node: StudioNode): DraftForm {
     bar_border_radius: Number(p.bar_border_radius ?? 4),
     line_width: Number(p.line_width ?? 2.5),
     area_opacity: Number(p.area_opacity ?? 0.28),
+    bar_max_width: Number(p.bar_max_width ?? 48),
+    content_font_size:
+      p.content_font_size != null ? Number(p.content_font_size) : undefined,
+    content_font_weight: p.content_font_weight != null ? String(p.content_font_weight) : undefined,
+    content_color: p.content_color ? String(p.content_color) : undefined,
+    content_align: (p.content_align as DraftForm['content_align']) || undefined,
+    content_line_height:
+      p.content_line_height != null ? Number(p.content_line_height) : undefined,
+    label_font_size: p.label_font_size != null ? Number(p.label_font_size) : undefined,
+    label_color: p.label_color ? String(p.label_color) : undefined,
+    title_font_size: p.title_font_size != null ? Number(p.title_font_size) : undefined,
+    chart_label_size: p.chart_label_size != null ? Number(p.chart_label_size) : undefined,
+    axis_font_size: p.axis_font_size != null ? Number(p.axis_font_size) : undefined,
+    legend_font_size: p.legend_font_size != null ? Number(p.legend_font_size) : undefined,
+    color_palette: Array.isArray(p.color_palette)
+      ? (p.color_palette as unknown[]).map(String)
+      : undefined,
   }
+}
+
+/** 组件级样式 props（做组件配置 → 成图引擎） */
+function draftStyleProps(draft: DraftForm): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const keys: (keyof DraftForm)[] = [
+    'content_font_size',
+    'content_font_weight',
+    'content_color',
+    'content_align',
+    'content_line_height',
+    'label_font_size',
+    'label_color',
+    'title_font_size',
+    'chart_label_size',
+    'axis_font_size',
+    'legend_font_size',
+    'color_palette',
+    'bar_max_width',
+  ]
+  for (const k of keys) {
+    const v = draft[k]
+    if (v !== undefined && v !== null && v !== '') out[k] = v
+  }
+  return out
 }
 
 /** draft → StudioNode（新建或覆盖 existingId） */
@@ -320,7 +404,10 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
       id,
       type: 'Kpi',
       visible: true,
-      props: { label: draft.label || draft.value_column || '指标' },
+      props: {
+        label: draft.label || draft.value_column || '指标',
+        ...draftStyleProps(draft),
+      },
       binding: {
         dataset_id: ds,
         value_column: draft.value_column || '',
@@ -359,6 +446,7 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
         line_width: draft.line_width ?? 2.5,
         area_opacity: draft.area_opacity ?? 0.28,
         value_columns: vcols,
+        ...draftStyleProps(draft),
       },
       binding: {
         dataset_id: ds,
@@ -378,6 +466,7 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
         text: draft.text || '',
         html: draft.text || '',
         content_format: 'html',
+        ...draftStyleProps(draft),
       },
       binding: { dataset_id: ds },
     }
@@ -387,7 +476,11 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
       id,
       type: 'Alert',
       visible: true,
-      props: { level: draft.level || 'error', text: draft.text || '' },
+      props: {
+        level: draft.level || 'error',
+        text: draft.text || '',
+        ...draftStyleProps(draft),
+      },
       binding: { dataset_id: ds },
     }
   }
@@ -396,7 +489,12 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
       id,
       type: 'Table',
       visible: true,
-      props: { style: draft.table_style || 'business', color_ratios: true, max_rows: 50 },
+      props: {
+        style: draft.table_style || 'business',
+        color_votes: true,
+        max_rows: 50,
+        ...draftStyleProps(draft),
+      },
       binding: { dataset_id: ds },
     }
   }
@@ -920,8 +1018,9 @@ export function EditorPage() {
           for (const ch of c.tree.children || []) {
             const src = String(ch.props?.library_id || ch.id)
             if (src !== libKey && ch.id !== editId) continue
+            // 只保留画布布局，样式以做组件新配置为准
             const layoutKeep: Record<string, unknown> = {}
-            for (const k of COMPOSE_PROP_KEYS) {
+            for (const k of COMPOSE_LAYOUT_KEYS) {
               if (ch.props?.[k] !== undefined) layoutKeep[k] = ch.props[k]
             }
             t = updateNode(t, ch.id, {
@@ -983,6 +1082,10 @@ export function EditorPage() {
         bar_border_radius: draft.bar_border_radius,
         line_width: draft.line_width,
         area_opacity: draft.area_opacity,
+        title_font_size: draft.title_font_size,
+        label_font_size: draft.chart_label_size,
+        axis_font_size: draft.axis_font_size,
+        color_palette: draft.color_palette,
       }
       return { kind: 'chart' as const, labels, series, style }
     }
@@ -995,6 +1098,12 @@ export function EditorPage() {
         label: draft.label || col || '指标',
         value: val === null || val === undefined ? '—' : String(val),
         hint: col ? `${dsId}.${col}` : '未选字段',
+        valueSize: draft.content_font_size,
+        labelSize: draft.label_font_size,
+        valueColor: draft.content_color,
+        labelColor: draft.label_color,
+        align: draft.content_align || 'center',
+        weight: draft.content_font_weight,
       }
     }
     if (draft.type === 'Table') {
@@ -2214,6 +2323,261 @@ export function EditorPage() {
                   {!draftFields.length && draft.type !== 'Divider' ? (
                     <Alert type="warning" showIcon message="请先回「数据」取数" style={{ marginBottom: 8 }} />
                   ) : null}
+
+                  {/* —— 组件样式（写入 props，成图生效；参考 DataEase/Superset 分数据与样式） —— */}
+                  {draft.type !== 'Divider' ? (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        marginBottom: 12,
+                        padding: 12,
+                        background: '#f7f9fc',
+                        borderRadius: 8,
+                        border: '1px solid #e8eef5',
+                      }}
+                    >
+                      <Typography.Text strong style={{ fontSize: 13 }}>
+                        组件样式
+                      </Typography.Text>
+                      <div style={{ fontSize: 11, color: '#888', margin: '4px 0 10px' }}>
+                        按组件类型配置（成图与预览共用）。组装画布只负责位置/大小。
+                      </div>
+
+                      {draft.type === 'Chart' ? (
+                        <>
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr',
+                              gap: 8,
+                            }}
+                          >
+                            <div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                标题字号
+                              </Typography.Text>
+                              <InputNumber
+                                style={{ width: '100%', marginTop: 4 }}
+                                min={10}
+                                max={36}
+                                value={draft.title_font_size ?? 15}
+                                onChange={(v) =>
+                                  setDraft({ ...draft, title_font_size: v ?? 15 })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                数据标签字号
+                              </Typography.Text>
+                              <InputNumber
+                                style={{ width: '100%', marginTop: 4 }}
+                                min={8}
+                                max={24}
+                                value={draft.chart_label_size ?? 10}
+                                onChange={(v) =>
+                                  setDraft({ ...draft, chart_label_size: v ?? 10 })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                坐标轴字号
+                              </Typography.Text>
+                              <InputNumber
+                                style={{ width: '100%', marginTop: 4 }}
+                                min={8}
+                                max={20}
+                                value={draft.axis_font_size ?? 11}
+                                onChange={(v) =>
+                                  setDraft({ ...draft, axis_font_size: v ?? 11 })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                图例字号
+                              </Typography.Text>
+                              <InputNumber
+                                style={{ width: '100%', marginTop: 4 }}
+                                min={8}
+                                max={20}
+                                value={draft.legend_font_size ?? 11}
+                                onChange={(v) =>
+                                  setDraft({ ...draft, legend_font_size: v ?? 11 })
+                                }
+                              />
+                            </div>
+                            {(draft.chart_type === 'bar' || draft.chart_type === 'hbar') && (
+                              <div>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  柱宽上限
+                                </Typography.Text>
+                                <InputNumber
+                                  style={{ width: '100%', marginTop: 4 }}
+                                  min={8}
+                                  max={120}
+                                  value={draft.bar_max_width ?? 48}
+                                  onChange={(v) =>
+                                    setDraft({ ...draft, bar_max_width: v ?? 48 })
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              配色方案
+                            </Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 4 }}
+                              value={
+                                draft.color_palette?.join(',') ||
+                                'default'
+                              }
+                              onChange={(v) => {
+                                if (v === 'default') {
+                                  setDraft({ ...draft, color_palette: undefined })
+                                  return
+                                }
+                                setDraft({
+                                  ...draft,
+                                  color_palette: v.split(','),
+                                })
+                              }}
+                              options={[
+                                { value: 'default', label: '默认（ECharts）' },
+                                {
+                                  value: '#5470c6,#91cc75,#fac858,#ee6666,#73c0de',
+                                  label: '经典蓝绿',
+                                },
+                                {
+                                  value: '#1677ff,#69b1ff,#91caff,#bae0ff,#003eb3',
+                                  label: '商务蓝',
+                                },
+                                {
+                                  value: '#cf1322,#ff4d4f,#ff7875,#ffa39e,#820014',
+                                  label: '警示红',
+                                },
+                                {
+                                  value: '#389e0d,#73d13d,#95de64,#b7eb8f,#237804',
+                                  label: '增长绿',
+                                },
+                              ]}
+                            />
+                          </div>
+                        </>
+                      ) : null}
+
+                      {draft.type === 'Kpi' ||
+                      draft.type === 'Text' ||
+                      draft.type === 'Alert' ||
+                      draft.type === 'Table' ? (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 8,
+                          }}
+                        >
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {draft.type === 'Kpi' ? '数值字号' : '正文字号'}
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 4 }}
+                              min={10}
+                              max={72}
+                              value={draft.content_font_size}
+                              placeholder="默认"
+                              onChange={(v) =>
+                                setDraft({
+                                  ...draft,
+                                  content_font_size: v == null ? undefined : Number(v),
+                                })
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              字重
+                            </Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 4 }}
+                              allowClear
+                              placeholder="默认"
+                              value={draft.content_font_weight}
+                              options={[
+                                { value: '400', label: '常规' },
+                                { value: '500', label: '中等' },
+                                { value: '600', label: '半粗' },
+                                { value: '700', label: '加粗' },
+                              ]}
+                              onChange={(v) =>
+                                setDraft({ ...draft, content_font_weight: v || undefined })
+                              }
+                            />
+                          </div>
+                          {draft.type === 'Kpi' ? (
+                            <div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                标签字号
+                              </Typography.Text>
+                              <InputNumber
+                                style={{ width: '100%', marginTop: 4 }}
+                                min={10}
+                                max={28}
+                                value={draft.label_font_size}
+                                onChange={(v) =>
+                                  setDraft({
+                                    ...draft,
+                                    label_font_size: v == null ? undefined : Number(v),
+                                  })
+                                }
+                              />
+                            </div>
+                          ) : null}
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              对齐
+                            </Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 4 }}
+                              allowClear
+                              placeholder="默认"
+                              value={draft.content_align}
+                              options={[
+                                { value: 'left', label: '左' },
+                                { value: 'center', label: '中' },
+                                { value: 'right', label: '右' },
+                              ]}
+                              onChange={(v) =>
+                                setDraft({ ...draft, content_align: v || undefined })
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {draft.type === 'Kpi' ? '数值颜色' : '文字颜色'}
+                            </Typography.Text>
+                            <div style={{ marginTop: 4 }}>
+                              <ColorPicker
+                                allowClear
+                                value={draft.content_color || undefined}
+                                onChange={(c) =>
+                                  setDraft({
+                                    ...draft,
+                                    content_color: c ? colorToHex(c) : undefined,
+                                  })
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <Button type="primary" block onClick={() => void addToCart()}>
                     {editId ? '更新组件' : '确认并加入组件库'}
                   </Button>
@@ -2273,13 +2637,25 @@ export function EditorPage() {
                     height={380}
                   />
                 ) : makerLocal.kind === 'kpi' ? (
-                  <div style={{ textAlign: 'center', padding: '48px 16px' }}>
-                    <div style={{ color: '#888', fontSize: 14 }}>{makerLocal.label}</div>
+                  <div
+                    style={{
+                      textAlign: (makerLocal.align as 'left' | 'center' | 'right') || 'center',
+                      padding: '48px 16px',
+                    }}
+                  >
                     <div
                       style={{
-                        fontSize: 48,
-                        fontWeight: 700,
-                        color: '#1677ff',
+                        color: makerLocal.labelColor || '#888',
+                        fontSize: makerLocal.labelSize || 14,
+                      }}
+                    >
+                      {makerLocal.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: makerLocal.valueSize || 48,
+                        fontWeight: (makerLocal.weight as number | string) || 700,
+                        color: makerLocal.valueColor || '#1677ff',
                         marginTop: 8,
                       }}
                     >
@@ -2769,12 +3145,24 @@ export function EditorPage() {
                     也可在画布上拖右下角自由缩放（最小 40×24）
                   </div>
 
-                  {/* —— 内容样式：字号 / 字重 / 颜色 / 对齐 —— */}
+                  {/* —— 内容样式快捷覆盖（与做组件同一 props，成图会生效） —— */}
                   <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
-                    <Typography.Text strong>内容样式</Typography.Text>
+                    <Typography.Text strong>内容样式（快捷）</Typography.Text>
                     <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
-                      字号、字重、颜色、对齐（文案/KPI/告警/表）；图表另可调标题与标签
+                      与「做组件」共用配置并写入成图。建议完整样式在做组件里调；此处便于排版时微调。
                     </div>
+                    <Button
+                      size="small"
+                      type="link"
+                      style={{ padding: 0, height: 'auto', marginBottom: 6 }}
+                      onClick={() => {
+                        setEditId(selectedCompose.id)
+                        setDraft(nodeToDraft(selectedCompose))
+                        setStep('make')
+                      }}
+                    >
+                      打开做组件完整配置 →
+                    </Button>
 
                     <div
                       style={{
