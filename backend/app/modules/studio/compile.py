@@ -645,6 +645,27 @@ def _render_alert_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
     return f"> ⚠ {text}"
 
 
+def _wrap_compose_layout(node: dict[str, Any], inner: str) -> str:
+    """Assembly-step layout: width % and optional accent color."""
+    if not inner:
+        return ""
+    props = dict(node.get("props") or {})
+    width = props.get("compose_width")
+    color = props.get("compose_color")
+    styles: list[str] = []
+    try:
+        w = int(width) if width is not None else 100
+    except (TypeError, ValueError):
+        w = 100
+    if w != 100:
+        styles.append(f"width:{max(10, min(100, w))}%;display:inline-block;vertical-align:top;box-sizing:border-box;padding:0 4px")
+    if color:
+        styles.append(f"--theme:{html.escape(str(color))}")
+    if not styles:
+        return inner
+    return f"<div style='{';'.join(styles)}'>{inner}</div>"
+
+
 def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     if not _visible(node, data_ctx):
         return ""
@@ -660,20 +681,25 @@ def _walk_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
             if isinstance(ch, dict)
         ]
         inner = "".join(k for k in kids if k)
-        return f"<div class='{cls}' style='--gap:{gap}px'>{inner}</div>"
+        return _wrap_compose_layout(
+            node, f"<div class='{cls}' style='--gap:{gap}px'>{inner}</div>"
+        )
+    body = ""
     if ntype == "Text":
-        return _render_text_html(node, data_ctx)
-    if ntype == "Kpi":
-        return _render_kpi_html(node, data_ctx)
-    if ntype == "Table":
-        return _render_table_html(node, data_ctx)
-    if ntype == "Chart":
-        return _render_chart_html(node, data_ctx)
-    if ntype == "Alert":
-        return _render_alert_html(node, data_ctx)
-    if ntype == "Divider":
-        return "<hr style='border:none;border-top:1px solid #e5e5e5;margin:4px 0'/>"
-    return ""
+        body = _render_text_html(node, data_ctx)
+    elif ntype == "Kpi":
+        body = _render_kpi_html(node, data_ctx)
+    elif ntype == "Table":
+        body = _render_table_html(node, data_ctx)
+    elif ntype == "Chart":
+        body = _render_chart_html(node, data_ctx)
+    elif ntype == "Alert":
+        body = _render_alert_html(node, data_ctx)
+    elif ntype == "Divider":
+        body = "<hr style='border:none;border-top:1px solid #e5e5e5;margin:4px 0'/>"
+    else:
+        return ""
+    return _wrap_compose_layout(node, body)
 
 
 def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str]:
