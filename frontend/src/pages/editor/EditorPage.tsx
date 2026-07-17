@@ -132,6 +132,21 @@ const COMPOSE_PROP_KEYS = [
   'compose_opacity',
   'compose_width',
   'preview_image',
+  // 内容样式（组装画布可调）
+  'content_font_size',
+  'content_font_weight',
+  'content_color',
+  'content_align',
+  'content_line_height',
+  'label_font_size',
+  'label_color',
+  'label_font_weight',
+  'title_font_size',
+  'chart_label_size',
+  'axis_font_size',
+  'show_label',
+  'show_legend',
+  'show_grid',
 ] as const
 
 function colorToHex(color: Color | string): string {
@@ -2706,12 +2721,13 @@ export function EditorPage() {
                       <Typography.Text type="secondary">宽</Typography.Text>
                       <InputNumber
                         style={{ width: '100%', marginTop: 4 }}
-                        min={120}
+                        min={40}
                         max={canvasWidth}
+                        step={4}
                         value={Number(selectedCompose.props?.compose_w ?? canvasWidth - 24)}
                         onChange={(v) =>
                           patchComposeLayout(selectedCompose.id, {
-                            compose_w: Math.round(Number(v ?? 120)),
+                            compose_w: Math.round(Number(v ?? 40)),
                           })
                         }
                       />
@@ -2720,15 +2736,275 @@ export function EditorPage() {
                       <Typography.Text type="secondary">高</Typography.Text>
                       <InputNumber
                         style={{ width: '100%', marginTop: 4 }}
-                        min={80}
+                        min={24}
+                        max={2000}
+                        step={4}
                         value={Number(selectedCompose.props?.compose_h ?? 200)}
                         onChange={(v) =>
                           patchComposeLayout(selectedCompose.id, {
-                            compose_h: Math.round(Number(v ?? 80)),
+                            compose_h: Math.round(Number(v ?? 24)),
                           })
                         }
                       />
                     </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#999' }}>
+                    也可在画布上拖右下角自由缩放（最小 40×24）
+                  </div>
+
+                  {/* —— 内容样式：字号 / 字重 / 颜色 / 对齐 —— */}
+                  <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+                    <Typography.Text strong>内容样式</Typography.Text>
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                      字号、字重、颜色、对齐（文案/KPI/告警/表）；图表另可调标题与标签
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 8,
+                      }}
+                    >
+                      <div>
+                        <Typography.Text type="secondary">正文字号</Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={10}
+                          max={72}
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_font_size != null
+                              ? Number(selectedCompose.props.content_font_size)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_font_size: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">字重</Typography.Text>
+                        <Select
+                          style={{ width: '100%', marginTop: 4 }}
+                          allowClear
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_font_weight != null
+                              ? String(selectedCompose.props.content_font_weight)
+                              : undefined
+                          }
+                          options={[
+                            { value: '400', label: '常规' },
+                            { value: '500', label: '中等' },
+                            { value: '600', label: '半粗' },
+                            { value: '700', label: '加粗' },
+                          ]}
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_font_weight: v || undefined,
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">对齐</Typography.Text>
+                        <Select
+                          style={{ width: '100%', marginTop: 4 }}
+                          allowClear
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_align
+                              ? String(selectedCompose.props.content_align)
+                              : undefined
+                          }
+                          options={[
+                            { value: 'left', label: '左' },
+                            { value: 'center', label: '中' },
+                            { value: 'right', label: '右' },
+                          ]}
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_align: v || undefined,
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">行高</Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={1}
+                          max={3}
+                          step={0.05}
+                          placeholder="1.55"
+                          value={
+                            selectedCompose.props?.content_line_height != null
+                              ? Number(selectedCompose.props.content_line_height)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_line_height: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <Typography.Text type="secondary">文字颜色</Typography.Text>
+                      <div style={{ marginTop: 4 }}>
+                        <ColorPicker
+                          allowClear
+                          value={
+                            selectedCompose.props?.content_color
+                              ? String(selectedCompose.props.content_color)
+                              : undefined
+                          }
+                          onChange={(c) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_color: c ? colorToHex(c) : '',
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {(selectedCompose.type === 'Kpi' ||
+                      selectedCompose.type === 'Text' ||
+                      selectedCompose.type === 'Alert') && (
+                      <div style={{ marginTop: 10 }}>
+                        <Typography.Text type="secondary">
+                          {selectedCompose.type === 'Kpi' ? '标签字号' : '辅助字号'}
+                        </Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={10}
+                          max={48}
+                          placeholder={selectedCompose.type === 'Kpi' ? '自动' : '可选'}
+                          value={
+                            selectedCompose.props?.label_font_size != null
+                              ? Number(selectedCompose.props.label_font_size)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              label_font_size: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    )}
+
+                    {selectedCompose.type === 'Chart' ? (
+                      <div style={{ marginTop: 12 }}>
+                        <Typography.Text type="secondary">图表字号</Typography.Text>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 8,
+                          }}
+                        >
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              标题
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={10}
+                              max={36}
+                              placeholder="15"
+                              value={
+                                selectedCompose.props?.title_font_size != null
+                                  ? Number(selectedCompose.props.title_font_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  title_font_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              数据标签
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={8}
+                              max={24}
+                              placeholder="10"
+                              value={
+                                selectedCompose.props?.chart_label_size != null
+                                  ? Number(selectedCompose.props.chart_label_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  chart_label_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              坐标轴
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={8}
+                              max={20}
+                              placeholder="11"
+                              value={
+                                selectedCompose.props?.axis_font_size != null
+                                  ? Number(selectedCompose.props.axis_font_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  axis_font_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <Switch
+                            size="small"
+                            checked={selectedCompose.props?.show_label !== false}
+                            onChange={(v) =>
+                              patchComposeLayout(selectedCompose.id, {
+                                show_label: v,
+                              } as Partial<ComposeLayout>)
+                            }
+                          />{' '}
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            显示数据标签
+                          </Typography.Text>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <Switch
+                            size="small"
+                            checked={Boolean(selectedCompose.props?.show_legend)}
+                            onChange={(v) =>
+                              patchComposeLayout(selectedCompose.id, {
+                                show_legend: v,
+                              } as Partial<ComposeLayout>)
+                            }
+                          />{' '}
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            显示图例
+                          </Typography.Text>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div style={{ marginTop: 12 }}>
@@ -2814,7 +3090,7 @@ export function EditorPage() {
                   style={{ marginTop: 16 }}
                   type="info"
                   showIcon
-                  message="点画布上的组件，可拖拽、缩放并改风格"
+                  message="点画布上的组件：拖拽缩放尺寸，右侧调字号/颜色/对齐等"
                 />
               )}
             </div>

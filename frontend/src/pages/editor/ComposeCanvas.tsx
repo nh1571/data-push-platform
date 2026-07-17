@@ -33,6 +33,21 @@ export type ComposeLayout = {
   compose_padding?: number
   compose_color?: string
   compose_opacity?: number
+  // 内容样式（组装画布可调，LiveComponent / 成图引擎读取）
+  content_font_size?: number
+  content_font_weight?: string | number
+  content_color?: string
+  content_align?: string
+  content_line_height?: number
+  label_font_size?: number
+  label_color?: string
+  label_font_weight?: string | number
+  title_font_size?: number
+  chart_label_size?: number
+  axis_font_size?: number
+  show_label?: boolean
+  show_legend?: boolean
+  show_grid?: boolean
 }
 
 /** 编辑器顶部拖拽把手高度（像素） */
@@ -65,12 +80,15 @@ function readLayout(node: StudioNode, canvasWidth: number, index: number): Compo
     const pct = Number(p.compose_width)
     w = Number.isFinite(pct) && pct > 0 ? Math.round((canvasWidth * pct) / 100) : canvasWidth - 24
   }
-  w = Math.max(120, Math.min(canvasWidth - 8, w))
+  // 最小 40：允许小 KPI / 细分割线等更自由尺寸
+  w = Math.max(40, Math.min(canvasWidth - 4, w))
   return {
     compose_x: Number.isFinite(Number(p.compose_x)) ? Number(p.compose_x) : 12,
     compose_y: Number.isFinite(Number(p.compose_y)) ? Number(p.compose_y) : defaultY,
     compose_w: w,
-    compose_h: Number.isFinite(Number(p.compose_h)) ? Number(p.compose_h) : 200,
+    compose_h: Number.isFinite(Number(p.compose_h))
+      ? Math.max(24, Number(p.compose_h))
+      : 200,
     compose_style: String(p.compose_style || 'card'),
     compose_bg: p.compose_bg ? String(p.compose_bg) : undefined,
     compose_radius: Number(p.compose_radius ?? 8),
@@ -167,8 +185,8 @@ export function ComposeCanvas({
         const y = Math.max(0, drag.orig.compose_y + dy)
         onChangeLayout(drag.id, { compose_x: Math.round(x), compose_y: Math.round(y) })
       } else if (drag.mode === 'resize') {
-        const w = Math.max(120, Math.min(canvasWidth - drag.orig.compose_x, drag.orig.compose_w + dx))
-        const h = Math.max(80, drag.orig.compose_h + dy)
+        const w = Math.max(40, Math.min(canvasWidth - drag.orig.compose_x, drag.orig.compose_w + dx))
+        const h = Math.max(24, drag.orig.compose_h + dy)
         onChangeLayout(drag.id, { compose_w: Math.round(w), compose_h: Math.round(h) })
       }
     },

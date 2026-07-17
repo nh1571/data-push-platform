@@ -36,12 +36,12 @@ function readLayout(node: StudioNode, canvasWidth: number, index: number) {
     const pct = Number(p.compose_width)
     w = Number.isFinite(pct) && pct > 0 ? Math.round((canvasWidth * pct) / 100) : canvasWidth - 24
   }
-  w = Math.max(80, Math.min(canvasWidth - 4, w))
+  w = Math.max(40, Math.min(canvasWidth - 4, w))
   return {
     x: Number.isFinite(Number(p.compose_x)) ? Number(p.compose_x) : 8,
     y: Number.isFinite(Number(p.compose_y)) ? Number(p.compose_y) : defaultY,
     w,
-    h: Number.isFinite(Number(p.compose_h)) ? Number(p.compose_h) : 140,
+    h: Number.isFinite(Number(p.compose_h)) ? Math.max(24, Number(p.compose_h)) : 140,
     bg: p.compose_bg ? String(p.compose_bg) : '#fff',
     radius: Number(p.compose_radius ?? 6),
     style: String(p.compose_style || 'card'),

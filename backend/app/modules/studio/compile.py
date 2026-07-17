@@ -397,6 +397,36 @@ def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s or "")
 
 
+def _content_inline_style(props: dict[str, Any], *, default_fs: int | None = None) -> str:
+    """组装画布内容样式 → inline style（字号/字重/色/对齐/行高）。"""
+    parts: list[str] = []
+    fs = props.get("content_font_size")
+    try:
+        if fs is not None and float(fs) > 0:
+            parts.append(f"font-size:{float(fs):g}px")
+        elif default_fs:
+            parts.append(f"font-size:{default_fs}px")
+    except (TypeError, ValueError):
+        if default_fs:
+            parts.append(f"font-size:{default_fs}px")
+    fw = props.get("content_font_weight")
+    if fw not in (None, ""):
+        parts.append(f"font-weight:{_esc(str(fw))}")
+    color = props.get("content_color")
+    if color:
+        parts.append(f"color:{_esc(str(color))}")
+    align = props.get("content_align")
+    if align in ("left", "center", "right"):
+        parts.append(f"text-align:{align}")
+    lh = props.get("content_line_height")
+    try:
+        if lh is not None and float(lh) > 0:
+            parts.append(f"line-height:{float(lh):g}")
+    except (TypeError, ValueError):
+        pass
+    return ";".join(parts)
+
+
 def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     """渲染文本组件 HTML：先做 {{列}} 替换；富文本原样嵌入，纯文本按 variant 套样式。"""
     props = dict(node.get("props") or {})
@@ -404,8 +434,10 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
     result = _get_dataset(data_ctx, binding)
     raw = str(props.get("html") or props.get("text") or "")
     text = substitute_first_row(raw, result)
+    style = _content_inline_style(props)
+    style_attr = f" style='{style}'" if style else ""
     if _looks_like_html(text):
-        return f"<div class='comp-rich'>{text}</div>"
+        return f"<div class='comp-rich'{style_attr}>{text}</div>"
     variant = str(props.get("variant") or "body")
     cls = {
         "h1": "comp-text-h1",
@@ -416,7 +448,7 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
         "rich": "comp-text-body",
     }.get(variant, "comp-text-body")
     tag = "h1" if cls == "comp-text-h1" else "p"
-    return f"<{tag} class='{cls}'>{_esc(text)}</{tag}>"
+    return f"<{tag} class='{cls}'{style_attr}>{_esc(text)}</{tag}>"
 
 
 def _render_text_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
@@ -476,11 +508,39 @@ def _resolve_kpi(
 
 
 def _render_kpi_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """KPI 卡片 HTML。"""
+    """KPI 卡片 HTML（支持组装画布 content_* / label_* 字号颜色）。"""
+    props = dict(node.get("props") or {})
     label, value = _resolve_kpi(node, data_ctx)
+    label_style_parts: list[str] = []
+    value_style_parts: list[str] = []
+    try:
+        lfs = props.get("label_font_size")
+        if lfs is not None and float(lfs) > 0:
+            label_style_parts.append(f"font-size:{float(lfs):g}px")
+    except (TypeError, ValueError):
+        pass
+    if props.get("label_color"):
+        label_style_parts.append(f"color:{_esc(str(props['label_color']))}")
+    try:
+        vfs = props.get("content_font_size")
+        if vfs is not None and float(vfs) > 0:
+            value_style_parts.append(f"font-size:{float(vfs):g}px")
+    except (TypeError, ValueError):
+        pass
+    if props.get("content_color"):
+        value_style_parts.append(f"color:{_esc(str(props['content_color']))}")
+    fw = props.get("content_font_weight")
+    if fw not in (None, ""):
+        value_style_parts.append(f"font-weight:{_esc(str(fw))}")
+    align = props.get("content_align")
+    wrap = ""
+    if align in ("left", "center", "right"):
+        wrap = f" style='text-align:{align}'"
+    ls = f" style='{';'.join(label_style_parts)}'" if label_style_parts else ""
+    vs = f" style='{';'.join(value_style_parts)}'" if value_style_parts else ""
     return (
-        f"<div class='comp-kpi'><div class='label'>{_esc(label)}</div>"
-        f"<div class='value'>{_esc(value)}</div></div>"
+        f"<div class='comp-kpi'{wrap}><div class='label'{ls}>{_esc(label)}</div>"
+        f"<div class='value'{vs}>{_esc(value)}</div></div>"
     )
 
 
