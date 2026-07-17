@@ -68,7 +68,7 @@ description: >
 | 6 | `docs/product/13-内容生产管线-核心关注.md` | **内容优先**，不是堆通道 |
 | 7 | `docs/product/17-组件画布-内容生产核心设计.md` | 画板是推送宽报表，不是无限 Figma |
 | 8 | `docs/product/22-模板与运行时动态渲染.md` | **工作台=模板；推送=每次动态取数成图** |
-| 9 | `docs/COLLAB_MODULES.md` + `docs/COLLAB_GIT.md` | 三人目录分工、短分支合 main |
+| 9 | `docs/LANES.md` + `COLLAB_MODULES` + `COLLAB_GIT` | 可扩展分工线、短分支合 main |
 | 10 | `README.md` + `docs/DEPLOYMENT.md` | 怎么跑、local SQLite |
 
 ### 1.2 产品理念速记（合并时默背）
@@ -79,7 +79,7 @@ description: >
 3. 内容生产（数据→组件→画布→推送壳→预览）是主战场；通道/调度是配套。
 4. 扩展靠插件新文件（datasource/channel），少改总线 pipeline/compile。
 5. 本地默认 APP_ENV=local + SQLite，不把 Docker/MySQL 当协作前提。
-6. 三人线：studio（工作台+成图）/ io（源+通道）/ runtime（执行+调度）；短 feature 分支 → PR → main。
+6. 分工线见 docs/LANES.md（默认可扩展，非永远 3 条）；短 feature/<laneId>-* → PR → main。
 ```
 
 读完前 **不得** 对非文档-only 的 PR 执行 merge。

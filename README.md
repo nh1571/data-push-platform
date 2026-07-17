@@ -17,8 +17,8 @@ curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scri
 > 0. **技能** `continue-data-push-dev` — **启动/继续** 与 **停止/收工**（说「继续开发推送中台」或「停止开发/收工」）  
 > 1. [`docs/DEVELOPMENT_HANDOFF.md`](docs/DEVELOPMENT_HANDOFF.md) — 进度、架构、下一优先级、开场白  
 > 2. [`docs/CONTINUE_CHECKLIST.md`](docs/CONTINUE_CHECKLIST.md) — 下次开工 5 分钟清单  
-> 3. [`docs/COLLAB_MODULES.md`](docs/COLLAB_MODULES.md) — **三人分工（目录）**  
-> 4. [`docs/COLLAB_GIT.md`](docs/COLLAB_GIT.md) — **分支 / 提交 / PR 规范**  
+> 3. [`docs/LANES.md`](docs/LANES.md) — **可扩展分工线注册表**（默认 3 条，可加第 4、5…）  
+> 4. [`docs/COLLAB_MODULES.md`](docs/COLLAB_MODULES.md) + [`COLLAB_GIT.md`](docs/COLLAB_GIT.md) — 目录与分支规范  
 > 5. [`docs/product/`](docs/product/) — **产品笔记（原 Obsidian，Agent 可读）**  
 > 6. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — 本地零依赖 / 生产外置  
 > 7. [`docs/GITHUB_OPS.md`](docs/GITHUB_OPS.md) — GitHub 代管  

@@ -1,7 +1,8 @@
-# Git 协同规范（三人 + 多 Agent）
+# Git 协同规范（人数可扩展）
 
-> **结论：** 分工对应 **目录**；分支是 **短任务沙箱**，从 `main` 自己创建，做完合回 `main`。  
-> Agent 强制版：`.grok/skills/data-push-collab/SKILL.md`（含完整命令）。
+> **结论：** 分工对应 **目录（Lane）**；分支是 **短任务沙箱**，从 `main` 自己创建，做完合回 `main`。  
+> **Lane 列表不是写死 3 条**：见 [LANES.md](./LANES.md)（可加第 4、第 5…）。  
+> Agent：`.grok/skills/data-push-collab/SKILL.md`。
 
 **仓库：** https://github.com/nh1571/data-push-platform  
 
@@ -43,9 +44,9 @@ git pull origin main
 git checkout main
 git pull origin main
 
-# 2) 自己建任务分支（名字带分工）
-git checkout -b feature/studio-我的任务   # 甲
-# feature/io-…  乙    feature/runtime-…  丙
+# 2) 自己建任务分支（前缀 = 当前 laneId，见 docs/LANES.md）
+git checkout -b feature/studio-我的任务
+# feature/io-… / feature/runtime-… / 将来 feature/<新lane>-…
 
 # 3) 开发
 ./scripts/dev.sh
