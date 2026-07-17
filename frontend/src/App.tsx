@@ -12,6 +12,8 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { AppLayout } from './layouts/AppLayout'
+import { IdentityFormPage } from './pages/address-book/Form'
+import { IdentityListPage } from './pages/address-book/List'
 import { ChannelFormPage } from './pages/channels/Form'
 import { ChannelListPage } from './pages/channels/List'
 import { DashboardPage } from './pages/Dashboard'
@@ -83,6 +85,9 @@ export default function App() {
               <Route path="/channels" element={<ChannelListPage />} />
               <Route path="/channels/new" element={<ChannelFormPage />} />
               <Route path="/channels/:id" element={<ChannelFormPage />} />
+              <Route path="/address-book" element={<IdentityListPage />} />
+              <Route path="/address-book/new" element={<IdentityFormPage />} />
+              <Route path="/address-book/:id" element={<IdentityFormPage />} />
               <Route path="/push-jobs" element={<PushJobListPage />} />
               {/* 新建任务统一走列表弹窗 → 编辑器，避免旧 Form 入口 */}
               <Route path="/push-jobs/new" element={<Navigate to="/push-jobs" replace />} />

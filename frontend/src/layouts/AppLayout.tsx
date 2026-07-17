@@ -15,6 +15,7 @@ import {
   MenuUnfoldOutlined,
   SendOutlined,
   SettingOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import { Button, Layout, Menu, theme, Tooltip, Typography } from 'antd'
 import { useMemo, useState } from 'react'
@@ -30,6 +31,7 @@ const MENU_ITEMS = [
   { key: '/push-jobs', icon: <SendOutlined />, label: '任务管理' },
   { key: '/data-sources', icon: <CloudServerOutlined />, label: '数据源' },
   { key: '/channels', icon: <ApiOutlined />, label: '通道' },
+  { key: '/address-book', icon: <TeamOutlined />, label: '通讯录' },
   { key: '/job-runs', icon: <HistoryOutlined />, label: '执行记录' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统' },
 ]
