@@ -32,6 +32,7 @@ from app.modules.editor.schemas import (
 )
 from app.modules.studio import service as studio_service
 from app.modules.studio import templates_repo
+from app.modules.studio.sql_params import list_auto_kinds, preview_resolved_params
 from app.modules.studio.themes import list_table_styles, list_theme_packs
 
 router = APIRouter()
@@ -66,6 +67,7 @@ def query_preview(
         body.sql,
         body.params,
         max_rows=body.max_rows,
+        param_defs=body.param_defs,
     )
 
 
@@ -183,6 +185,7 @@ def studio_meta() -> dict:
             {"id": "line", "label": "折线图"},
             {"id": "pie", "label": "饼图"},
         ],
+        "sql_auto_params": list_auto_kinds(),
         "visible_when_presets": [
             {"id": "always", "label": "始终显示"},
             {"id": "row_count>0", "label": "有数据时"},
@@ -199,6 +202,15 @@ def studio_meta() -> dict:
             {"type": "Divider", "label": "分隔线"},
         ],
     }
+
+
+@router.post("/studio/resolve-params")
+def studio_resolve_params(body: dict) -> dict:
+    """Preview resolved SQL params (auto dates etc.) without executing SQL."""
+    sql = str(body.get("sql") or "")
+    param_defs = body.get("param_defs") if isinstance(body.get("param_defs"), list) else []
+    overrides = body.get("params") if isinstance(body.get("params"), dict) else {}
+    return preview_resolved_params(sql, param_defs=param_defs, overrides=overrides)
 
 
 @router.post("/studio/compile", response_model=StudioCompileResponse)

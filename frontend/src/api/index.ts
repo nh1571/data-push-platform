@@ -197,6 +197,20 @@ export async function queryPreview(body: QueryPreviewRequest): Promise<QueryPrev
   return data
 }
 
+export async function resolveSqlParams(body: {
+  sql: string
+  param_defs?: import('./types').SqlParamDef[]
+  params?: Record<string, unknown>
+}): Promise<{
+  placeholders: string[]
+  resolved: Record<string, string>
+  builtins: Record<string, string>
+  auto_kinds: { id: string; label: string; example: string }[]
+}> {
+  const { data } = await api.post('/v1/editor/studio/resolve-params', body)
+  return data
+}
+
 export async function messagePreview(
   body: MessagePreviewRequest,
 ): Promise<MessagePreviewResponse> {

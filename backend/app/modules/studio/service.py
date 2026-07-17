@@ -13,6 +13,7 @@ from app.modules.editor.schemas import ChannelSendResult, SaveJobRequest
 from app.modules.studio.compile import compile_artboard
 from app.modules.studio.defaults import default_daily_artboard
 from app.modules.studio.migrate import design_to_artboard, extract_artboard, is_artboard_spec
+from app.modules.studio.sql_params import resolve_sql_params
 from app.plugins.base import QueryResult
 
 
@@ -90,9 +91,18 @@ def resolve_data_context(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid data_source_id for dataset {ds_id}",
             ) from exc
+        # Merge request params + dataset param defs (auto yesterday/today/…)
+        param_defs = ds.get("params") if isinstance(ds.get("params"), list) else []
+        # per-dataset overrides: ds.param_values or global params
+        ds_overrides = dict(params or {})
+        if isinstance(ds.get("param_values"), dict):
+            ds_overrides.update({str(k): v for k, v in ds["param_values"].items()})
+        _sql, resolved = resolve_sql_params(
+            sql, param_defs=param_defs, overrides=ds_overrides
+        )
         try:
             ctx[ds_id] = editor_service.execute_query(
-                db, source_uuid, sql, params, max_rows=max_rows
+                db, source_uuid, sql, resolved, max_rows=max_rows
             )
         except HTTPException:
             if ds_id == "main":

@@ -30,6 +30,8 @@ class QueryPreviewRequest(BaseModel):
     data_source_id: UUID
     sql: str = Field(..., min_length=1)
     params: dict[str, Any] | None = None
+    # Dataset param definitions (auto/static/runtime) — resolved before execute
+    param_defs: list[dict[str, Any]] | None = None
     max_rows: int = Field(default=200, ge=1, le=10_000)
 
 
@@ -37,6 +39,8 @@ class QueryPreviewResponse(BaseModel):
     columns: list[str]
     rows: list[list[Any]]
     row_count: int
+    resolved_params: dict[str, str] = Field(default_factory=dict)
+    rendered_sql: str | None = None
 
 
 class MessagePreviewRequest(BaseModel):

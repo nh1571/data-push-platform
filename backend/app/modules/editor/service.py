@@ -152,11 +152,21 @@ def query_preview(
     params: dict[str, Any] | None = None,
     *,
     max_rows: int = 200,
+    param_defs: list[dict[str, Any]] | None = None,
 ) -> QueryPreviewResponse:
-    result = execute_query(db, data_source_id, sql, params, max_rows=max_rows)
+    from app.modules.studio.sql_params import resolve_sql_params
+    from app.plugins.datasource.mysql import substitute_sql_params
+
+    _sql, resolved = resolve_sql_params(
+        sql, param_defs=param_defs, overrides=params
+    )
+    result = execute_query(db, data_source_id, sql, resolved, max_rows=max_rows)
+    rendered = substitute_sql_params(sql, resolved)
     return QueryPreviewResponse(
         columns=result.columns,
         rows=result.rows,
+        resolved_params=resolved,
+        rendered_sql=rendered,
         row_count=len(result.rows),
     )
 

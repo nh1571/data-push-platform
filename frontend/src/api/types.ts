@@ -181,10 +181,23 @@ export interface DesignSpec {
   kpi_columns?: string[]
 }
 
+export interface SqlParamDef {
+  name: string
+  label?: string
+  /** auto | static | runtime */
+  source?: 'auto' | 'static' | 'runtime' | string
+  /** when source=auto: yesterday | today | now | … */
+  auto?: string
+  value?: string
+  default?: string
+  format?: string
+}
+
 export interface QueryPreviewRequest {
   data_source_id: string
   sql: string
   params?: Record<string, unknown> | null
+  param_defs?: SqlParamDef[] | null
   max_rows?: number
 }
 
@@ -192,6 +205,8 @@ export interface QueryPreviewResponse {
   columns: string[]
   rows: unknown[][]
   row_count: number
+  resolved_params?: Record<string, string>
+  rendered_sql?: string | null
 }
 
 export interface MessagePreviewRequest {
@@ -291,6 +306,10 @@ export interface StudioDataset {
   name?: string
   data_source_id?: string | null
   sql?: string
+  /** SQL parameter definitions (auto date etc.) */
+  params?: SqlParamDef[]
+  /** Optional static overrides for preview */
+  param_values?: Record<string, string>
 }
 
 export interface ArtboardDoc {

@@ -269,25 +269,39 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         _log(db, job_run_id, "query", f"executing SQL via datasource type={ds.type!r}")
         db.commit()
 
-        result: QueryResult = ds_plugin.execute(ds_config, job.query_sql, params)
-        row_count = len(result.rows or [])
-        _log(
-            db,
-            job_run_id,
-            "query",
-            f"query returned {row_count} row(s), {len(result.columns or [])} column(s)",
-        )
-        db.commit()
-
-        # Multi-dataset artboard: execute additional slots (main uses job SQL)
-        data_ctx: dict[str, QueryResult] = {"main": result}
         from app.modules.studio.migrate import extract_artboard, is_artboard_spec
+        from app.modules.studio.sql_params import resolve_sql_params
 
         artboard_doc = extract_artboard(job.render_spec)
         if artboard_doc is None and isinstance(job.render_spec, dict) and is_artboard_spec(
             job.render_spec
         ):
             artboard_doc = job.render_spec
+
+        # Main dataset: job SQL + param defs from artboard main slot
+        main_defs: list = []
+        if isinstance(artboard_doc, dict):
+            for ds_def in artboard_doc.get("datasets") or []:
+                if isinstance(ds_def, dict) and str(ds_def.get("id") or "main") == "main":
+                    if isinstance(ds_def.get("params"), list):
+                        main_defs = ds_def["params"]
+                    break
+        _sql, main_resolved = resolve_sql_params(
+            job.query_sql, param_defs=main_defs, overrides=params
+        )
+        result: QueryResult = ds_plugin.execute(ds_config, job.query_sql, main_resolved)
+        row_count = len(result.rows or [])
+        _log(
+            db,
+            job_run_id,
+            "query",
+            f"query returned {row_count} row(s), {len(result.columns or [])} column(s); "
+            f"params={{{', '.join(f'{k}={v}' for k, v in list(main_resolved.items())[:8])}}}",
+        )
+        db.commit()
+
+        # Multi-dataset artboard: execute additional slots
+        data_ctx: dict[str, QueryResult] = {"main": result}
         if isinstance(artboard_doc, dict):
             for ds_def in artboard_doc.get("datasets") or []:
                 if not isinstance(ds_def, dict):
@@ -305,7 +319,14 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
                         continue
                     extra_plugin = plugin_registry.get("datasource", extra_ds.type)
                     extra_cfg = decrypt_dict(extra_ds.config_enc)
-                    data_ctx[slot] = extra_plugin.execute(extra_cfg, sql_extra, params)
+                    pdefs = ds_def.get("params") if isinstance(ds_def.get("params"), list) else []
+                    ov = dict(params)
+                    if isinstance(ds_def.get("param_values"), dict):
+                        ov.update(ds_def["param_values"])
+                    _s, resolved = resolve_sql_params(
+                        sql_extra, param_defs=pdefs, overrides=ov
+                    )
+                    data_ctx[slot] = extra_plugin.execute(extra_cfg, sql_extra, resolved)
                     _log(
                         db,
                         job_run_id,

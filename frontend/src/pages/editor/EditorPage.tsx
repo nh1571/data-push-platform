@@ -39,6 +39,7 @@ import {
   listChannels,
   listDataSources,
   queryPreview,
+  resolveSqlParams,
   studioCompile,
   studioSaveJob,
   studioTestPush,
@@ -48,6 +49,7 @@ import type {
   ArtboardDoc,
   Channel,
   DataSource,
+  SqlParamDef,
   StudioCompileResponse,
   StudioNode,
 } from '../../api/types'
@@ -506,6 +508,8 @@ export function EditorPage() {
   const [pushing, setPushing] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
+  const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
+  const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
 
   // Per-component thumbnail cache for canvas (optional server snap)
   const [thumbById, setThumbById] = useState<Record<string, string>>({})
@@ -607,6 +611,46 @@ export function EditorPage() {
       .finally(() => setFinalLoading(false))
   }, [step, cart.length, dataSourceId, buildDoc, runCompile])
 
+  const activeParamDefs = useMemo((): SqlParamDef[] => {
+    const ds = datasets.find((d) => d.id === activeDatasetId)
+    return (ds?.params as SqlParamDef[]) || []
+  }, [datasets, activeDatasetId])
+
+  const setActiveParamDefs = (params: SqlParamDef[]) => {
+    const ds = datasets.find((d) => d.id === activeDatasetId)
+    setArtboard((p) =>
+      upsertDataset(p, {
+        id: activeDatasetId,
+        name: ds?.name || (activeDatasetId === 'main' ? '主查询' : activeDatasetId),
+        data_source_id:
+          activeDatasetId === 'main'
+            ? dataSourceId
+            : ds?.data_source_id || dataSourceId || null,
+        sql: activeDatasetId === 'main' ? sql : String(ds?.sql || ''),
+        params,
+      }),
+    )
+  }
+
+  const refreshResolvedPreview = async () => {
+    const slotSql =
+      activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')
+    try {
+      const res = await resolveSqlParams({
+        sql: slotSql,
+        param_defs: activeParamDefs,
+      })
+      setResolvedPreview(res.resolved || {})
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    void refreshResolvedPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatasetId, sql, activeDs?.sql, JSON.stringify(activeParamDefs)])
+
   const onQueryDataset = async (datasetId: string) => {
     const dsMeta = datasets.find((d) => d.id === datasetId)
     const slotSql =
@@ -624,17 +668,29 @@ export function EditorPage() {
       message.error('请填写 SQL')
       return
     }
+    const paramDefs = (dsMeta?.params as SqlParamDef[]) || []
     setQuerying(true)
     try {
       const res = await queryPreview({
         data_source_id: slotDs,
         sql: slotSql,
+        param_defs: paramDefs,
         max_rows: 200,
       })
       setFieldsByDataset((p) => ({ ...p, [datasetId]: res.columns }))
       setRowsByDataset((p) => ({ ...p, [datasetId]: res.rows }))
+      if (res.resolved_params) setResolvedPreview(res.resolved_params)
+      if (res.rendered_sql) setRenderedSqlPreview(res.rendered_sql)
       if (datasetId === 'main') {
-        setArtboard((p) => syncMainDataset(p, slotDs, slotSql))
+        setArtboard((p) =>
+          upsertDataset(syncMainDataset(p, slotDs, slotSql), {
+            id: 'main',
+            name: dsMeta?.name || '主查询',
+            data_source_id: slotDs,
+            sql: slotSql,
+            params: paramDefs,
+          }),
+        )
         setDataSourceId(slotDs)
         setSql(slotSql)
       } else {
@@ -644,10 +700,18 @@ export function EditorPage() {
             name: dsMeta?.name,
             data_source_id: slotDs,
             sql: slotSql,
+            params: paramDefs,
           }),
         )
       }
-      message.success(`「${dsMeta?.name || datasetId}」取数 ${res.row_count} 行`)
+      const rp = res.resolved_params || {}
+      const hint = Object.keys(rp).length
+        ? ` · 参数 ${Object.entries(rp)
+            .slice(0, 4)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(', ')}`
+        : ''
+      message.success(`「${dsMeta?.name || datasetId}」取数 ${res.row_count} 行${hint}`)
     } catch (e) {
       message.error(getErrorMessage(e))
     } finally {
@@ -1122,9 +1186,11 @@ export function EditorPage() {
                       />
                     </div>
                     <div>
-                      <Typography.Text type="secondary">SQL</Typography.Text>
+                      <Typography.Text type="secondary">
+                        SQL（支持 {'{{参数名}}'}，如 {'{{yesterday}}'} / {'{{today}}'} / 自定义）
+                      </Typography.Text>
                       <Input.TextArea
-                        rows={8}
+                        rows={6}
                         style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
                         value={
                           activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')
@@ -1138,17 +1204,183 @@ export function EditorPage() {
                                 sql: e.target.value,
                                 data_source_id: activeDs?.data_source_id,
                                 name: activeDs?.name,
+                                params: activeParamDefs,
                               }),
                             )
                         }}
+                        placeholder={
+                          "SELECT * FROM t WHERE dt = '{{yesterday}}'"
+                        }
                       />
                     </div>
+
+                    <div>
+                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Typography.Text type="secondary">SQL 参数</Typography.Text>
+                        <Button
+                          size="small"
+                          type="dashed"
+                          onClick={() => {
+                            const n = activeParamDefs.length + 1
+                            setActiveParamDefs([
+                              ...activeParamDefs,
+                              {
+                                name: n === 1 ? 'biz_date' : `param_${n}`,
+                                label: n === 1 ? '业务日期' : `参数${n}`,
+                                source: 'auto',
+                                auto: 'yesterday',
+                                format: '%Y-%m-%d',
+                              },
+                            ])
+                          }}
+                        >
+                          + 参数
+                        </Button>
+                      </Space>
+                      <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+                        内置可用：today / yesterday / tomorrow / now / this_month_start …
+                        每次取数与推送都会重新计算自动参数。
+                      </Typography.Paragraph>
+                      {activeParamDefs.length === 0 ? (
+                        <Alert
+                          type="info"
+                          showIcon
+                          style={{ marginBottom: 8 }}
+                          message="未自定义参数时，SQL 里写 {{yesterday}} 等内置名也会自动替换"
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {activeParamDefs.map((p, idx) => (
+                            <div
+                              key={`${p.name}-${idx}`}
+                              style={{
+                                border: '1px solid #f0f0f0',
+                                borderRadius: 6,
+                                padding: 8,
+                                background: '#fafafa',
+                              }}
+                            >
+                              <Space wrap style={{ width: '100%' }}>
+                                <Input
+                                  style={{ width: 110 }}
+                                  placeholder="name"
+                                  value={p.name}
+                                  onChange={(e) => {
+                                    const next = [...activeParamDefs]
+                                    next[idx] = { ...p, name: e.target.value }
+                                    setActiveParamDefs(next)
+                                  }}
+                                />
+                                <Select
+                                  style={{ width: 100 }}
+                                  value={p.source || 'auto'}
+                                  onChange={(v) => {
+                                    const next = [...activeParamDefs]
+                                    next[idx] = { ...p, source: v }
+                                    setActiveParamDefs(next)
+                                  }}
+                                  options={[
+                                    { value: 'auto', label: '自动' },
+                                    { value: 'static', label: '固定值' },
+                                    { value: 'runtime', label: '运行时' },
+                                  ]}
+                                />
+                                {(p.source || 'auto') === 'auto' ? (
+                                  <Select
+                                    style={{ width: 140 }}
+                                    value={p.auto || 'yesterday'}
+                                    onChange={(v) => {
+                                      const next = [...activeParamDefs]
+                                      next[idx] = { ...p, auto: v }
+                                      setActiveParamDefs(next)
+                                    }}
+                                    options={[
+                                      { value: 'yesterday', label: '昨天' },
+                                      { value: 'today', label: '今天' },
+                                      { value: 'tomorrow', label: '明天' },
+                                      { value: 'now', label: '当前时间' },
+                                      { value: 'this_month_start', label: '本月1日' },
+                                      { value: 'this_month_end', label: '本月末' },
+                                      { value: 'last_month_start', label: '上月1日' },
+                                      { value: 'last_month_end', label: '上月末' },
+                                      { value: 'last_7_days_start', label: '近7天起' },
+                                      { value: 'last_30_days_start', label: '近30天起' },
+                                    ]}
+                                  />
+                                ) : (
+                                  <Input
+                                    style={{ width: 140 }}
+                                    placeholder="固定值/默认值"
+                                    value={p.value || p.default || ''}
+                                    onChange={(e) => {
+                                      const next = [...activeParamDefs]
+                                      next[idx] = {
+                                        ...p,
+                                        value: e.target.value,
+                                        default: e.target.value,
+                                      }
+                                      setActiveParamDefs(next)
+                                    }}
+                                  />
+                                )}
+                                <Input
+                                  style={{ width: 120 }}
+                                  placeholder="格式 %Y-%m-%d"
+                                  value={p.format || ''}
+                                  onChange={(e) => {
+                                    const next = [...activeParamDefs]
+                                    next[idx] = { ...p, format: e.target.value }
+                                    setActiveParamDefs(next)
+                                  }}
+                                />
+                                <Button
+                                  size="small"
+                                  danger
+                                  type="text"
+                                  icon={<DeleteOutlined />}
+                                  onClick={() =>
+                                    setActiveParamDefs(
+                                      activeParamDefs.filter((_, i) => i !== idx),
+                                    )
+                                  }
+                                />
+                              </Space>
+                              {p.name && resolvedPreview[p.name] !== undefined ? (
+                                <div style={{ fontSize: 12, color: '#1677ff', marginTop: 4 }}>
+                                  本次解析：{p.name} = {resolvedPreview[p.name]}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {Object.keys(resolvedPreview).length > 0 ? (
+                        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                          SQL 中将替换：
+                          {Object.entries(resolvedPreview).map(([k, v]) => (
+                            <Tag key={k} style={{ marginBottom: 4 }}>
+                              {`{{${k}}}`}→{v}
+                            </Tag>
+                          ))}
+                        </div>
+                      ) : null}
+                      {renderedSqlPreview ? (
+                        <Input.TextArea
+                          style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 11 }}
+                          rows={2}
+                          readOnly
+                          value={renderedSqlPreview}
+                          placeholder="取数后显示实际执行 SQL"
+                        />
+                      ) : null}
+                    </div>
+
                     <Button
                       type="primary"
                       loading={querying}
                       onClick={() => void onQueryDataset(activeDatasetId)}
                     >
-                      运行取数并缓存字段
+                      运行取数（应用参数）
                     </Button>
                   </Space>
                 </div>
