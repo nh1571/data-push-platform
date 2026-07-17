@@ -414,8 +414,8 @@ def _to_float(value: Any) -> float | None:
 
 def _chart_series(
     node: dict[str, Any], data_ctx: dict[str, QueryResult]
-) -> tuple[list[str], list[float], str]:
-    """Return (labels, values, chart_type) from binding + props."""
+) -> tuple[list[str], list[float], str, list[dict[str, Any]]]:
+    """Return (labels, primary_values, chart_type, multi_series)."""
     props = dict(node.get("props") or {})
     binding = dict(node.get("binding") or {})
     result = _get_dataset(data_ctx, binding)
@@ -424,44 +424,62 @@ def _chart_series(
         chart_type = "bar"
 
     if result is None or not result.columns or not result.rows:
-        return [], [], chart_type
+        return [], [], chart_type, []
 
     columns = list(result.columns)
     label_col = str(binding.get("category_column") or binding.get("label_column") or "")
     value_col = str(binding.get("value_column") or "")
+    value_cols_raw = binding.get("value_columns") or props.get("value_columns")
+    value_cols: list[str] = []
+    if isinstance(value_cols_raw, list) and value_cols_raw:
+        value_cols = [str(c) for c in value_cols_raw if str(c) in columns]
+    if not value_cols and value_col:
+        value_cols = [value_col]
 
-    # Auto-pick: first non-numeric-looking as category, first numeric as value
     if not label_col and columns:
         label_col = columns[0]
-    if not value_col:
+    if not value_cols:
         for c in columns:
             if c == label_col:
                 continue
-            # probe first row
             idx = columns.index(c)
             sample = result.rows[0][idx] if result.rows and idx < len(result.rows[0]) else None
             if _to_float(sample) is not None:
-                value_col = c
+                value_cols = [c]
                 break
-        if not value_col and len(columns) > 1:
-            value_col = columns[1]
-        elif not value_col:
-            value_col = columns[0]
+        if not value_cols and len(columns) > 1:
+            value_cols = [columns[1]]
+        elif not value_cols:
+            value_cols = [columns[0]]
 
     li = columns.index(label_col) if label_col in columns else 0
-    vi = columns.index(value_col) if value_col in columns else min(1, len(columns) - 1)
-    max_rows = int(props.get("max_rows") or 12)
+    max_rows = int(props.get("max_rows") or 50)
+    vis = [columns.index(c) if c in columns else -1 for c in value_cols]
 
     labels: list[str] = []
-    values: list[float] = []
+    series_vals: list[list[float]] = [[] for _ in value_cols]
     for row in list(result.rows)[:max_rows]:
         lab = row[li] if li < len(row) else ""
-        val = _to_float(row[vi] if vi < len(row) else None)
-        if val is None:
+        row_ok = False
+        row_nums: list[float | None] = []
+        for vi in vis:
+            val = _to_float(row[vi] if 0 <= vi < len(row) else None)
+            row_nums.append(val)
+            if val is not None:
+                row_ok = True
+        if not row_ok:
             continue
         labels.append("" if lab is None else str(lab))
-        values.append(val)
-    return labels, values, chart_type
+        for si, val in enumerate(row_nums):
+            series_vals[si].append(float(val) if val is not None else 0.0)
+
+    multi = [
+        {"name": value_cols[i], "values": series_vals[i]}
+        for i in range(len(value_cols))
+        if series_vals[i]
+    ]
+    primary = series_vals[0] if series_vals else []
+    return labels, primary, chart_type, multi
 
 
 def _render_bar_svg(labels: list[str], values: list[float], *, width: int = 680, height: int = 260) -> str:
@@ -599,7 +617,7 @@ def _render_pie_svg(labels: list[str], values: list[float], *, size: int = 220) 
 
 def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     props = dict(node.get("props") or {})
-    labels, values, chart_type = _chart_series(node, data_ctx)
+    labels, values, chart_type, multi = _chart_series(node, data_ctx)
     title = str(props.get("title") or "")
     if not values:
         return (
@@ -607,17 +625,20 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
             f"（请绑定分类列与数值列，并先取数）</p></div>"
         )
 
-    # Prefer pyecharts (ECharts) — same family as many BI tools; falls back to SVG
+    # Apache ECharts (via option JSON + Playwright) — mainstream BI path
     try:
         from app.modules.studio.charts import chart_img_html, chart_to_png_data_url
 
-        props_full = {**props, "chart_type": chart_type}
+        props_full = {
+            **props,
+            "chart_type": chart_type,
+            "value_series": multi if len(multi) > 1 else None,
+            "show_legend": props.get("legend") or props.get("show_legend") or len(multi) > 1,
+        }
         data_url, err = chart_to_png_data_url(labels, values, props_full)
         if data_url:
-            # title already in chart when set; avoid double title
-            return chart_img_html(data_url, title="" if props.get("title") else "")
-        # if failed, keep going to SVG fallback with note
-        note = f"<p class='comp-empty' style='font-size:11px'>pyecharts: {_esc(err or 'fail')}</p>"
+            return chart_img_html(data_url, title="")
+        note = f"<p class='comp-empty' style='font-size:11px'>echarts: {_esc(err or 'fail')}</p>"
     except Exception as exc:  # noqa: BLE001
         note = f"<p class='comp-empty' style='font-size:11px'>chart engine: {_esc(str(exc))}</p>"
     else:
@@ -635,7 +656,7 @@ def _render_chart_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -
 
 def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     props = dict(node.get("props") or {})
-    labels, values, chart_type = _chart_series(node, data_ctx)
+    labels, values, chart_type, multi = _chart_series(node, data_ctx)
     type_label = {
         "pie": "饼图",
         "line": "折线图",
@@ -647,8 +668,12 @@ def _render_chart_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> 
     if not values:
         return f"**{title}**（无数据）"
     lines = [f"**{title}**（{type_label}）"]
-    for lab, val in zip(labels, values, strict=False):
-        lines.append(f"- {lab}: {_fmt_num(val)}")
+    if multi and len(multi) > 1:
+        for s in multi:
+            lines.append(f"- {s.get('name')}: {s.get('values')}")
+    else:
+        for lab, val in zip(labels, values, strict=False):
+            lines.append(f"- {lab}: {_fmt_num(val)}")
     return "\n".join(lines)
 
 

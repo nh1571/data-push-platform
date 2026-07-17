@@ -1,212 +1,219 @@
-"""High-quality chart rendering via pyecharts (ECharts).
+"""Chart rendering with Apache ECharts (mainstream BI stack).
 
-Produces PNG (through existing Playwright HTML screenshot) for push images,
-aligned with common BI report style (FineReport / DataEase / Superset level
-defaults — not raw SVG sticks).
+Preview is done client-side (instant). Server only builds ECharts option JSON
++ HTML for Playwright screenshot when producing final push images.
 """
 
 from __future__ import annotations
 
 import base64
-import html as html_lib
+import json
 from typing import Any
 
-# pyecharts is optional at import time; callers handle ImportError fallback.
+
+DEFAULT_PALETTE = [
+    "#5470c6",
+    "#91cc75",
+    "#fac858",
+    "#ee6666",
+    "#73c0de",
+    "#3ba272",
+    "#fc8452",
+    "#9a60b4",
+    "#ea7ccc",
+]
 
 
-def _series_from_node(
+def _prepare(
     labels: list[str],
     values: list[float],
+    props: dict[str, Any],
 ) -> tuple[list[str], list[float]]:
-    return labels, values
+    """Sort / top-n like frontend chartOption.prepareAxisData (single series)."""
+    pairs = list(zip(labels, values, strict=False))
+    sort = str(props.get("sort") or "none")
+    if sort == "asc":
+        pairs.sort(key=lambda x: x[1])
+    elif sort == "desc":
+        pairs.sort(key=lambda x: x[1], reverse=True)
+    top_n = props.get("top_n")
+    if top_n:
+        try:
+            pairs = pairs[: int(top_n)]
+        except (TypeError, ValueError):
+            pass
+    if not pairs:
+        return [], []
+    labs, vals = zip(*pairs, strict=False)
+    return list(labs), list(vals)
 
 
-def build_pyecharts_html(
+def build_echarts_option(
     labels: list[str],
     values: list[float],
+    props: dict[str, Any] | None = None,
     *,
-    chart_type: str = "bar",
-    title: str = "",
-    theme: str = "white",
-    show_label: bool = True,
-    smooth: bool = True,
-    stack: bool = False,
-    rose: bool = False,
-    donut: bool = False,
-    legend: bool = False,
-    series_name: str = "数值",
+    multi_series: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build ECharts option dict (aligned with frontend chartOption.ts)."""
+    props = dict(props or {})
+    labels, values = _prepare(labels, values, props)
+    ct = str(props.get("chart_type") or "bar").lower()
+    palette = props.get("color_palette") or DEFAULT_PALETTE
+    show_label = props.get("show_label", True) is not False
+    show_legend = bool(props.get("legend") or props.get("show_legend"))
+    show_grid = props.get("show_grid", True) is not False
+    title = str(props.get("title") or "")
+    subtitle = str(props.get("subtitle") or "")
+    series_name = str(props.get("series_name") or title or "数值")
+
+    option: dict[str, Any] = {
+        "color": palette,
+        "backgroundColor": "transparent",
+        "tooltip": {
+            "trigger": "item" if ct == "pie" else "axis",
+            "axisPointer": {"type": "shadow"} if ct != "pie" else None,
+        },
+        "legend": (
+            {"show": True, "bottom": 4, "left": "center", "type": "scroll"}
+            if show_legend or (multi_series and len(multi_series) > 1)
+            else {"show": False}
+        ),
+    }
+    if title:
+        option["title"] = {
+            "text": title,
+            "subtext": subtitle or None,
+            "left": "center",
+            "top": 6,
+            "textStyle": {"fontSize": 15, "fontWeight": 600},
+        }
+
+    if ct == "pie":
+        data = [{"name": n, "value": v} for n, v in zip(labels, values, strict=False)]
+        option["series"] = [
+            {
+                "name": series_name,
+                "type": "pie",
+                "radius": ["42%", "68%"] if props.get("donut") else ["0%", "68%"],
+                "center": ["50%", "55%"],
+                "roseType": "radius" if props.get("rose") else None,
+                "itemStyle": {"borderRadius": 4, "borderColor": "#fff", "borderWidth": 2},
+                "label": {
+                    "show": show_label,
+                    "formatter": "{b}\n{d}%",
+                    "fontSize": 11,
+                },
+                "data": data,
+            }
+        ]
+        return option
+
+    is_h = ct == "hbar" or bool(props.get("horizontal"))
+    cat_axis = {
+        "type": "category",
+        "data": labels,
+        "axisLabel": {
+            "rotate": 0 if is_h else (30 if len(labels) > 8 else int(props.get("x_label_rotate") or 0)),
+            "fontSize": 11,
+        },
+    }
+    val_axis = {
+        "type": "value",
+        "splitLine": {
+            "show": show_grid,
+            "lineStyle": {"type": "dashed", "opacity": 0.5},
+        },
+    }
+    option["grid"] = {
+        "left": 48,
+        "right": 24,
+        "top": 56 if title else 32,
+        "bottom": 48 if show_legend else 36,
+        "containLabel": True,
+    }
+    option["xAxis"] = val_axis if is_h else cat_axis
+    option["yAxis"] = cat_axis if is_h else val_axis
+
+    series_defs = multi_series
+    if not series_defs:
+        series_defs = [{"name": series_name, "values": values}]
+
+    series_out: list[dict[str, Any]] = []
+    for s in series_defs:
+        name = str(s.get("name") or series_name)
+        data = list(s.get("values") or values)
+        if ct in ("line", "area"):
+            series_out.append(
+                {
+                    "name": name,
+                    "type": "line",
+                    "data": data,
+                    "smooth": props.get("smooth", True) is not False,
+                    "stack": "total" if props.get("stack") else None,
+                    "symbol": "circle",
+                    "symbolSize": 6,
+                    "lineStyle": {"width": int(props.get("line_width") or 2.5)},
+                    "areaStyle": (
+                        {"opacity": float(props.get("area_opacity") or 0.28)}
+                        if ct == "area"
+                        else None
+                    ),
+                    "label": {
+                        "show": show_label,
+                        "position": str(props.get("label_position") or "top"),
+                        "fontSize": 10,
+                    },
+                }
+            )
+        else:
+            br = int(props.get("bar_border_radius") or 4)
+            series_out.append(
+                {
+                    "name": name,
+                    "type": "bar",
+                    "data": data,
+                    "stack": "total" if props.get("stack") else None,
+                    "barMaxWidth": 48,
+                    "itemStyle": {
+                        "borderRadius": [0, br, br, 0] if is_h else [br, br, 0, 0],
+                    },
+                    "label": {
+                        "show": show_label,
+                        "position": "right" if is_h else str(props.get("label_position") or "top"),
+                        "fontSize": 10,
+                    },
+                }
+            )
+    option["series"] = series_out
+    return option
+
+
+# ECharts 5 min — loaded from CDN for final screenshot pages
+_ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"
+
+
+def build_echarts_html(
+    option: dict[str, Any],
+    *,
     width_px: int = 680,
     height_px: int = 360,
-    colors: list[str] | None = None,
 ) -> str:
-    """Return a full HTML document ready for Playwright screenshot (#artboard)."""
-    from pyecharts import options as opts
-    from pyecharts.charts import Bar, Line, Pie
-    from pyecharts.globals import ThemeType
-
-    theme_map = {
-        "white": ThemeType.WHITE,
-        "dark": ThemeType.DARK,
-        "macarons": ThemeType.MACARONS,
-        "wonderland": ThemeType.WONDERLAND,
-        "roma": ThemeType.ROMA,
-        "shine": ThemeType.SHINE,
-        "infographic": ThemeType.INFOGRAPHIC,
-        "walden": ThemeType.WALDEN,
-    }
-    th = theme_map.get(str(theme).lower(), ThemeType.WHITE)
-    ct = str(chart_type or "bar").lower()
-    palette = colors or [
-        "#5470c6",
-        "#91cc75",
-        "#fac858",
-        "#ee6666",
-        "#73c0de",
-        "#3ba272",
-        "#fc8452",
-        "#9a60b4",
-        "#ea7ccc",
-    ]
-
-    init = opts.InitOpts(
-        width=f"{width_px}px",
-        height=f"{height_px}px",
-        theme=th,
-        bg_color="#ffffff" if th == ThemeType.WHITE else None,
-    )
-
-    title_opts = opts.TitleOpts(
-        title=title or None,
-        title_textstyle_opts=opts.TextStyleOpts(font_size=14, font_weight="bold"),
-        pos_left="center",
-        pos_top="8",
-    )
-    legend_opts = (
-        opts.LegendOpts(is_show=True, pos_bottom="0", pos_left="center")
-        if legend
-        else opts.LegendOpts(is_show=False)
-    )
-    tooltip = opts.TooltipOpts(trigger="axis" if ct in ("bar", "line", "area", "hbar") else "item")
-
-    chart: Any
-    if ct == "pie":
-        data_pair = list(zip(labels, values, strict=False))
-        radius = ["40%", "65%"] if donut else ["0%", "65%"]
-        pie = Pie(init_opts=init)
-        pie.add(
-            series_name=series_name,
-            data_pair=data_pair,
-            radius=radius,
-            rosetype="radius" if rose else None,
-            label_opts=opts.LabelOpts(
-                is_show=show_label,
-                formatter="{b}\n{d}%",
-                font_size=11,
-            ),
-        )
-        pie.set_global_opts(
-            title_opts=title_opts,
-            legend_opts=legend_opts,
-            tooltip_opts=opts.TooltipOpts(trigger="item", formatter="{b}: {c} ({d}%)"),
-        )
-        pie.set_colors(palette)
-        chart = pie
-    elif ct in ("line", "area"):
-        line = Line(init_opts=init)
-        line.add_xaxis(list(labels))
-        y_kwargs: dict[str, Any] = {
-            "series_name": series_name,
-            "y_axis": list(values),
-            "is_smooth": smooth,
-            "label_opts": opts.LabelOpts(is_show=show_label, font_size=10),
-            "linestyle_opts": opts.LineStyleOpts(width=2.5),
-            "itemstyle_opts": opts.ItemStyleOpts(color=palette[0]),
-        }
-        if ct == "area":
-            y_kwargs["areastyle_opts"] = opts.AreaStyleOpts(opacity=0.28)
-        if stack:
-            y_kwargs["stack"] = "total"
-        line.add_yaxis(**y_kwargs)
-        line.set_global_opts(
-            title_opts=title_opts,
-            legend_opts=legend_opts,
-            tooltip_opts=tooltip,
-            xaxis_opts=opts.AxisOpts(
-                axislabel_opts=opts.LabelOpts(rotate=30 if len(labels) > 6 else 0, font_size=11),
-                axistick_opts=opts.AxisTickOpts(is_align_with_label=True),
-            ),
-            yaxis_opts=opts.AxisOpts(
-                splitline_opts=opts.SplitLineOpts(is_show=True),
-            ),
-        )
-        chart = line
-    elif ct == "hbar":
-        bar = Bar(init_opts=init)
-        bar.add_xaxis(list(labels))
-        bar.add_yaxis(
-            series_name=series_name,
-            y_axis=list(values),
-            label_opts=opts.LabelOpts(is_show=show_label, position="right", font_size=10),
-            itemstyle_opts=opts.ItemStyleOpts(color=palette[0], border_radius=[0, 4, 4, 0]),
-        )
-        bar.reversal_axis()
-        bar.set_colors(palette)
-        bar.set_global_opts(
-            title_opts=title_opts,
-            legend_opts=legend_opts,
-            tooltip_opts=tooltip,
-            xaxis_opts=opts.AxisOpts(splitline_opts=opts.SplitLineOpts(is_show=True)),
-            yaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(font_size=11)),
-        )
-        chart = bar
-    else:
-        # bar (default) — column
-        bar = Bar(init_opts=init)
-        bar.add_xaxis(list(labels))
-        y_kwargs: dict[str, Any] = {
-            "series_name": series_name,
-            "y_axis": list(values),
-            "category_gap": "35%",
-            "label_opts": opts.LabelOpts(is_show=show_label, position="top", font_size=10),
-            "itemstyle_opts": opts.ItemStyleOpts(
-                border_radius=[4, 4, 0, 0],
-                color=palette[0],
-            ),
-        }
-        if stack:
-            y_kwargs["stack"] = "total"
-        bar.add_yaxis(**y_kwargs)
-        bar.set_colors(palette)
-        bar.set_global_opts(
-            title_opts=title_opts,
-            legend_opts=legend_opts,
-            tooltip_opts=tooltip,
-            xaxis_opts=opts.AxisOpts(
-                axislabel_opts=opts.LabelOpts(rotate=30 if len(labels) > 6 else 0, font_size=11),
-                axisline_opts=opts.AxisLineOpts(
-                    linestyle_opts=opts.LineStyleOpts(color="#ccc")
-                ),
-            ),
-            yaxis_opts=opts.AxisOpts(
-                splitline_opts=opts.SplitLineOpts(
-                    is_show=True,
-                    linestyle_opts=opts.LineStyleOpts(type_="dashed", opacity=0.5),
-                ),
-            ),
-        )
-        chart = bar
-
-    # Embed: self-contained page for screenshot
-    embed = chart.render_embed()
-    # pyecharts embed includes div+script; wrap for #artboard locator
+    """Full HTML page with ECharts for Playwright screenshot (#artboard)."""
+    opt_json = json.dumps(option, ensure_ascii=False)
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
+<script src="{_ECHARTS_CDN}"></script>
 <style>
-  body {{ margin:0; background:#fff; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }}
-  #artboard {{ width:{width_px}px; margin:0 auto; padding:8px 8px 16px; background:#fff; box-sizing:border-box; }}
-</style>
-</head><body>
-<div id="artboard">{embed}</div>
+body {{ margin:0; background:#fff; }}
+#artboard {{ width:{width_px}px; margin:0 auto; padding:8px; background:#fff; box-sizing:border-box; }}
+#chart {{ width:100%; height:{height_px}px; }}
+</style></head><body>
+<div id="artboard"><div id="chart"></div></div>
+<script>
+  var chart = echarts.init(document.getElementById('chart'));
+  chart.setOption({opt_json});
+</script>
 </body></html>"""
 
 
@@ -215,33 +222,24 @@ def chart_to_png_data_url(
     values: list[float],
     props: dict[str, Any],
 ) -> tuple[str | None, str | None]:
-    """Render chart to data URL PNG. Returns (data_url, error)."""
+    """Server-side PNG for push pipeline. Returns (data_url, error)."""
     if not labels or not values:
         return None, "图表无有效数据"
 
-    try:
-        html_doc = build_pyecharts_html(
-            labels,
-            values,
-            chart_type=str(props.get("chart_type") or "bar"),
-            title=str(props.get("title") or ""),
-            theme=str(props.get("theme") or props.get("chart_theme") or "white"),
-            show_label=props.get("show_label", True) is not False,
-            smooth=props.get("smooth", True) is not False,
-            stack=bool(props.get("stack")),
-            rose=bool(props.get("rose")),
-            donut=bool(props.get("donut")),
-            legend=bool(props.get("legend")),
-            series_name=str(props.get("series_name") or props.get("title") or "数值"),
-            width_px=int(props.get("chart_width") or 680),
-            height_px=int(props.get("chart_height") or 360),
-        )
-    except Exception as exc:  # noqa: BLE001
-        return None, f"pyecharts 生成失败: {exc}"
+    # multi-series from props.value_series: [{name, values}]
+    multi = props.get("value_series")
+    option = build_echarts_option(
+        labels,
+        values,
+        props,
+        multi_series=multi if isinstance(multi, list) else None,
+    )
+    width = int(props.get("chart_width") or 680)
+    height = int(props.get("chart_height") or 360)
+    html_doc = build_echarts_html(option, width_px=width, height_px=height)
 
     try:
-        width = int(props.get("chart_width") or 680)
-        png, _path = _html_to_png_chart(html_doc, width=width)
+        png, _path = _html_to_png_chart(html_doc, width=width, height=height)
         if not png:
             return None, "图表截图失败（Playwright / Chromium）"
         b64 = base64.b64encode(png).decode("ascii")
@@ -250,8 +248,9 @@ def chart_to_png_data_url(
         return None, f"图表截图异常: {exc}"
 
 
-def _html_to_png_chart(html_doc: str, width: int = 680) -> tuple[bytes | None, str | None]:
-    """Screenshot chart HTML with wait for ECharts canvas."""
+def _html_to_png_chart(
+    html_doc: str, width: int = 680, height: int = 360
+) -> tuple[bytes | None, str | None]:
     import tempfile
     from pathlib import Path
 
@@ -265,16 +264,14 @@ def _html_to_png_chart(html_doc: str, width: int = 680) -> tuple[bytes | None, s
             with sync_playwright() as p:
                 browser = p.chromium.launch()
                 page = browser.new_page(
-                    viewport={"width": width + 40, "height": 480}
+                    viewport={"width": width + 48, "height": height + 80}
                 )
                 page.set_content(html_doc, wait_until="networkidle")
-                # ECharts needs a tick to paint canvas
-                page.wait_for_timeout(400)
                 try:
-                    page.wait_for_selector("canvas", timeout=3000)
+                    page.wait_for_selector("canvas", timeout=5000)
                 except Exception:
-                    pass
-                page.wait_for_timeout(200)
+                    page.wait_for_timeout(500)
+                page.wait_for_timeout(150)
                 page.locator("#artboard").screenshot(path=str(out))
                 browser.close()
             if out.is_file() and out.stat().st_size > 0:
@@ -287,6 +284,8 @@ def _html_to_png_chart(html_doc: str, width: int = 680) -> tuple[bytes | None, s
 
 
 def chart_img_html(data_url: str, title: str = "") -> str:
+    import html as html_lib
+
     title_html = (
         f"<div class='comp-chart-title'>{html_lib.escape(title)}</div>" if title else ""
     )

@@ -27,7 +27,6 @@ dependencies = [
     "openpyxl",
     "croniter",
     "playwright",
-    "pyecharts",
 ]
 
 [project.optional-dependencies]

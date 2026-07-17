@@ -32,7 +32,7 @@ import {
   message,
 } from 'antd'
 import type { Color } from 'antd/es/color-picker'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   getPushJob,
@@ -51,21 +51,26 @@ import type {
   StudioCompileResponse,
   StudioNode,
 } from '../../api/types'
+import { seriesFromTable, type ChartStyle } from './chartOption'
+import { LiveChart } from './LiveChart'
 import {
   appendChild,
   defaultAlertArtboard,
   defaultDailyArtboard,
   emptyArtboard,
   extractArtboardFromJob,
+  firstRowMap,
   moveNodeTo,
   newComponent,
   nid,
   removeNode,
+  substituteRow,
   syncMainDataset,
   TABLE_STYLES,
   THEME_PACKS,
   updateNode,
   upsertDataset,
+  type DataPreviewCtx,
 } from './studioUtils'
 
 function colorToHex(color: Color | string): string {
@@ -94,17 +99,6 @@ const CHART_TYPES = [
   { value: 'pie', label: '饼图' },
 ]
 
-const CHART_THEMES = [
-  { value: 'white', label: '默认白' },
-  { value: 'macarons', label: 'Macarons' },
-  { value: 'wonderland', label: 'Wonderland' },
-  { value: 'walden', label: 'Walden' },
-  { value: 'roma', label: 'Roma' },
-  { value: 'shine', label: 'Shine' },
-  { value: 'infographic', label: 'Infographic' },
-  { value: 'dark', label: '深色' },
-]
-
 type StepKey = 'data' | 'make' | 'compose' | 'preview'
 
 const STEPS = [
@@ -118,22 +112,29 @@ type DraftForm = {
   type: string
   dataset_id: string
   value_column?: string
+  value_columns?: string[]
   category_column?: string
   label?: string
   text?: string
   chart_type?: string
   title?: string
+  subtitle?: string
   variant?: string
   table_style?: string
   level?: string
-  // chart style (pyecharts / BI-like)
-  chart_theme?: string
   show_label?: boolean
+  show_legend?: boolean
+  show_grid?: boolean
   smooth?: boolean
   stack?: boolean
   donut?: boolean
   rose?: boolean
-  legend?: boolean
+  sort?: 'none' | 'asc' | 'desc'
+  top_n?: number | null
+  x_label_rotate?: number
+  bar_border_radius?: number
+  line_width?: number
+  area_opacity?: number
 }
 
 function emptyDraft(type: string, datasetId: string): DraftForm {
@@ -142,21 +143,29 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
     dataset_id: datasetId,
     text: '',
     title: '',
+    subtitle: '',
     label: '',
-    chart_theme: 'macarons',
+    value_columns: [],
     show_label: true,
+    show_legend: false,
+    show_grid: true,
     smooth: true,
     stack: false,
     donut: false,
     rose: false,
-    legend: false,
+    sort: 'none',
+    top_n: null,
+    x_label_rotate: 0,
+    bar_border_radius: 4,
+    line_width: 2.5,
+    area_opacity: 0.28,
   }
   if (type === 'ChartBar') return { ...chartBase, chart_type: 'bar', title: '柱状图' }
   if (type === 'ChartLine') return { ...chartBase, chart_type: 'line', title: '折线图' }
   if (type === 'ChartArea') return { ...chartBase, chart_type: 'area', title: '面积图' }
   if (type === 'ChartHBar') return { ...chartBase, chart_type: 'hbar', title: '条形图' }
   if (type === 'ChartPie')
-    return { ...chartBase, chart_type: 'pie', title: '饼图', donut: false, legend: true }
+    return { ...chartBase, chart_type: 'pie', title: '饼图', show_legend: true }
   const base: DraftForm = { type, dataset_id: datasetId, text: '', title: '', label: '' }
   if (type === 'Text') return { ...base, type: 'Text', variant: 'body', text: '标题文案' }
   if (type === 'Alert') return { ...base, type: 'Alert', level: 'error', text: '请注意异常指标' }
@@ -169,25 +178,38 @@ function emptyDraft(type: string, datasetId: string): DraftForm {
 function nodeToDraft(node: StudioNode): DraftForm {
   const b = node.binding || {}
   const p = node.props || {}
+  const vcols = b.value_columns
   return {
     type: String(node.type),
     dataset_id: String(b.dataset_id || 'main'),
     value_column: String(b.value_column || ''),
+    value_columns: Array.isArray(vcols)
+      ? vcols.map(String)
+      : b.value_column
+        ? [String(b.value_column)]
+        : [],
     category_column: String(b.category_column || ''),
     label: String(b.label || p.label || ''),
     text: String(p.text || ''),
     chart_type: String(p.chart_type || 'bar'),
     title: String(p.title || ''),
+    subtitle: String(p.subtitle || ''),
     variant: String(p.variant || 'body'),
     table_style: String(p.style || 'business'),
     level: String(p.level || 'error'),
-    chart_theme: String(p.theme || p.chart_theme || 'macarons'),
     show_label: p.show_label !== false,
+    show_legend: Boolean(p.show_legend || p.legend),
+    show_grid: p.show_grid !== false,
     smooth: p.smooth !== false,
     stack: Boolean(p.stack),
     donut: Boolean(p.donut),
     rose: Boolean(p.rose),
-    legend: Boolean(p.legend),
+    sort: (p.sort as DraftForm['sort']) || 'none',
+    top_n: (p.top_n as number) ?? null,
+    x_label_rotate: Number(p.x_label_rotate || 0),
+    bar_border_radius: Number(p.bar_border_radius ?? 4),
+    line_width: Number(p.line_width ?? 2.5),
+    area_opacity: Number(p.area_opacity ?? 0.28),
   }
 }
 
@@ -209,6 +231,12 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
     }
   }
   if (t === 'Chart') {
+    const vcols =
+      draft.value_columns && draft.value_columns.length
+        ? draft.value_columns
+        : draft.value_column
+          ? [draft.value_column]
+          : []
     return {
       id,
       type: 'Chart',
@@ -216,19 +244,29 @@ function draftToNode(draft: DraftForm, existingId?: string): StudioNode {
       props: {
         chart_type: draft.chart_type || 'bar',
         title: draft.title || '',
-        max_rows: 12,
-        theme: draft.chart_theme || 'macarons',
+        subtitle: draft.subtitle || '',
+        max_rows: 50,
         show_label: draft.show_label !== false,
+        show_legend: Boolean(draft.show_legend),
+        show_grid: draft.show_grid !== false,
         smooth: draft.smooth !== false,
         stack: Boolean(draft.stack),
         donut: Boolean(draft.donut),
         rose: Boolean(draft.rose),
-        legend: Boolean(draft.legend),
+        legend: Boolean(draft.show_legend),
+        sort: draft.sort || 'none',
+        top_n: draft.top_n ?? null,
+        x_label_rotate: draft.x_label_rotate ?? 0,
+        bar_border_radius: draft.bar_border_radius ?? 4,
+        line_width: draft.line_width ?? 2.5,
+        area_opacity: draft.area_opacity ?? 0.28,
+        value_columns: vcols,
       },
       binding: {
         dataset_id: ds,
         category_column: draft.category_column || '',
-        value_column: draft.value_column || '',
+        value_column: vcols[0] || '',
+        value_columns: vcols,
       },
     }
   }
@@ -446,12 +484,7 @@ export function EditorPage() {
   const [rowsByDataset, setRowsByDataset] = useState<Record<string, unknown[][]>>({})
   const [activeDatasetId, setActiveDatasetId] = useState('main')
 
-  // Maker live preview
-  const [makerPreview, setMakerPreview] = useState<StudioCompileResponse | null>(null)
-  const [makerLoading, setMakerLoading] = useState(false)
-  const makerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Final preview
+  // Final preview (server compile — only here)
   const [finalPreview, setFinalPreview] = useState<StudioCompileResponse | null>(null)
   const [finalLoading, setFinalLoading] = useState(false)
   const [finalError, setFinalError] = useState<string | null>(null)
@@ -462,7 +495,7 @@ export function EditorPage() {
   const [dragId, setDragId] = useState<string | null>(null)
   const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
 
-  // Per-component thumbnail cache for canvas
+  // Per-component thumbnail cache for canvas (optional server snap)
   const [thumbById, setThumbById] = useState<Record<string, string>>({})
 
   const tree = artboard.tree
@@ -535,47 +568,6 @@ export function EditorPage() {
     },
     [dataSourceId, sql],
   )
-
-  // Debounced maker preview when draft changes
-  useEffect(() => {
-    if (step !== 'make' || !draft || !dataSourceId) {
-      return
-    }
-    if (makerTimer.current) clearTimeout(makerTimer.current)
-    makerTimer.current = setTimeout(() => {
-      const node = draftToNode(draft, editId || 'draft-preview')
-      // need fields for chart/kpi
-      const needsData =
-        node.type === 'Kpi' ||
-        node.type === 'Chart' ||
-        node.type === 'Table' ||
-        node.type === 'Text' ||
-        node.type === 'Alert'
-      if (needsData && node.type === 'Kpi' && !node.binding?.value_column) {
-        setMakerPreview(null)
-        return
-      }
-      if (
-        node.type === 'Chart' &&
-        (!node.binding?.category_column || !node.binding?.value_column)
-      ) {
-        setMakerPreview(null)
-        return
-      }
-      setMakerLoading(true)
-      const doc = singleComponentArtboard(buildDoc(), node, dataSourceId, sql)
-      runCompile(doc)
-        .then(setMakerPreview)
-        .catch((e) => {
-          setMakerPreview(null)
-          message.error(getErrorMessage(e))
-        })
-        .finally(() => setMakerLoading(false))
-    }, 450)
-    return () => {
-      if (makerTimer.current) clearTimeout(makerTimer.current)
-    }
-  }, [draft, step, dataSourceId, sql, editId, buildDoc, runCompile])
 
   // Auto final preview when entering step 4
   useEffect(() => {
@@ -697,17 +689,22 @@ export function EditorPage() {
       readyDsOptions[0]?.value ||
       activeDatasetId
     setDraft(emptyDraft(paletteType, preferDs))
-    setMakerPreview(null)
   }
 
   const addToCart = async () => {
     if (!draft || !tree) return
-    if (draft.type === 'Kpi' && !draft.value_column) {
+    const vcols =
+      draft.value_columns && draft.value_columns.length
+        ? draft.value_columns
+        : draft.value_column
+          ? [draft.value_column]
+          : []
+    if (draft.type === 'Kpi' && !draft.value_column && !vcols.length) {
       message.error('请选择数值字段')
       return
     }
-    if (draft.type === 'Chart' && (!draft.category_column || !draft.value_column)) {
-      message.error('请选择分类字段和数值字段')
+    if (draft.type === 'Chart' && (!draft.category_column || !vcols.length)) {
+      message.error('请选择分类字段和至少一个数值字段')
       return
     }
     if ((draft.type === 'Text' || draft.type === 'Alert') && !String(draft.text || '').trim()) {
@@ -716,14 +713,6 @@ export function EditorPage() {
     }
 
     let node = draftToNode(draft, editId || undefined)
-    // attach last maker preview as thumbnail
-    if (makerPreview?.image_base64) {
-      node = {
-        ...node,
-        props: { ...node.props, preview_image: makerPreview.image_base64 },
-      }
-      setThumbById((p) => ({ ...p, [node.id]: makerPreview.image_base64! }))
-    }
 
     if (editId) {
       const old = findNode(tree, editId)
@@ -732,7 +721,7 @@ export function EditorPage() {
           ...node.props,
           compose_width: old.props.compose_width,
           compose_color: old.props.compose_color,
-          preview_image: node.props?.preview_image || old.props.preview_image,
+          preview_image: old.props.preview_image,
         }
       }
       setTree(updateNode(tree, editId, node))
@@ -743,8 +732,72 @@ export function EditorPage() {
     }
     setDraft(null)
     setEditId(null)
-    setMakerPreview(null)
   }
+
+  /** Instant local preview data for current draft (no server). */
+  const makerLocal = useMemo(() => {
+    if (!draft) return null
+    const dsId = draft.dataset_id || 'main'
+    const cols = fieldsByDataset[dsId] || []
+    const rows = rowsByDataset[dsId] || []
+    const ctx: DataPreviewCtx = { [dsId]: { columns: cols, rows } }
+    if (draft.type === 'Chart') {
+      const vcols =
+        draft.value_columns && draft.value_columns.length
+          ? draft.value_columns
+          : draft.value_column
+            ? [draft.value_column]
+            : []
+      if (!draft.category_column || !vcols.length || !cols.length) return { kind: 'empty' as const }
+      const { labels, series } = seriesFromTable(cols, rows, draft.category_column, vcols)
+      const style: ChartStyle = {
+        chart_type: draft.chart_type || 'bar',
+        title: draft.title,
+        subtitle: draft.subtitle,
+        show_label: draft.show_label !== false,
+        show_legend: Boolean(draft.show_legend) || vcols.length > 1,
+        show_grid: draft.show_grid !== false,
+        smooth: draft.smooth !== false,
+        stack: Boolean(draft.stack),
+        donut: Boolean(draft.donut),
+        rose: Boolean(draft.rose),
+        sort: draft.sort || 'none',
+        top_n: draft.top_n,
+        x_label_rotate: draft.x_label_rotate,
+        bar_border_radius: draft.bar_border_radius,
+        line_width: draft.line_width,
+        area_opacity: draft.area_opacity,
+      }
+      return { kind: 'chart' as const, labels, series, style }
+    }
+    if (draft.type === 'Kpi') {
+      const col = draft.value_column || ''
+      const row = firstRowMap(ctx, dsId)
+      const val = row && col ? row[col] : null
+      return {
+        kind: 'kpi' as const,
+        label: draft.label || col || '指标',
+        value: val === null || val === undefined ? '—' : String(val),
+        hint: col ? `${dsId}.${col}` : '未选字段',
+      }
+    }
+    if (draft.type === 'Table') {
+      return { kind: 'table' as const, columns: cols, rows: rows.slice(0, 8) }
+    }
+    if (draft.type === 'Text' || draft.type === 'Alert') {
+      const row = firstRowMap(ctx, dsId)
+      const text = substituteRow(draft.text || '', row)
+      return {
+        kind: 'text' as const,
+        text,
+        alert: draft.type === 'Alert',
+        level: draft.level || 'error',
+        variant: draft.variant || 'body',
+      }
+    }
+    if (draft.type === 'Divider') return { kind: 'divider' as const }
+    return { kind: 'empty' as const }
+  }, [draft, fieldsByDataset, rowsByDataset])
 
   const refreshThumb = async (node: StudioNode) => {
     if (!dataSourceId) return
@@ -1228,28 +1281,64 @@ export function EditorPage() {
                           options={draftFields.map((c) => ({ value: c, label: c }))}
                         />
                       </Form.Item>
-                      <Form.Item label="数值字段" required>
+                      <Form.Item label="数值字段（可多选=多系列）" required>
                         <Select
+                          mode="multiple"
                           allowClear
-                          value={draft.value_column || undefined}
-                          onChange={(v) => setDraft({ ...draft, value_column: v })}
+                          value={
+                            draft.value_columns?.length
+                              ? draft.value_columns
+                              : draft.value_column
+                                ? [draft.value_column]
+                                : []
+                          }
+                          onChange={(v) =>
+                            setDraft({
+                              ...draft,
+                              value_columns: v,
+                              value_column: v[0],
+                              show_legend: v.length > 1 ? true : draft.show_legend,
+                            })
+                          }
                           options={draftFields.map((c) => ({ value: c, label: c }))}
+                          placeholder="选 1 个或多个数值列"
                         />
                       </Form.Item>
-                      <Form.Item label="标题">
+                      <Form.Item label="标题 / 副标题">
                         <Input
                           value={draft.title}
                           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                          placeholder="标题"
+                          style={{ marginBottom: 6 }}
+                        />
+                        <Input
+                          value={draft.subtitle}
+                          onChange={(e) => setDraft({ ...draft, subtitle: e.target.value })}
+                          placeholder="副标题（可选）"
                         />
                       </Form.Item>
-                      <Form.Item label="图表主题（ECharts）">
-                        <Select
-                          value={draft.chart_theme || 'macarons'}
-                          onChange={(v) => setDraft({ ...draft, chart_theme: v })}
-                          options={CHART_THEMES}
-                        />
+                      <Form.Item label="排序 / TopN">
+                        <Space wrap>
+                          <Select
+                            style={{ width: 110 }}
+                            value={draft.sort || 'none'}
+                            onChange={(v) => setDraft({ ...draft, sort: v })}
+                            options={[
+                              { value: 'none', label: '不排序' },
+                              { value: 'desc', label: '数值降序' },
+                              { value: 'asc', label: '数值升序' },
+                            ]}
+                          />
+                          <InputNumber
+                            min={0}
+                            max={100}
+                            placeholder="Top N"
+                            value={draft.top_n ?? undefined}
+                            onChange={(v) => setDraft({ ...draft, top_n: v })}
+                          />
+                        </Space>
                       </Form.Item>
-                      <Form.Item label="样式选项">
+                      <Form.Item label="显示">
                         <Space wrap>
                           <span>
                             <Switch
@@ -1257,7 +1346,23 @@ export function EditorPage() {
                               checked={draft.show_label !== false}
                               onChange={(v) => setDraft({ ...draft, show_label: v })}
                             />{' '}
-                            数据标签
+                            标签
+                          </span>
+                          <span>
+                            <Switch
+                              size="small"
+                              checked={Boolean(draft.show_legend)}
+                              onChange={(v) => setDraft({ ...draft, show_legend: v })}
+                            />{' '}
+                            图例
+                          </span>
+                          <span>
+                            <Switch
+                              size="small"
+                              checked={draft.show_grid !== false}
+                              onChange={(v) => setDraft({ ...draft, show_grid: v })}
+                            />{' '}
+                            网格
                           </span>
                           {(draft.chart_type === 'line' || draft.chart_type === 'area') && (
                             <span>
@@ -1271,7 +1376,8 @@ export function EditorPage() {
                           )}
                           {(draft.chart_type === 'bar' ||
                             draft.chart_type === 'line' ||
-                            draft.chart_type === 'area') && (
+                            draft.chart_type === 'area' ||
+                            draft.chart_type === 'hbar') && (
                             <span>
                               <Switch
                                 size="small"
@@ -1297,18 +1403,46 @@ export function EditorPage() {
                                   checked={Boolean(draft.rose)}
                                   onChange={(v) => setDraft({ ...draft, rose: v })}
                                 />{' '}
-                                南丁格尔
+                                玫瑰图
                               </span>
                             </>
                           )}
-                          <span>
-                            <Switch
-                              size="small"
-                              checked={Boolean(draft.legend)}
-                              onChange={(v) => setDraft({ ...draft, legend: v })}
-                            />{' '}
-                            图例
-                          </span>
+                        </Space>
+                      </Form.Item>
+                      <Form.Item label="细节">
+                        <Space wrap>
+                          <span style={{ fontSize: 12 }}>X轴旋转</span>
+                          <InputNumber
+                            min={0}
+                            max={90}
+                            value={draft.x_label_rotate ?? 0}
+                            onChange={(v) => setDraft({ ...draft, x_label_rotate: v ?? 0 })}
+                          />
+                          {(draft.chart_type === 'bar' || draft.chart_type === 'hbar') && (
+                            <>
+                              <span style={{ fontSize: 12 }}>圆角</span>
+                              <InputNumber
+                                min={0}
+                                max={20}
+                                value={draft.bar_border_radius ?? 4}
+                                onChange={(v) =>
+                                  setDraft({ ...draft, bar_border_radius: v ?? 4 })
+                                }
+                              />
+                            </>
+                          )}
+                          {(draft.chart_type === 'line' || draft.chart_type === 'area') && (
+                            <>
+                              <span style={{ fontSize: 12 }}>线宽</span>
+                              <InputNumber
+                                min={1}
+                                max={8}
+                                step={0.5}
+                                value={draft.line_width ?? 2.5}
+                                onChange={(v) => setDraft({ ...draft, line_width: v ?? 2.5 })}
+                              />
+                            </>
+                          )}
                         </Space>
                       </Form.Item>
                     </>
@@ -1386,7 +1520,6 @@ export function EditorPage() {
                     onClick={() => {
                       setDraft(null)
                       setEditId(null)
-                      setMakerPreview(null)
                     }}
                   >
                     取消
@@ -1410,12 +1543,12 @@ export function EditorPage() {
               </div>
             </div>
 
-            {/* 大预览 */}
+            {/* 大预览 — 前端 ECharts 即时渲染，不走服务端截图 */}
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
               <Typography.Title level={5} style={{ marginTop: 0 }}>
                 组件预览
                 <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
-                  这里应看到组件真实样子（图/表/KPI），不是名称框
+                  本地 ECharts 即时渲染（改配置即变，无需等待服务端）
                 </Typography.Text>
               </Typography.Title>
               <div
@@ -1423,21 +1556,79 @@ export function EditorPage() {
                   background: '#fff',
                   borderRadius: 8,
                   padding: 16,
-                  minHeight: 360,
+                  minHeight: 400,
                   border: '1px solid #e8e8e8',
                 }}
               >
-                {!draft ? (
-                  <Empty description="选择左侧组件类型并配置后，此处实时预览" />
-                ) : (
-                  <RenderPreview
-                    loading={makerLoading}
-                    image={makerPreview?.image_base64}
-                    html={makerPreview?.html}
-                    error={makerPreview?.image_error}
-                    emptyHint="请完善必填字段（如图表的分类/数值）后自动预览"
-                    minHeight={320}
+                {!draft || !makerLocal ? (
+                  <Empty description="选择左侧组件类型并配置后，此处即时预览" />
+                ) : makerLocal.kind === 'chart' ? (
+                  <LiveChart
+                    labels={makerLocal.labels}
+                    series={makerLocal.series}
+                    style={makerLocal.style}
+                    height={380}
                   />
+                ) : makerLocal.kind === 'kpi' ? (
+                  <div style={{ textAlign: 'center', padding: '48px 16px' }}>
+                    <div style={{ color: '#888', fontSize: 14 }}>{makerLocal.label}</div>
+                    <div
+                      style={{
+                        fontSize: 48,
+                        fontWeight: 700,
+                        color: '#1677ff',
+                        marginTop: 8,
+                      }}
+                    >
+                      {makerLocal.value}
+                    </div>
+                    <div style={{ color: '#bbb', fontSize: 12, marginTop: 8 }}>
+                      {makerLocal.hint}
+                    </div>
+                  </div>
+                ) : makerLocal.kind === 'table' ? (
+                  <Table
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: true, y: 320 }}
+                    rowKey={(_, i) => String(i)}
+                    dataSource={makerLocal.rows.map((row, i) => {
+                      const r: Record<string, unknown> = { key: i }
+                      makerLocal.columns.forEach((c, j) => {
+                        r[c] = row[j]
+                      })
+                      return r
+                    })}
+                    columns={makerLocal.columns.map((c) => ({
+                      title: c,
+                      dataIndex: c,
+                      ellipsis: true,
+                    }))}
+                  />
+                ) : makerLocal.kind === 'text' ? (
+                  <div
+                    style={{
+                      padding: 24,
+                      fontSize: makerLocal.variant === 'h1' ? 22 : 14,
+                      fontWeight: makerLocal.variant === 'h1' ? 700 : 400,
+                      color: makerLocal.alert
+                        ? makerLocal.level === 'error'
+                          ? '#a8071a'
+                          : '#d48806'
+                        : '#222',
+                      background: makerLocal.alert ? '#fff2f0' : 'transparent',
+                      borderRadius: 8,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {makerLocal.text || '（空文案）'}
+                  </div>
+                ) : makerLocal.kind === 'divider' ? (
+                  <div style={{ padding: 40 }}>
+                    <div style={{ borderTop: '1px solid #d9d9d9' }} />
+                  </div>
+                ) : (
+                  <Empty description="请完善必填字段后预览" />
                 )}
               </div>
             </div>

@@ -424,10 +424,10 @@ data-push-platform/
 ### 当前阻塞 / 进行中（每次会话结束请改这里）
 
 ```text
-进行中：数据多数据集 + pyecharts 图表增强（待用户验）
-阻塞：无（playwright+pyecharts 已本机可用）
-上次完成：数据集列表预生成/取数缓存；Chart 改 pyecharts(ECharts) 主题与样式项
-建议下一动作：用户验「多数据集 → 做组件选集+图表主题 → 预览是否更好看」
+进行中：ECharts 即时预览 + 图表自由度增强（待用户验）
+阻塞：无
+上次完成：预览改前端 ECharts（秒开）；终片仍 Playwright；多系列/排序TopN/环形玫瑰等
+建议下一动作：用户感受预览速度与图表选项是否够用
 
 环境：mysql+redis；API/前端应在跑
 参考：Obsidian 20–21
