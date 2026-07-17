@@ -167,8 +167,22 @@ def build_echarts_option(
         "bottom": 48 if show_legend else 36,
         "containLabel": True,
     }
-    option["xAxis"] = val_axis if is_h else cat_axis
-    option["yAxis"] = cat_axis if is_h else val_axis
+    x_name = str(props.get("x_axis_name") or "").strip()
+    y_name = str(props.get("y_axis_name") or "").strip()
+    if is_h:
+        if y_name:
+            cat_axis = {**cat_axis, "name": y_name, "nameTextStyle": {"fontSize": axis_fs}}
+        if x_name:
+            val_axis = {**val_axis, "name": x_name, "nameTextStyle": {"fontSize": axis_fs}}
+        option["xAxis"] = val_axis
+        option["yAxis"] = cat_axis
+    else:
+        if x_name:
+            cat_axis = {**cat_axis, "name": x_name, "nameTextStyle": {"fontSize": axis_fs}}
+        if y_name:
+            val_axis = {**val_axis, "name": y_name, "nameTextStyle": {"fontSize": axis_fs}}
+        option["xAxis"] = cat_axis
+        option["yAxis"] = val_axis
 
     series_defs = multi_series
     if not series_defs:

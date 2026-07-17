@@ -48,6 +48,8 @@ export type ChartStyle = {
   label_font_size?: number
   /** 坐标轴字号 */
   axis_font_size?: number
+  x_axis_name?: string
+  y_axis_name?: string
 }
 
 /** 单条数据序列：名称 + 与 labels 等长的数值数组（缺失为 null） */
@@ -203,6 +205,8 @@ export function buildEchartsOption(
   const categoryAxis = {
     type: 'category' as const,
     data: labels,
+    name: isH ? style.y_axis_name : style.x_axis_name,
+    nameTextStyle: { fontSize: axisSize },
     axisLabel: {
       // 分类过多时自动倾斜，避免重叠
       rotate: isH ? 0 : style.x_label_rotate ?? (labels.length > 8 ? 30 : 0),
@@ -212,6 +216,9 @@ export function buildEchartsOption(
   }
   const valueAxis = {
     type: 'value' as const,
+    name: isH ? style.x_axis_name : style.y_axis_name,
+    nameTextStyle: { fontSize: axisSize },
+    axisLabel: { fontSize: axisSize },
     splitLine: {
       show: showGrid,
       lineStyle: { type: 'dashed' as const, opacity: 0.5 },

@@ -34,7 +34,6 @@ import {
   Button,
   ColorPicker,
   Empty,
-  Form,
   Input,
   InputNumber,
   Select,
@@ -95,6 +94,7 @@ import {
   downloadImageBase64,
   downloadTextFile,
 } from './exportPushMarkdown'
+import { MakeComponentPanel } from './MakeComponentPanel'
 import { LiveChart } from './LiveChart'
 import {
   appendFieldToken,
@@ -246,6 +246,8 @@ type DraftForm = {
   axis_font_size?: number
   legend_font_size?: number
   color_palette?: string[]
+  x_axis_name?: string
+  y_axis_name?: string
 }
 
 /** 按组件类型生成空 draft 表单默认值 */
@@ -366,6 +368,8 @@ function nodeToDraft(node: StudioNode): DraftForm {
     color_palette: Array.isArray(p.color_palette)
       ? (p.color_palette as unknown[]).map(String)
       : undefined,
+    x_axis_name: p.x_axis_name ? String(p.x_axis_name) : undefined,
+    y_axis_name: p.y_axis_name ? String(p.y_axis_name) : undefined,
   }
 }
 
@@ -386,6 +390,8 @@ function draftStyleProps(draft: DraftForm): Record<string, unknown> {
     'legend_font_size',
     'color_palette',
     'bar_max_width',
+    'x_axis_name',
+    'y_axis_name',
   ]
   for (const k of keys) {
     const v = draft[k]
@@ -1086,6 +1092,8 @@ export function EditorPage() {
         label_font_size: draft.chart_label_size,
         axis_font_size: draft.axis_font_size,
         color_palette: draft.color_palette,
+        x_axis_name: draft.x_axis_name,
+        y_axis_name: draft.y_axis_name,
       }
       return { kind: 'chart' as const, labels, series, style }
     }
@@ -1989,596 +1997,76 @@ export function EditorPage() {
                   type="info"
                   showIcon
                   style={{ marginTop: 12 }}
-                  message="点上方类型开始"
-                  description="配置数据与样式后，中间会实时显示组件样子，满意再加入清单。"
+                  message="点上方类型开始做组件"
+                  description="右侧属性按帆软结构：类型 / 数据 / 样式（标题·图例·系列·坐标轴）/ 显示。中间实时预览，满意后加入组件库。"
                 />
               ) : (
-                <Form layout="vertical" size="small" style={{ marginTop: 8 }}>
-                  <Form.Item label="类型">
-                    <Tag color="blue">
-                      {typeLabel(draft.type, draft.chart_type)}
-                    </Tag>
-                  </Form.Item>
-                  {draft.type !== 'Divider' ? (
-                    <Form.Item
-                      label="数据集"
-                      extra={
-                        readyDsOptions.length === 0
-                          ? '请先在「数据」步对至少一个数据集取数'
-                          : undefined
-                      }
-                    >
-                      <Select
-                        value={draft.dataset_id}
-                        onChange={(v) =>
-                          setDraft({
-                            ...draft,
-                            dataset_id: v,
-                            value_column: undefined,
-                            category_column: undefined,
-                          })
-                        }
-                        options={
-                          readyDsOptions.length
-                            ? readyDsOptions
-                            : datasetOptions
-                        }
-                        placeholder="选择已取数的数据集"
-                      />
-                    </Form.Item>
-                  ) : null}
-                  {draft.type === 'Kpi' ? (
-                    <>
-                      <Form.Item label="数值字段" required>
-                        <Select
-                          allowClear
-                          value={draft.value_column || undefined}
-                          onChange={(v) =>
-                            setDraft({ ...draft, value_column: v, label: draft.label || v })
-                          }
-                          options={draftFields.map((c) => ({ value: c, label: c }))}
-                          placeholder="必选"
-                        />
-                      </Form.Item>
-                      <Form.Item label="显示名">
-                        <Input
-                          value={draft.label}
-                          onChange={(e) => setDraft({ ...draft, label: e.target.value })}
-                        />
-                      </Form.Item>
-                    </>
-                  ) : null}
-                  {draft.type === 'Chart' ? (
-                    <>
-                      <Form.Item label="图表类型">
-                        <Select
-                          value={draft.chart_type || 'bar'}
-                          onChange={(v) => setDraft({ ...draft, chart_type: v })}
-                          options={CHART_TYPES}
-                        />
-                      </Form.Item>
-                      <Form.Item label="分类字段" required>
-                        <Select
-                          allowClear
-                          value={draft.category_column || undefined}
-                          onChange={(v) => setDraft({ ...draft, category_column: v })}
-                          options={draftFields.map((c) => ({ value: c, label: c }))}
-                        />
-                      </Form.Item>
-                      <Form.Item label="数值字段（可多选=多系列）" required>
-                        <Select
-                          mode="multiple"
-                          allowClear
-                          value={
-                            draft.value_columns?.length
-                              ? draft.value_columns
-                              : draft.value_column
-                                ? [draft.value_column]
-                                : []
-                          }
-                          onChange={(v) =>
-                            setDraft({
-                              ...draft,
-                              value_columns: v,
-                              value_column: v[0],
-                              show_legend: v.length > 1 ? true : draft.show_legend,
-                            })
-                          }
-                          options={draftFields.map((c) => ({ value: c, label: c }))}
-                          placeholder="选 1 个或多个数值列"
-                        />
-                      </Form.Item>
-                      <Form.Item label="标题 / 副标题">
-                        <Input
-                          value={draft.title}
-                          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                          placeholder="标题"
-                          style={{ marginBottom: 6 }}
-                        />
-                        <Input
-                          value={draft.subtitle}
-                          onChange={(e) => setDraft({ ...draft, subtitle: e.target.value })}
-                          placeholder="副标题（可选）"
-                        />
-                      </Form.Item>
-                      <Form.Item label="排序 / TopN">
-                        <Space wrap>
-                          <Select
-                            style={{ width: 110 }}
-                            value={draft.sort || 'none'}
-                            onChange={(v) => setDraft({ ...draft, sort: v })}
-                            options={[
-                              { value: 'none', label: '不排序' },
-                              { value: 'desc', label: '数值降序' },
-                              { value: 'asc', label: '数值升序' },
-                            ]}
-                          />
-                          <InputNumber
-                            min={0}
-                            max={100}
-                            placeholder="Top N"
-                            value={draft.top_n ?? undefined}
-                            onChange={(v) => setDraft({ ...draft, top_n: v })}
-                          />
-                        </Space>
-                      </Form.Item>
-                      <Form.Item label="显示">
-                        <Space wrap>
-                          <span>
-                            <Switch
-                              size="small"
-                              checked={draft.show_label !== false}
-                              onChange={(v) => setDraft({ ...draft, show_label: v })}
-                            />{' '}
-                            标签
-                          </span>
-                          <span>
-                            <Switch
-                              size="small"
-                              checked={Boolean(draft.show_legend)}
-                              onChange={(v) => setDraft({ ...draft, show_legend: v })}
-                            />{' '}
-                            图例
-                          </span>
-                          <span>
-                            <Switch
-                              size="small"
-                              checked={draft.show_grid !== false}
-                              onChange={(v) => setDraft({ ...draft, show_grid: v })}
-                            />{' '}
-                            网格
-                          </span>
-                          {(draft.chart_type === 'line' || draft.chart_type === 'area') && (
-                            <span>
-                              <Switch
-                                size="small"
-                                checked={draft.smooth !== false}
-                                onChange={(v) => setDraft({ ...draft, smooth: v })}
-                              />{' '}
-                              平滑
-                            </span>
-                          )}
-                          {(draft.chart_type === 'bar' ||
-                            draft.chart_type === 'line' ||
-                            draft.chart_type === 'area' ||
-                            draft.chart_type === 'hbar') && (
-                            <span>
-                              <Switch
-                                size="small"
-                                checked={Boolean(draft.stack)}
-                                onChange={(v) => setDraft({ ...draft, stack: v })}
-                              />{' '}
-                              堆叠
-                            </span>
-                          )}
-                          {draft.chart_type === 'pie' && (
-                            <>
-                              <span>
-                                <Switch
-                                  size="small"
-                                  checked={Boolean(draft.donut)}
-                                  onChange={(v) => setDraft({ ...draft, donut: v })}
-                                />{' '}
-                                环形
-                              </span>
-                              <span>
-                                <Switch
-                                  size="small"
-                                  checked={Boolean(draft.rose)}
-                                  onChange={(v) => setDraft({ ...draft, rose: v })}
-                                />{' '}
-                                玫瑰图
-                              </span>
-                            </>
-                          )}
-                        </Space>
-                      </Form.Item>
-                      <Form.Item label="细节">
-                        <Space wrap>
-                          <span style={{ fontSize: 12 }}>X轴旋转</span>
-                          <InputNumber
-                            min={0}
-                            max={90}
-                            value={draft.x_label_rotate ?? 0}
-                            onChange={(v) => setDraft({ ...draft, x_label_rotate: v ?? 0 })}
-                          />
-                          {(draft.chart_type === 'bar' || draft.chart_type === 'hbar') && (
-                            <>
-                              <span style={{ fontSize: 12 }}>圆角</span>
-                              <InputNumber
-                                min={0}
-                                max={20}
-                                value={draft.bar_border_radius ?? 4}
-                                onChange={(v) =>
-                                  setDraft({ ...draft, bar_border_radius: v ?? 4 })
-                                }
-                              />
-                            </>
-                          )}
-                          {(draft.chart_type === 'line' || draft.chart_type === 'area') && (
-                            <>
-                              <span style={{ fontSize: 12 }}>线宽</span>
-                              <InputNumber
-                                min={1}
-                                max={8}
-                                step={0.5}
-                                value={draft.line_width ?? 2.5}
-                                onChange={(v) => setDraft({ ...draft, line_width: v ?? 2.5 })}
-                              />
-                            </>
-                          )}
-                        </Space>
-                      </Form.Item>
-                    </>
-                  ) : null}
-                  {draft.type === 'Text' ? (
-                    <>
-                      <Form.Item
-                        label="富文本文案"
-                        extra="自由排版：标题/加粗/颜色/列表/对齐。点字段插入 {{列名}}。"
-                      >
-                        <RichTextEditor
-                          value={draft.text || ''}
-                          onChange={(html) => setDraft({ ...draft, text: html, variant: 'rich' })}
-                          minHeight={200}
-                        />
-                      </Form.Item>
-                      <div style={{ marginBottom: 12 }}>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          插入数据字段：
-                        </Typography.Text>
-                        <div style={{ marginTop: 4 }}>
-                          {draftFields.map((c) => (
-                            <Tag
-                              key={c}
-                              color="blue"
-                              style={{ cursor: 'pointer', marginBottom: 4 }}
-                              onClick={() =>
-                                setDraft({
-                                  ...draft,
-                                  text: `${draft.text || ''}<span>{{${c}}}</span>`,
-                                })
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <Tag color="blue">{typeLabel(draft.type, draft.chart_type)}</Tag>
+                    {editId ? <Tag>编辑中</Tag> : <Tag color="green">新建</Tag>}
+                  </div>
+                  <MakeComponentPanel
+                    draft={draft}
+                    onChange={(patch) => setDraft({ ...draft, ...patch })}
+                    datasetOptions={
+                      readyDsOptions.length ? readyDsOptions : datasetOptions
+                    }
+                    fields={draftFields}
+                    chartTypes={CHART_TYPES}
+                    tableStyles={TABLE_STYLES}
+                    richTextSlot={
+                      draft.type === 'Text' ? (
+                        <div>
+                          <span style={{ fontSize: 12, color: '#595959' }}>富文本文案</span>
+                          <div style={{ marginTop: 4 }}>
+                            <RichTextEditor
+                              value={draft.text || ''}
+                              onChange={(html) =>
+                                setDraft({ ...draft, text: html, variant: 'rich' })
                               }
-                            >
-                              +{`{{${c}}}`}
-                            </Tag>
-                          ))}
-                          {!draftFields.length ? (
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              请先对所选数据集取数
-                            </Typography.Text>
-                          ) : null}
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
-                  {draft.type === 'Alert' ? (
-                    <>
-                      <Form.Item label="告警文案">
-                        <Input.TextArea
-                          rows={3}
-                          value={draft.text}
-                          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-                          placeholder="可插入 {{列名}}"
-                        />
-                      </Form.Item>
-                      <div style={{ marginBottom: 8 }}>
-                        {draftFields.map((c) => (
-                          <Tag
-                            key={c}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() =>
-                              setDraft({
-                                ...draft,
-                                text: `${draft.text || ''}{{${c}}}`,
-                              })
-                            }
-                          >
-                            +{c}
-                          </Tag>
-                        ))}
-                      </div>
-                      <Form.Item label="级别">
-                        <Select
-                          value={draft.level}
-                          onChange={(v) => setDraft({ ...draft, level: v })}
-                          options={[
-                            { value: 'error', label: '严重' },
-                            { value: 'warning', label: '警告' },
-                            { value: 'info', label: '信息' },
-                          ]}
-                        />
-                      </Form.Item>
-                    </>
-                  ) : null}
-                  {draft.type === 'Table' ? (
-                    <Form.Item label="表样式">
-                      <Select
-                        value={draft.table_style}
-                        onChange={(v) => setDraft({ ...draft, table_style: v })}
-                        options={TABLE_STYLES.map((s) => ({ value: s.id, label: s.label }))}
-                      />
-                    </Form.Item>
-                  ) : null}
-                  {!draftFields.length && draft.type !== 'Divider' ? (
-                    <Alert type="warning" showIcon message="请先回「数据」取数" style={{ marginBottom: 8 }} />
-                  ) : null}
-
-                  {/* —— 组件样式（写入 props，成图生效；参考 DataEase/Superset 分数据与样式） —— */}
-                  {draft.type !== 'Divider' ? (
-                    <div
-                      style={{
-                        marginTop: 8,
-                        marginBottom: 12,
-                        padding: 12,
-                        background: '#f7f9fc',
-                        borderRadius: 8,
-                        border: '1px solid #e8eef5',
-                      }}
-                    >
-                      <Typography.Text strong style={{ fontSize: 13 }}>
-                        组件样式
-                      </Typography.Text>
-                      <div style={{ fontSize: 11, color: '#888', margin: '4px 0 10px' }}>
-                        按组件类型配置（成图与预览共用）。组装画布只负责位置/大小。
-                      </div>
-
-                      {draft.type === 'Chart' ? (
-                        <>
-                          <div
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1fr 1fr',
-                              gap: 8,
-                            }}
-                          >
-                            <div>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                标题字号
-                              </Typography.Text>
-                              <InputNumber
-                                style={{ width: '100%', marginTop: 4 }}
-                                min={10}
-                                max={36}
-                                value={draft.title_font_size ?? 15}
-                                onChange={(v) =>
-                                  setDraft({ ...draft, title_font_size: v ?? 15 })
-                                }
-                              />
-                            </div>
-                            <div>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                数据标签字号
-                              </Typography.Text>
-                              <InputNumber
-                                style={{ width: '100%', marginTop: 4 }}
-                                min={8}
-                                max={24}
-                                value={draft.chart_label_size ?? 10}
-                                onChange={(v) =>
-                                  setDraft({ ...draft, chart_label_size: v ?? 10 })
-                                }
-                              />
-                            </div>
-                            <div>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                坐标轴字号
-                              </Typography.Text>
-                              <InputNumber
-                                style={{ width: '100%', marginTop: 4 }}
-                                min={8}
-                                max={20}
-                                value={draft.axis_font_size ?? 11}
-                                onChange={(v) =>
-                                  setDraft({ ...draft, axis_font_size: v ?? 11 })
-                                }
-                              />
-                            </div>
-                            <div>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                图例字号
-                              </Typography.Text>
-                              <InputNumber
-                                style={{ width: '100%', marginTop: 4 }}
-                                min={8}
-                                max={20}
-                                value={draft.legend_font_size ?? 11}
-                                onChange={(v) =>
-                                  setDraft({ ...draft, legend_font_size: v ?? 11 })
-                                }
-                              />
-                            </div>
-                            {(draft.chart_type === 'bar' || draft.chart_type === 'hbar') && (
-                              <div>
-                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                  柱宽上限
-                                </Typography.Text>
-                                <InputNumber
-                                  style={{ width: '100%', marginTop: 4 }}
-                                  min={8}
-                                  max={120}
-                                  value={draft.bar_max_width ?? 48}
-                                  onChange={(v) =>
-                                    setDraft({ ...draft, bar_max_width: v ?? 48 })
-                                  }
-                                />
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ marginTop: 10 }}>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              配色方案
-                            </Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 4 }}
-                              value={
-                                draft.color_palette?.join(',') ||
-                                'default'
-                              }
-                              onChange={(v) => {
-                                if (v === 'default') {
-                                  setDraft({ ...draft, color_palette: undefined })
-                                  return
-                                }
-                                setDraft({
-                                  ...draft,
-                                  color_palette: v.split(','),
-                                })
-                              }}
-                              options={[
-                                { value: 'default', label: '默认（ECharts）' },
-                                {
-                                  value: '#5470c6,#91cc75,#fac858,#ee6666,#73c0de',
-                                  label: '经典蓝绿',
-                                },
-                                {
-                                  value: '#1677ff,#69b1ff,#91caff,#bae0ff,#003eb3',
-                                  label: '商务蓝',
-                                },
-                                {
-                                  value: '#cf1322,#ff4d4f,#ff7875,#ffa39e,#820014',
-                                  label: '警示红',
-                                },
-                                {
-                                  value: '#389e0d,#73d13d,#95de64,#b7eb8f,#237804',
-                                  label: '增长绿',
-                                },
-                              ]}
+                              minHeight={160}
                             />
-                          </div>
-                        </>
-                      ) : null}
-
-                      {draft.type === 'Kpi' ||
-                      draft.type === 'Text' ||
-                      draft.type === 'Alert' ||
-                      draft.type === 'Table' ? (
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 1fr',
-                            gap: 8,
-                          }}
-                        >
-                          <div>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              {draft.type === 'Kpi' ? '数值字号' : '正文字号'}
-                            </Typography.Text>
-                            <InputNumber
-                              style={{ width: '100%', marginTop: 4 }}
-                              min={10}
-                              max={72}
-                              value={draft.content_font_size}
-                              placeholder="默认"
-                              onChange={(v) =>
-                                setDraft({
-                                  ...draft,
-                                  content_font_size: v == null ? undefined : Number(v),
-                                })
-                              }
-                            />
-                          </div>
-                          <div>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              字重
-                            </Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 4 }}
-                              allowClear
-                              placeholder="默认"
-                              value={draft.content_font_weight}
-                              options={[
-                                { value: '400', label: '常规' },
-                                { value: '500', label: '中等' },
-                                { value: '600', label: '半粗' },
-                                { value: '700', label: '加粗' },
-                              ]}
-                              onChange={(v) =>
-                                setDraft({ ...draft, content_font_weight: v || undefined })
-                              }
-                            />
-                          </div>
-                          {draft.type === 'Kpi' ? (
-                            <div>
-                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                标签字号
-                              </Typography.Text>
-                              <InputNumber
-                                style={{ width: '100%', marginTop: 4 }}
-                                min={10}
-                                max={28}
-                                value={draft.label_font_size}
-                                onChange={(v) =>
-                                  setDraft({
-                                    ...draft,
-                                    label_font_size: v == null ? undefined : Number(v),
-                                  })
-                                }
-                              />
-                            </div>
-                          ) : null}
-                          <div>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              对齐
-                            </Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 4 }}
-                              allowClear
-                              placeholder="默认"
-                              value={draft.content_align}
-                              options={[
-                                { value: 'left', label: '左' },
-                                { value: 'center', label: '中' },
-                                { value: 'right', label: '右' },
-                              ]}
-                              onChange={(v) =>
-                                setDraft({ ...draft, content_align: v || undefined })
-                              }
-                            />
-                          </div>
-                          <div>
-                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                              {draft.type === 'Kpi' ? '数值颜色' : '文字颜色'}
-                            </Typography.Text>
-                            <div style={{ marginTop: 4 }}>
-                              <ColorPicker
-                                allowClear
-                                value={draft.content_color || undefined}
-                                onChange={(c) =>
-                                  setDraft({
-                                    ...draft,
-                                    content_color: c ? colorToHex(c) : undefined,
-                                  })
-                                }
-                              />
-                            </div>
                           </div>
                         </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  <Button type="primary" block onClick={() => void addToCart()}>
+                      ) : undefined
+                    }
+                    fieldInsertSlot={
+                      draft.type === 'Text' || draft.type === 'Alert' ? (
+                        <div>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            插入数据字段：
+                          </Typography.Text>
+                          <div style={{ marginTop: 4 }}>
+                            {draftFields.map((c) => (
+                              <Tag
+                                key={c}
+                                color="blue"
+                                style={{ cursor: 'pointer', marginBottom: 4 }}
+                                onClick={() =>
+                                  setDraft({
+                                    ...draft,
+                                    text:
+                                      draft.type === 'Text'
+                                        ? `${draft.text || ''}<span>{{${c}}}</span>`
+                                        : `${draft.text || ''}{{${c}}}`,
+                                  })
+                                }
+                              >
+                                +{`{{${c}}}`}
+                              </Tag>
+                            ))}
+                            {!draftFields.length ? (
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                请先对所选数据集取数
+                              </Typography.Text>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                  <Button type="primary" block onClick={() => void addToCart()} style={{ marginTop: 8 }}>
                     {editId ? '更新组件' : '确认并加入组件库'}
                   </Button>
                   <Button
@@ -2591,7 +2079,7 @@ export function EditorPage() {
                   >
                     取消
                   </Button>
-                </Form>
+                </div>
               )}
               <div style={{ marginTop: 16 }}>
                 <Button block onClick={() => setStep('data')}>
@@ -2615,7 +2103,7 @@ export function EditorPage() {
               <Typography.Title level={5} style={{ marginTop: 0 }}>
                 组件预览
                 <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
-                  本地 ECharts 即时渲染（改配置即变，无需等待服务端）
+                  即时渲染 · 与成图同一套样式 props（改属性即变）
                 </Typography.Text>
               </Typography.Title>
               <div
