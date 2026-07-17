@@ -1,6 +1,6 @@
 # GitHub 项目管理（增强）
 
-> 仓库：**https://github.com/nh1571/data-push-platform**（Private）  
+> 仓库：**https://github.com/nh1571/data-push-platform**（**Public** 公开）  
 > 本机已用 `gh` 登录账号 `nh1571`。助手可通过 `gh` 代为：建 Issue、贴标签、开/看 PR、看 CI、列里程碑等。
 
 ---
@@ -12,8 +12,9 @@
 | 远程 | `origin` → `https://github.com/nh1571/data-push-platform.git` |
 | 默认分支 | `main` |
 | 开发分支 | `feature/m0-scaffold`（历史工作线，已推送） |
-| 可见性 | **Private** |
-| Issues | 已种子 #1 甲 / #2 乙 / #3 丙 / #4 协作约定 |
+| 可见性 | **Public**（欢迎 Fork / PR） |
+| Issues | #1 甲 / #2 乙 / #3 丙 / #4 协作约定（已标 help wanted） |
+| 贡献说明 | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ---
 

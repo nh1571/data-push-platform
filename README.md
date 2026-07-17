@@ -4,8 +4,8 @@
 
 Data push middleware for configuring sources, SQL/templates, delivery channels (e.g. DingTalk), and triggers (manual / cron / HTTP for DS orchestrators), with full job-run observability.
 
-**GitHub（Private）:** https://github.com/nh1571/data-push-platform  
-协作与代管说明：[`docs/GITHUB_OPS.md`](docs/GITHUB_OPS.md)
+**GitHub（Public）:** https://github.com/nh1571/data-push-platform  
+欢迎 Star / Fork / PR · [贡献指南](CONTRIBUTING.md) · [GitHub 代管说明](docs/GITHUB_OPS.md)
 
 > **多 Agent / 跨会话继续开发（必读）**  
 > 0. **技能** `continue-data-push-dev` — **启动/继续** 与 **停止/收工**（说「继续开发推送中台」或「停止开发/收工」）  
