@@ -1,10 +1,12 @@
 /**
- * Content workbench:
- * 1 数据
- * 2 做组件 → 清单
- * 3 组装画布（自由布局成图）
- * 4 组装推送（图外 Markdown 文案壳）
- * 5 预览推送 / 试推
+ * Content workbench = push **template** authoring (not a static one-off image).
+ * Runtime JobRun re-queries with resolved params and re-renders every push.
+ *
+ * 1 数据（SQL + 参数定义，样例取数）
+ * 2 做组件（字段绑定）
+ * 3 组装画布（推送图版式模板）
+ * 4 组装推送（图外文案模板）
+ * 5 预览 / 试推（样例预演；正式推送动态渲染）
  */
 import {
   ArrowLeftOutlined,
@@ -136,11 +138,11 @@ const CHART_TYPES = [
 type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
 
 const STEPS = [
-  { key: 'data' as const, title: '1. 数据' },
-  { key: 'make' as const, title: '2. 做组件' },
-  { key: 'compose' as const, title: '3. 组装画布' },
-  { key: 'message' as const, title: '4. 组装推送' },
-  { key: 'preview' as const, title: '5. 预览推送' },
+  { key: 'data' as const, title: '1. 数据', desc: 'SQL/参数模板' },
+  { key: 'make' as const, title: '2. 做组件', desc: '绑定字段' },
+  { key: 'compose' as const, title: '3. 组装画布', desc: '图版式模板' },
+  { key: 'message' as const, title: '4. 组装推送', desc: '图外文案' },
+  { key: 'preview' as const, title: '5. 预览推送', desc: '样例预演' },
 ]
 
 type DraftForm = {
@@ -900,7 +902,7 @@ export function EditorPage() {
         enabled,
       })
       setCurrentJobId(saved.id)
-      message.success('已保存')
+      message.success('模板已保存（运行时按参数动态渲染）')
       if (jobId !== saved.id) navigate(`/editor/${saved.id}`, { replace: true })
     } catch (e) {
       message.error(getErrorMessage(e))
@@ -1058,12 +1060,17 @@ export function EditorPage() {
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/push-jobs')}>
               任务
             </Button>
-            <Typography.Title level={5} style={{ margin: 0 }}>
-              内容工作台
-            </Typography.Title>
+            <div>
+              <Typography.Title level={5} style={{ margin: 0 }}>
+                内容工作台
+                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+                  制作推送模板 · 每次推送按参数动态取数成图
+                </Typography.Text>
+              </Typography.Title>
+            </div>
             <Input
               style={{ width: 200 }}
-              placeholder="推送名称"
+              placeholder="模板 / 任务名称"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={loading}
@@ -1073,15 +1080,20 @@ export function EditorPage() {
             </Tag>
           </Space>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void onSave()}>
-            保存
+            保存模板
           </Button>
         </Space>
-        <div style={{ marginTop: 12, maxWidth: 720 }}>
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            此处配置的是<strong>模板</strong>（SQL、参数、组件绑定、画布版式、图外文案）。调度/试推时会重新解析参数、取数并渲染，不是固定一张截图。
+          </Typography.Text>
+        </div>
+        <div style={{ marginTop: 12, maxWidth: 900 }}>
           <Steps
             size="small"
             current={stepIndex}
             onChange={(i) => setStep(STEPS[i]!.key)}
-            items={STEPS.map((s) => ({ title: s.title }))}
+            items={STEPS.map((s) => ({ title: s.title, description: s.desc }))}
           />
         </div>
       </div>
@@ -1097,7 +1109,7 @@ export function EditorPage() {
                     数据集管理
                   </Typography.Title>
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                    预先配置并取数多个数据集；做组件时再自由选用。
+                    配置模板侧的 SQL 与参数（如 {'{{yesterday}}'}）；此处「取数」仅用于绑字段样例。正式推送每次重新执行 SQL。
                   </Typography.Text>
                 </div>
                 <Space>
@@ -2043,8 +2055,8 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                本步只排版<strong>推送图</strong>。图外说明文字请在下一步「组装推送」中写。
-                画布内是真实组件（随缩放重排）。把手拖动 · 右下角改大小 · 右侧选风格
+                排版的是<strong>推送图模板</strong>（位置/大小/风格）；业务数字来自字段绑定，推送时按当时数据重绘。
+                图外说明在下一步写。把手拖动 · 右下角改大小 · 右侧选风格
               </Typography.Paragraph>
               <ComposeCanvas
                 canvasWidth={canvasWidth}
@@ -2330,8 +2342,8 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                图前 / 图后文案支持<strong>格式工具栏</strong>（标题、加粗、颜色、列表、链接）。
-                编辑为富文本，发送时自动转为钉钉 Markdown。字段用工具旁「插入字段」或手写 {'{{列名}}'}。
+                图前 / 图后是<strong>文案模板</strong>（工具栏：标题、加粗、颜色、列表、链接）。
+                {'{{列名}}'} 在每次推送时用当次查询首行替换；发送时转钉钉 Markdown。
               </Typography.Paragraph>
 
               <div style={{ marginBottom: 16 }}>
@@ -2620,9 +2632,10 @@ export function EditorPage() {
                 <Alert type="error" showIcon style={{ marginBottom: 12 }} message={finalError} />
               ) : null}
 
-              <Typography.Title level={5}>最终推送效果</Typography.Title>
+              <Typography.Title level={5}>样例预演（当前参数 / 当前取数）</Typography.Title>
               <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
-                图前 / 图 / 图后结构与钉钉投递一致（OpenAPI 图文分 part；Webhook 会拼成 Markdown）
+                下方是用<strong>此刻工作台样例数据</strong>渲染的终片，用于验收模板。
+                正式调度或试推时会<strong>重新解析参数、重新取数、重新成图</strong>再投递（图前/图/图后结构一致）。
               </Typography.Paragraph>
 
               <div
