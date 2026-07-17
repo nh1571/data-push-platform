@@ -352,6 +352,8 @@ export interface StudioCompileResponse {
   row_count: number
   parts: MessagePartPreview[]
   artboard: ArtboardDoc
+  image_error?: string | null
+  ok?: boolean
 }
 
 export interface StudioSaveJobRequest {

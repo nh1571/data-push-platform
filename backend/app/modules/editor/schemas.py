@@ -142,6 +142,9 @@ class StudioCompileResponse(BaseModel):
     row_count: int = 0
     parts: list[MessagePartPreview] = Field(default_factory=list)
     artboard: dict[str, Any] = Field(default_factory=dict)
+    # When PNG missing: explain why (playwright/wkhtml unavailable, etc.)
+    image_error: str | None = None
+    ok: bool = True
 
 
 class StudioSaveJobRequest(BaseModel):

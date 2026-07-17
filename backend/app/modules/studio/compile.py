@@ -179,6 +179,7 @@ class CompileResult:
     image_path: str | None = None
     row_count: int = 0
     parts_preview: list[dict[str, str]] = field(default_factory=list)
+    image_error: str | None = None
 
 
 def _get_dataset(
@@ -875,6 +876,7 @@ def compile_artboard(
 
     image_b64 = None
     image_path = None
+    image_error: str | None = None
     message = artboard_to_message(doc, data_ctx, with_image=want_image)
 
     if want_image:
@@ -886,6 +888,11 @@ def compile_artboard(
             if png:
                 image_b64 = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
                 image_path = path
+            else:
+                image_error = (
+                    "未能生成 PNG 预览。请安装：pip install playwright && playwright install chromium"
+                    "（或配置 wkhtmltoimage）。下方仍提供 HTML 预览。"
+                )
 
     previews = []
     for p in message.parts:
@@ -904,4 +911,5 @@ def compile_artboard(
         image_path=image_path,
         row_count=row_count,
         parts_preview=previews,
+        image_error=image_error,
     )

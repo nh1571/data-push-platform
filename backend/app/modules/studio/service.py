@@ -140,6 +140,8 @@ def studio_compile(
         "row_count": result.row_count,
         "parts": result.parts_preview,
         "artboard": doc,
+        "image_error": result.image_error,
+        "ok": bool(result.image_base64 or result.markdown or result.html),
     }
 
 
