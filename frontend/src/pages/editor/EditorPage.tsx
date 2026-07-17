@@ -60,7 +60,12 @@ import {
   type ComposeLayout,
 } from './ComposeCanvas'
 import { LiveChart } from './LiveChart'
-import { RichTextEditor } from './RichTextEditor'
+import {
+  appendFieldToken,
+  isEmptyRichHtml,
+  looksLikeHtml,
+  RichTextEditor,
+} from './RichTextEditor'
 import {
   appendChild,
   defaultAlertArtboard,
@@ -577,7 +582,7 @@ export function EditorPage() {
   const patchCompose = useCallback((patch: NonNullable<ArtboardDoc['compose']>) => {
     setArtboard((prev) => ({
       ...prev,
-      compose: { ...prev.compose, ...patch },
+      compose: { ...prev.compose, text_format: 'html', ...patch },
     }))
   }, [])
 
@@ -2299,7 +2304,7 @@ export function EditorPage() {
         {/* ========== 4 组装推送（图 + 外层文案） ========== */}
         {step === 'message' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
-            <div style={{ flex: 1, overflow: 'auto', padding: 16, maxWidth: 560 }}>
+            <div style={{ flex: '1 1 52%', overflow: 'auto', padding: 16, minWidth: 360 }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('compose')}>← 组装画布</Button>
                 <Button type="primary" onClick={() => setStep('preview')}>
@@ -2325,12 +2330,12 @@ export function EditorPage() {
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                推送载体通常是<strong>钉钉 Markdown</strong>：可在画布成图<strong>上方 / 下方</strong>
-                写说明文字。字段用 {'{{列名}}'}，取主查询首行替换。
+                图前 / 图后文案支持<strong>格式工具栏</strong>（标题、加粗、颜色、列表、链接）。
+                编辑为富文本，发送时自动转为钉钉 Markdown。字段用工具旁「插入字段」或手写 {'{{列名}}'}。
               </Typography.Paragraph>
 
-              <div style={{ marginBottom: 12 }}>
-                <Typography.Text type="secondary">消息标题（钉钉 title）</Typography.Text>
+              <div style={{ marginBottom: 16 }}>
+                <Typography.Text type="secondary">消息标题（钉钉通知标题，纯文本）</Typography.Text>
                 <Input
                   style={{ marginTop: 4 }}
                   value={String(artboard.compose?.title || '')}
@@ -2339,9 +2344,16 @@ export function EditorPage() {
                 />
               </div>
 
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography.Text type="secondary">图前文案（Markdown）</Typography.Text>
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 6,
+                  }}
+                >
+                  <Typography.Text strong>图前文案</Typography.Text>
                   <Select
                     size="small"
                     placeholder="插入字段"
@@ -2349,34 +2361,44 @@ export function EditorPage() {
                     options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
                       (c) => ({ value: c, label: c }),
                     )}
-                    onChange={(col) => {
-                      const cur = String(artboard.compose?.text_before || '')
-                      patchCompose({ text_before: `${cur}{{${col}}}` })
+                    onChange={(col: string) => {
+                      if (!col) return
+                      patchCompose({
+                        text_before: appendFieldToken(
+                          String(artboard.compose?.text_before || ''),
+                          col,
+                        ),
+                      })
                     }}
-                    allowClear={false}
-                    value={undefined}
                   />
                 </div>
-                <Input.TextArea
-                  style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
-                  rows={5}
+                <RichTextEditor
+                  compact
+                  minHeight={140}
                   value={String(artboard.compose?.text_before || '')}
-                  onChange={(e) => patchCompose({ text_before: e.target.value })}
-                  placeholder={'例如：\n**【{{院区}}】运营日报**\n\n今日要点如下：'}
+                  onChange={(html) => patchCompose({ text_before: html })}
+                  placeholder="图上方说明：可加粗、着色、列表… 例：【{{院区}}】运营日报"
                 />
               </div>
 
               <Alert
                 type="info"
                 showIcon
-                style={{ marginBottom: 12 }}
+                style={{ marginBottom: 16 }}
                 message="中间固定插入「组装画布」生成的推送图"
-                description="图内布局请回第 3 步调整；本步只编排图外文字。"
+                description="图内布局请回第 3 步调整；本步用工具栏编排图外文字样式。"
               />
 
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography.Text type="secondary">图后文案（Markdown）</Typography.Text>
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 6,
+                  }}
+                >
+                  <Typography.Text strong>图后文案</Typography.Text>
                   <Select
                     size="small"
                     placeholder="插入字段"
@@ -2384,19 +2406,23 @@ export function EditorPage() {
                     options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
                       (c) => ({ value: c, label: c }),
                     )}
-                    onChange={(col) => {
-                      const cur = String(artboard.compose?.text_after || '')
-                      patchCompose({ text_after: `${cur}{{${col}}}` })
+                    onChange={(col: string) => {
+                      if (!col) return
+                      patchCompose({
+                        text_after: appendFieldToken(
+                          String(artboard.compose?.text_after || ''),
+                          col,
+                        ),
+                      })
                     }}
-                    value={undefined}
                   />
                 </div>
-                <Input.TextArea
-                  style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', fontSize: 13 }}
-                  rows={4}
+                <RichTextEditor
+                  compact
+                  minHeight={120}
                   value={String(artboard.compose?.text_after || '')}
-                  onChange={(e) => patchCompose({ text_after: e.target.value })}
-                  placeholder="例如：数据仅供内部参考，有问题请联系数据中心。"
+                  onChange={(html) => patchCompose({ text_after: html })}
+                  placeholder="图下方脚注、说明、免责声明…"
                 />
               </div>
 
@@ -2456,18 +2482,31 @@ export function EditorPage() {
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
                   标题：{shellPreview.title || '数据推送'}
                 </div>
-                {shellPreview.before ? (
-                  <div
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      fontSize: 14,
-                      lineHeight: 1.6,
-                      marginBottom: 12,
-                      color: '#222',
-                    }}
-                  >
-                    {shellPreview.before}
-                  </div>
+                {!isEmptyRichHtml(shellPreview.before) ? (
+                  looksLikeHtml(shellPreview.before) ? (
+                    <div
+                      className="comp-rich-preview"
+                      style={{
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        marginBottom: 12,
+                        color: '#222',
+                      }}
+                      dangerouslySetInnerHTML={{ __html: shellPreview.before }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        marginBottom: 12,
+                        color: '#222',
+                      }}
+                    >
+                      {shellPreview.before}
+                    </div>
+                  )
                 ) : (
                   <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
                     （无图前文案）
@@ -2499,17 +2538,25 @@ export function EditorPage() {
                   </div>
                 )}
 
-                {shellPreview.after ? (
-                  <div
-                    style={{
-                      whiteSpace: 'pre-wrap',
-                      fontSize: 14,
-                      lineHeight: 1.6,
-                      color: '#222',
-                    }}
-                  >
-                    {shellPreview.after}
-                  </div>
+                {!isEmptyRichHtml(shellPreview.after) ? (
+                  looksLikeHtml(shellPreview.after) ? (
+                    <div
+                      className="comp-rich-preview"
+                      style={{ fontSize: 14, lineHeight: 1.6, color: '#222' }}
+                      dangerouslySetInnerHTML={{ __html: shellPreview.after }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        whiteSpace: 'pre-wrap',
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        color: '#222',
+                      }}
+                    >
+                      {shellPreview.after}
+                    </div>
+                  )
                 ) : (
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     （无图后文案）
@@ -2587,10 +2634,18 @@ export function EditorPage() {
                   marginBottom: 16,
                 }}
               >
-                {shellPreview.before ? (
-                  <div style={{ whiteSpace: 'pre-wrap', marginBottom: 12, lineHeight: 1.6 }}>
-                    {shellPreview.before}
-                  </div>
+                {!isEmptyRichHtml(shellPreview.before) ? (
+                  looksLikeHtml(shellPreview.before) ? (
+                    <div
+                      className="comp-rich-preview"
+                      style={{ marginBottom: 12, lineHeight: 1.6 }}
+                      dangerouslySetInnerHTML={{ __html: shellPreview.before }}
+                    />
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', marginBottom: 12, lineHeight: 1.6 }}>
+                      {shellPreview.before}
+                    </div>
+                  )
                 ) : null}
                 <RenderPreview
                   loading={finalLoading}
@@ -2604,10 +2659,18 @@ export function EditorPage() {
                   emptyHint="正在生成或清单为空"
                   minHeight={320}
                 />
-                {shellPreview.after ? (
-                  <div style={{ whiteSpace: 'pre-wrap', marginTop: 12, lineHeight: 1.6 }}>
-                    {shellPreview.after}
-                  </div>
+                {!isEmptyRichHtml(shellPreview.after) ? (
+                  looksLikeHtml(shellPreview.after) ? (
+                    <div
+                      className="comp-rich-preview"
+                      style={{ marginTop: 12, lineHeight: 1.6 }}
+                      dangerouslySetInnerHTML={{ __html: shellPreview.after }}
+                    />
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', marginTop: 12, lineHeight: 1.6 }}>
+                      {shellPreview.after}
+                    </div>
+                  )
                 ) : null}
               </div>
 

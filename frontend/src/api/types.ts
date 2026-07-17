@@ -326,19 +326,27 @@ export interface ArtboardDoc {
   }
   datasets?: StudioDataset[]
   tree?: StudioNode
-  /** Push message shell: canvas image + optional markdown around it. */
+  /** Push message shell: canvas image + optional rich text around it. */
   compose?: {
     mode?: 'image_primary' | 'markdown_primary' | 'mixed' | 'image_only' | string
     /** @deprecated use include_component_md / text_before|after */
     markdown_caption?: boolean
     /** Auto-append markdown projected from component tree */
     include_component_md?: boolean
-    /** DingTalk markdown title */
+    /** DingTalk markdown title (plain text) */
     title?: string
-    /** Markdown above the canvas image (supports {{字段}}) */
+    /**
+     * Rich text above the canvas image (HTML from Quill; supports {{字段}}).
+     * Converted to DingTalk markdown on send.
+     */
     text_before?: string
-    /** Markdown below the canvas image (supports {{字段}}) */
+    /**
+     * Rich text below the canvas image (HTML from Quill; supports {{字段}}).
+     * Converted to DingTalk markdown on send.
+     */
     text_after?: string
+    /** Content format of text_before/after — default html when using rich editor */
+    text_format?: 'html' | 'markdown' | string
   }
 }
 

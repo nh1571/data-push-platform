@@ -1057,11 +1057,19 @@ def _main_query_result(data_ctx: dict[str, QueryResult]) -> QueryResult | None:
 
 
 def _resolve_compose_text(template: Any, data_ctx: dict[str, QueryResult]) -> str:
-    """Resolve push-shell markdown templates with first-row {{字段}}."""
+    """Resolve push-shell rich text / markdown with first-row {{字段}}.
+
+    Editors store HTML (Quill); outbound DingTalk text is converted to
+    DingTalk-friendly markdown (bold/headers/lists/font color).
+    """
+    from app.modules.studio.html_md import is_empty_rich_text, rich_to_push_text
+
     raw = str(template or "")
-    if not raw.strip():
+    if not raw.strip() or is_empty_rich_text(raw):
         return ""
-    return substitute_first_row(raw, _main_query_result(data_ctx)).strip()
+    # Substitute fields first so tokens inside HTML / markdown are filled
+    resolved = substitute_first_row(raw, _main_query_result(data_ctx))
+    return rich_to_push_text(resolved)
 
 
 def _compose_include_component_md(compose: dict[str, Any], *, has_shell_text: bool) -> bool:
