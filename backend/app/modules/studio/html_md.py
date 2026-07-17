@@ -1,4 +1,4 @@
-"""Convert rich-text HTML (Quill) to DingTalk-friendly Markdown."""
+"""将富文本 HTML（Quill）转为钉钉友好 Markdown。"""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ _EMPTY_RE = re.compile(r"^(?:\s|&nbsp;|<p><br\s*/?></p>|<p>\s*</p>|<br\s*/?>)*$"
 
 
 def looks_like_html(text: str) -> bool:
+    """粗判文本是否含 HTML 标签。"""
     if not text or not text.strip():
         return False
     return bool(_TAG_RE.search(text))
 
 
 def is_empty_rich_text(text: str) -> bool:
+    """富文本是否实质为空（仅空白/空段落）。"""
     if not text or not str(text).strip():
         return True
     plain = re.sub(r"<[^>]+>", "", str(text))
@@ -26,10 +28,10 @@ def is_empty_rich_text(text: str) -> bool:
 
 
 def html_to_dingtalk_md(html: str) -> str:
-    """Map common Quill HTML to DingTalk markdown (+ font color).
+    """映射常见 Quill HTML 为钉钉 Markdown（含字体颜色）。
 
-    DingTalk markdown supports headers, bold, italic, lists, links, and
-    ``<font color=#RRGGBB>text</font>`` color tags.
+    钉钉支持标题、加粗、斜体、列表、链接，以及
+    ``<font color=#RRGGBB>text</font>`` 色标。
     """
     raw = str(html or "").strip()
     if not raw or is_empty_rich_text(raw):
@@ -42,18 +44,18 @@ def html_to_dingtalk_md(html: str) -> str:
         parser.feed(raw)
         parser.close()
     except Exception:
-        # Fallback: strip tags
+        # 回退：剥标签
         plain = re.sub(r"<[^>]+>", "", raw)
         return _unescape(plain).strip()
 
     text = parser.get_text()
-    # Collapse excess blank lines
+    # 合并多余空行
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def rich_to_push_text(content: Any) -> str:
-    """Normalize shell field for outbound message parts."""
+    """归一化推送外壳字段，供出站 Message part 使用。"""
     raw = str(content or "").strip()
     if not raw or is_empty_rich_text(raw):
         return ""
@@ -63,6 +65,7 @@ def rich_to_push_text(content: Any) -> str:
 
 
 def _unescape(s: str) -> str:
+    """还原常见 HTML 实体。"""
     return (
         s.replace("&nbsp;", " ")
         .replace("&lt;", "<")
@@ -74,6 +77,7 @@ def _unescape(s: str) -> str:
 
 
 def _parse_style_color(style: str) -> str | None:
+    """从 style 属性提取 color 值。"""
     if not style:
         return None
     m = re.search(r"color\s*:\s*([^;]+)", style, re.I)
@@ -91,6 +95,8 @@ def _parse_style_color(style: str) -> str | None:
 
 
 class _DingMdParser(HTMLParser):
+    """将 Quill HTML 流式转为钉钉 Markdown 文本。"""
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._chunks: list[str] = []

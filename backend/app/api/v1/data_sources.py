@@ -1,4 +1,4 @@
-"""DataSource CRUD + connection test endpoints (auth via router dependencies)."""
+"""数据源 CRUD 与连通性测试端点（鉴权由路由 dependencies 注入）。"""
 
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ router = APIRouter()
 
 
 def _to_out(row: DataSource) -> DataSourceOut:
+    """DataSource ORM → 脱敏后的 DataSourceOut。"""
     plain = decrypt_dict(row.config_enc)
     return DataSourceOut(
         id=row.id,
@@ -37,6 +38,7 @@ def _to_out(row: DataSource) -> DataSourceOut:
 
 
 def _get_or_404(db: Session, source_id: UUID) -> DataSource:
+    """按 id 取数据源，不存在 404。"""
     row = db.get(DataSource, source_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="data source not found")
@@ -45,6 +47,7 @@ def _get_or_404(db: Session, source_id: UUID) -> DataSource:
 
 @router.get("", response_model=list[DataSourceOut])
 def list_data_sources(db: Session = Depends(get_db)) -> list[DataSourceOut]:
+    """列出全部数据源。"""
     rows = db.scalars(select(DataSource).order_by(DataSource.created_at.desc())).all()
     return [_to_out(r) for r in rows]
 
@@ -54,6 +57,7 @@ def create_data_source(
     body: DataSourceCreate,
     db: Session = Depends(get_db),
 ) -> DataSourceOut:
+    """创建数据源（config 加密存储）。"""
     row = DataSource(
         name=body.name,
         type=body.type,
@@ -67,6 +71,7 @@ def create_data_source(
 
 @router.get("/{source_id}", response_model=DataSourceOut)
 def get_data_source(source_id: UUID, db: Session = Depends(get_db)) -> DataSourceOut:
+    """获取单个数据源。"""
     return _to_out(_get_or_404(db, source_id))
 
 
@@ -76,6 +81,7 @@ def update_data_source(
     body: DataSourceUpdate,
     db: Session = Depends(get_db),
 ) -> DataSourceOut:
+    """更新数据源名称/类型/配置。"""
     row = _get_or_404(db, source_id)
     data = body.model_dump(exclude_unset=True)
     if "name" in data:
@@ -92,6 +98,7 @@ def update_data_source(
 
 @router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_data_source(source_id: UUID, db: Session = Depends(get_db)) -> None:
+    """删除数据源。"""
     row = _get_or_404(db, source_id)
     db.delete(row)
     db.commit()
@@ -99,7 +106,7 @@ def delete_data_source(source_id: UUID, db: Session = Depends(get_db)) -> None:
 
 @router.post("/{source_id}/test", response_model=TestConnectionResult)
 def test_data_source(source_id: UUID, db: Session = Depends(get_db)) -> TestConnectionResult:
-    """Decrypt config, validate via plugin, run ``SELECT 1``."""
+    """解密配置、插件校验，并执行 ``SELECT 1`` 探活。"""
     row = _get_or_404(db, source_id)
     try:
         plugin = plugin_registry.get("datasource", row.type)

@@ -1,6 +1,6 @@
-"""Cron tick: fire schedule-enabled push jobs whose cron matches the current minute.
+"""Cron 滴答：触发 schedule_enabled 且 cron 命中当前分钟的推送任务。
 
-Double-fire protection uses ``PushJob.last_schedule_slot`` (UTC minute string).
+防双触发：写入 ``PushJob.last_schedule_slot``（UTC 分钟串，如 2024-01-01T12:00）。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def slot_for(when: datetime) -> str:
-    """Return the UTC minute slot key for *when* (e.g. ``2024-01-01T12:00``)."""
+    """返回 *when* 的 UTC 分钟槽键（如 ``2024-01-01T12:00``）。"""
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     else:
@@ -32,7 +32,7 @@ def slot_for(when: datetime) -> str:
 
 
 def _cron_matches(expr: str, when: datetime) -> bool:
-    """True if *expr* (5-field cron) fires at the minute of *when*."""
+    """*expr*（5 段 cron）是否在 *when* 所在分钟触发。"""
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     else:
@@ -46,10 +46,9 @@ def _cron_matches(expr: str, when: datetime) -> bool:
 
 
 def _fire_job(db: Session, job: PushJob, *, slot: str, now: datetime) -> UUID | None:
-    """Create a scheduled JobRun for *job* and execute/enqueue it.
+    """为 *job* 创建 scheduled JobRun 并同步执行或入队。
 
-    Updates ``last_schedule_slot`` before execution so a second tick in the
-    same minute will not re-fire even if the pipeline is slow.
+    执行前先写 ``last_schedule_slot``，即使管线较慢，同分钟二次 tick 也不会重触。
     """
     job.last_schedule_slot = slot
     run = JobRun(
@@ -86,19 +85,19 @@ def tick(
     *,
     now: datetime | None = None,
 ) -> list[UUID]:
-    """Scan schedule-enabled jobs and fire those matching the current minute.
+    """扫描开启调度的任务，触发 cron 命中当前分钟者。
 
     Parameters
     ----------
     db:
-        SQLAlchemy session.
+        SQLAlchemy 会话。
     now:
-        Clock override for tests; defaults to UTC now.
+        可注入时钟（测试）；默认 UTC 当前时间。
 
     Returns
     -------
     list[UUID]
-        Ids of JobRun rows created during this tick.
+        本轮创建的 JobRun id 列表。
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -124,7 +123,7 @@ def tick(
         if not _cron_matches(cron_expr, now):
             continue
 
-        # Optionally skip disabled jobs (schedule_enabled alone is not enough).
+        # 仅 schedule_enabled 不够：enabled=false 的任务仍跳过
         if not job.enabled:
             logger.debug("skip disabled job_id=%s despite schedule_enabled", job.id)
             continue
@@ -141,7 +140,7 @@ def tick(
 
 
 def tick_summary(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
-    """Convenience wrapper returning a small status dict (for logging/CLI)."""
+    """便捷包装：返回简要状态 dict（供日志/CLI）。"""
     run_ids = tick(db, now=now)
     return {
         "fired": len(run_ids),

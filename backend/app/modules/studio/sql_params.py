@@ -1,12 +1,19 @@
-"""SQL parameter resolution for datasets.
+"""SQL 数据集参数解析。
 
-SQL may contain ``{{name}}`` placeholders (already supported by datasource plugins).
-This module produces the *values* dict, including:
+架构意图
+--------
+数据源插件支持 SQL 中的 ``{{name}}`` 占位符替换；**本模块只负责生成 values 字典**，
+不改写 SQL 字符串本身（返回的 sql 原样交给插件）。
 
-- **Built-in auto params** always available: today / yesterday / now / …
-- **Dataset-defined params**: auto | static | runtime (override)
+参数来源（优先级由低到高）::
 
-Each push / preview re-resolves auto values so times stay fresh.
+    内置 auto（today/yesterday/…）
+      ← 数据集 param_defs（auto | static | runtime）
+        ← 请求 overrides / 数据集 param_values
+
+每次预览与正式推送都会重新解析 auto 日期，保证「昨天」等语义始终相对当前时刻。
+
+时区默认 ``Asia/Shanghai``，符合国内院区/业务日切习惯；``biz_date`` 默认等同 yesterday。
 """
 
 from __future__ import annotations
@@ -16,12 +23,13 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+# 仅匹配 {{word}}，与数据源插件占位符约定一致
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
-# Default timezone for business calendars in CN enterprises
+# 国内企业业务日历默认时区
 _DEFAULT_TZ = "Asia/Shanghai"
 
-# Built-in names always injected unless overridden
+# 内置参数名 → auto kind；未在 resolved 中时自动注入
 BUILTIN_AUTO: dict[str, str] = {
     "today": "today",
     "yesterday": "yesterday",
@@ -38,7 +46,7 @@ BUILTIN_AUTO: dict[str, str] = {
 
 
 def list_auto_kinds() -> list[dict[str, str]]:
-    """UI catalog for auto parameter kinds."""
+    """前端「自动参数」下拉目录（id / 中文 label / 示例值）。"""
     return [
         {"id": "today", "label": "今天", "example": "2026-07-17"},
         {"id": "yesterday", "label": "昨天", "example": "2026-07-16"},
@@ -54,6 +62,7 @@ def list_auto_kinds() -> list[dict[str, str]]:
 
 
 def _tz(name: str | None) -> ZoneInfo:
+    """解析时区；非法名称回退 Asia/Shanghai。"""
     try:
         return ZoneInfo(name or _DEFAULT_TZ)
     except Exception:
@@ -61,6 +70,7 @@ def _tz(name: str | None) -> ZoneInfo:
 
 
 def _month_end(d: date) -> date:
+    """返回 ``d`` 所在自然月的最后一天。"""
     if d.month == 12:
         return date(d.year, 12, 31)
     return date(d.year, d.month + 1, 1) - timedelta(days=1)
@@ -73,7 +83,17 @@ def resolve_auto_kind(
     tz_name: str | None = None,
     now: datetime | None = None,
 ) -> str:
-    """Resolve a single auto kind to string."""
+    """将单个 auto kind 解析为格式化字符串。
+
+    Parameters
+    ----------
+    kind:
+        today / yesterday / biz_date / now / 本月起止 / 上月起止 / 近 N 天起点等。
+    fmt:
+        strftime 格式；日期默认 ``%Y-%m-%d``，now 默认带时分秒。
+    now:
+        可注入时钟（单测 / 回放）；默认当前时区时间。
+    """
     tz = _tz(tz_name)
     now = now or datetime.now(tz)
     if now.tzinfo is None:
@@ -109,12 +129,12 @@ def resolve_auto_kind(
         return (today - timedelta(days=6)).strftime(date_fmt)
     if kind == "last_30_days_start":
         return (today - timedelta(days=29)).strftime(date_fmt)
-    # unknown kind — empty
+    # 未知 kind → 空串，避免注入脏值
     return ""
 
 
 def extract_placeholders(sql: str) -> list[str]:
-    """Ordered unique ``{{name}}`` keys in SQL."""
+    """按出现顺序提取 SQL 中唯一的 ``{{name}}`` 键。"""
     seen: list[str] = []
     for m in _PLACEHOLDER_RE.finditer(sql or ""):
         name = m.group(1)
@@ -130,7 +150,13 @@ def resolve_param_defs(
     tz_name: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, str]:
-    """Resolve dataset param definitions + overrides to string map."""
+    """根据数据集参数定义 + overrides 生成字符串参数表。
+
+    单条 def 字段约定::
+
+        name, source|type: auto|static|runtime,
+        auto|auto_kind, format, value, default
+    """
     out: dict[str, str] = {}
     overrides = dict(overrides or {})
 
@@ -150,7 +176,7 @@ def resolve_param_defs(
             kind = str(p.get("auto") or p.get("auto_kind") or "yesterday")
             out[name] = resolve_auto_kind(kind, fmt=fmt_s, tz_name=tz_name, now=now)
         elif source == "runtime":
-            # default when no override
+            # 无 override 时用 default（可为空，提示运行时必填）
             default = p.get("default")
             out[name] = "" if default is None else str(default)
         else:
@@ -160,7 +186,7 @@ def resolve_param_defs(
                 val = p.get("default")
             out[name] = "" if val is None else str(val)
 
-    # explicit overrides always win
+    # 显式 overrides 最终覆盖（含 def 中未声明的键）
     for k, v in overrides.items():
         if v is not None and str(v) != "":
             out[str(k)] = str(v)
@@ -176,10 +202,10 @@ def resolve_sql_params(
     tz_name: str | None = None,
     now: datetime | None = None,
 ) -> tuple[str, dict[str, str]]:
-    """Return (sql_unchanged_for_plugin, resolved_params_dict).
+    """返回 ``(原样 sql, 已解析参数字典)``。
 
-    The datasource plugin performs the actual ``{{name}}`` substitution;
-    this only builds the values map. Built-ins fill any missing keys used in SQL.
+    真正的 ``{{name}}`` 替换由数据源插件完成；本函数只构建 values。
+    ``inject_builtins=True`` 时为缺失的内置名补全 auto 值。
     """
     resolved = resolve_param_defs(
         param_defs, overrides=overrides, tz_name=tz_name, now=now
@@ -188,7 +214,7 @@ def resolve_sql_params(
     if inject_builtins:
         for name, kind in BUILTIN_AUTO.items():
             if name not in resolved:
-                # prefer matching def format if any
+                # 若 def 里声明了同名 format，沿用
                 fmt = None
                 for p in param_defs or []:
                     if isinstance(p, dict) and str(p.get("name")) == name:
@@ -208,7 +234,7 @@ def preview_resolved_params(
     tz_name: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """For UI: show placeholders + resolved values without running SQL."""
+    """UI 预览：展示占位符与解析结果，不执行 SQL。"""
     _, resolved = resolve_sql_params(
         sql, param_defs=param_defs, overrides=overrides, tz_name=tz_name, now=now
     )

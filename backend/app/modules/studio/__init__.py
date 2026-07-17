@@ -1,4 +1,7 @@
-"""Studio: component artboard content designer (core content pipeline)."""
+"""Studio 画板：组件化内容设计与编译（核心内容管线）。
+
+re-export 编译入口、默认模板与 design→artboard 迁移工具。
+"""
 
 from app.modules.studio.compile import compile_artboard, artboard_to_message
 from app.modules.studio.defaults import (

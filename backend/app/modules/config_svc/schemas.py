@@ -1,4 +1,4 @@
-"""Pydantic v2 schemas for DataSource / Channel / PushJob config APIs."""
+"""DataSource / Channel / PushJob 配置类 API 的 Pydantic v2 schema。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TestConnectionResult(BaseModel):
-    """Outcome of a /test connection or channel validation call."""
+    """数据源/渠道 ``/test`` 连通性或配置校验结果。"""
 
     ok: bool
     message: str | None = None
@@ -28,18 +28,21 @@ class TestConnectionResult(BaseModel):
 
 
 class DataSourceCreate(BaseModel):
+    """创建数据源请求体。"""
     name: str = Field(..., min_length=1, max_length=128)
     type: str = Field(..., min_length=1, max_length=64)
     config: dict[str, Any]
 
 
 class DataSourceUpdate(BaseModel):
+    """更新数据源（部分字段可选）。"""
     name: str | None = Field(default=None, min_length=1, max_length=128)
     type: str | None = Field(default=None, min_length=1, max_length=64)
     config: dict[str, Any] | None = None
 
 
 class DataSourceOut(BaseModel):
+    """数据源响应（config 已脱敏）。"""
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -56,18 +59,21 @@ class DataSourceOut(BaseModel):
 
 
 class ChannelCreate(BaseModel):
+    """创建渠道请求体。"""
     name: str = Field(..., min_length=1, max_length=128)
     type: str = Field(..., min_length=1, max_length=64)
     config: dict[str, Any]
 
 
 class ChannelUpdate(BaseModel):
+    """更新渠道（部分字段可选）。"""
     name: str | None = Field(default=None, min_length=1, max_length=128)
     type: str | None = Field(default=None, min_length=1, max_length=64)
     config: dict[str, Any] | None = None
 
 
 class ChannelOut(BaseModel):
+    """渠道响应（config 已脱敏）。"""
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -84,6 +90,7 @@ class ChannelOut(BaseModel):
 
 
 class PushJobCreate(BaseModel):
+    """完整创建推送任务请求体。"""
     name: str = Field(..., min_length=1, max_length=128)
     enabled: bool = True
     skip_if_empty: bool = False
@@ -96,7 +103,7 @@ class PushJobCreate(BaseModel):
 
 
 class PushJobDraftCreate(BaseModel):
-    """Minimal payload for creating a draft job (then open in content editor)."""
+    """创建草稿任务的最小载荷（随后在内容编辑器中完善）。"""
 
     name: str = Field(..., min_length=1, max_length=128)
     data_source_id: UUID
@@ -104,6 +111,7 @@ class PushJobDraftCreate(BaseModel):
 
 
 class PushJobUpdate(BaseModel):
+    """更新推送任务（部分字段可选）。"""
     name: str | None = Field(default=None, min_length=1, max_length=128)
     enabled: bool | None = None
     skip_if_empty: bool | None = None
@@ -116,6 +124,7 @@ class PushJobUpdate(BaseModel):
 
 
 class PushJobOut(BaseModel):
+    """推送任务响应；列表可附带最近一次运行摘要。"""
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID

@@ -1,7 +1,7 @@
-"""Chart rendering with Apache ECharts (mainstream BI stack).
+"""基于 Apache ECharts 的图表渲染（主流 BI 技术栈）。
 
-Preview is done client-side (instant). Server only builds ECharts option JSON
-+ HTML for Playwright screenshot when producing final push images.
+前端预览即时完成；服务端仅在最终推送出图时构建 option JSON + HTML，
+再经 Playwright 截图嵌入画板。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def _prepare(
     values: list[float],
     props: dict[str, Any],
 ) -> tuple[list[str], list[float]]:
-    """Sort / top-n like frontend chartOption.prepareAxisData (single series)."""
+    """排序 / top-n，对齐前端 chartOption.prepareAxisData（单系列）。"""
     pairs = list(zip(labels, values, strict=False))
     sort = str(props.get("sort") or "none")
     if sort == "asc":
@@ -55,7 +55,7 @@ def build_echarts_option(
     *,
     multi_series: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build ECharts option dict (aligned with frontend chartOption.ts)."""
+    """构建 ECharts option 字典（与前端 chartOption.ts 对齐）。"""
     props = dict(props or {})
     labels, values = _prepare(labels, values, props)
     ct = str(props.get("chart_type") or "bar").lower()
@@ -189,7 +189,7 @@ def build_echarts_option(
     return option
 
 
-# ECharts 5 min — loaded from CDN for final screenshot pages
+# ECharts 5 精简版 — 最终截图页从 CDN 加载
 _ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"
 
 
@@ -199,7 +199,7 @@ def build_echarts_html(
     width_px: int = 680,
     height_px: int = 360,
 ) -> str:
-    """Full HTML page with ECharts for Playwright screenshot (#artboard)."""
+    """含 ECharts 的完整 HTML 页，供 Playwright 截 ``#artboard``。"""
     opt_json = json.dumps(option, ensure_ascii=False)
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"/>
@@ -222,11 +222,11 @@ def chart_to_png_data_url(
     values: list[float],
     props: dict[str, Any],
 ) -> tuple[str | None, str | None]:
-    """Server-side PNG for push pipeline. Returns (data_url, error)."""
+    """服务端图表 PNG（推送管线）。返回 (data_url, error)。"""
     if not labels or not values:
         return None, "图表无有效数据"
 
-    # multi-series from props.value_series: [{name, values}]
+    # 多系列：props.value_series = [{name, values}, ...]
     multi = props.get("value_series")
     option = build_echarts_option(
         labels,
@@ -251,6 +251,7 @@ def chart_to_png_data_url(
 def _html_to_png_chart(
     html_doc: str, width: int = 680, height: int = 360
 ) -> tuple[bytes | None, str | None]:
+    """Playwright 截图图表 HTML，返回 (png_bytes, storage_path)。"""
     import tempfile
     from pathlib import Path
 
@@ -284,6 +285,7 @@ def _html_to_png_chart(
 
 
 def chart_img_html(data_url: str, title: str = "") -> str:
+    """将图表 data URL 包成画板内嵌 ``<img>`` HTML 片段。"""
     import html as html_lib
 
     title_html = (

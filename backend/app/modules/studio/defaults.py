@@ -1,4 +1,4 @@
-"""Official artboard templates."""
+"""官方画板模板工厂：空白 / 日报 / 告警等 artboard v3 文档。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ from uuid import uuid4
 
 
 def _nid() -> str:
+    """生成短节点 id（uuid hex 前 12 位）。"""
     return uuid4().hex[:12]
 
 
 def empty_artboard(*, width: int = 750, theme_color: str = "#1677ff") -> dict[str, Any]:
-    """Blank flow artboard with empty root container."""
+    """空白流式画板：空根容器 + 默认 compose（图优先）。"""
     return {
         "version": 3,
         "kind": "artboard",
@@ -50,7 +51,7 @@ def empty_artboard(*, width: int = 750, theme_color: str = "#1677ff") -> dict[st
 
 
 def default_daily_artboard(*, theme_color: str = "#1677ff") -> dict[str, Any]:
-    """Daily report template: title + KPI row + table + footer."""
+    """日报模板：标题 + KPI 行 + 表 + 页脚（可含趋势数据集槽）。"""
     t1, k1, k2, tb, f1, row = _nid(), _nid(), _nid(), _nid(), _nid(), _nid()
     return {
         "version": 3,
@@ -194,7 +195,7 @@ def default_daily_artboard(*, theme_color: str = "#1677ff") -> dict[str, Any]:
 
 
 def default_alert_artboard(*, theme_color: str = "#ff4d4f") -> dict[str, Any]:
-    """Alert-style template with banner + table."""
+    """告警场景模板：告警条 + 异常表。"""
     return {
         "version": 3,
         "kind": "artboard",

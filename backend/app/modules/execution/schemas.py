@@ -1,4 +1,4 @@
-"""Pydantic schemas for job execution APIs."""
+"""任务执行相关 API 的 Pydantic schema（触发运行、JobRun 详情等）。"""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PushJobRunRequest(BaseModel):
-    """Body for ``POST /api/v1/push-jobs/{id}/run``."""
+    """``POST /api/v1/push-jobs/{id}/run`` 请求体。"""
 
     params: dict[str, Any] | None = None
     trigger_type: str = Field(default="manual", min_length=1, max_length=32)
 
 
 class JobRunOut(BaseModel):
-    """Minimal job-run representation for run + get endpoints."""
+    """JobRun 列表/触发接口的精简表示。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,7 +36,7 @@ class JobRunOut(BaseModel):
 
 
 class DeliveryOut(BaseModel):
-    """Per-channel delivery attempt within a job run."""
+    """单次 JobRun 内对某一渠道的投递记录。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,7 +51,7 @@ class DeliveryOut(BaseModel):
 
 
 class JobRunLogOut(BaseModel):
-    """Structured log line for a job run."""
+    """JobRun 结构化日志行。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,7 +64,7 @@ class JobRunLogOut(BaseModel):
 
 
 class JobRunDetailOut(JobRunOut):
-    """Job run with nested deliveries and logs (detail endpoint)."""
+    """详情接口：JobRun + 嵌套 deliveries / logs。"""
 
     deliveries: list[DeliveryOut] = Field(default_factory=list)
     logs: list[JobRunLogOut] = Field(default_factory=list)

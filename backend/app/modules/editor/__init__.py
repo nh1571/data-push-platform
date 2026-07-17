@@ -1,4 +1,7 @@
-"""Editor module: design → message, preview APIs, save job."""
+"""编辑器模块：轻量 design → Message、预览 API、保存任务。
+
+对外 re-export design 层核心函数；HTTP 路由在 ``app.api.v1.editor``。
+"""
 
 from __future__ import annotations
 
