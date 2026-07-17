@@ -32,7 +32,14 @@ import {
   message,
 } from 'antd'
 import type { Color } from 'antd/es/color-picker'
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+} from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   createStudioTemplate,
@@ -58,6 +65,7 @@ import {
   emptyArtboard,
   ensureSecondaryDataset,
   extractArtboardFromJob,
+  fieldDropSlots,
   findNode,
   flattenOutline,
   moveNodeTo,
@@ -70,6 +78,7 @@ import {
   THEME_PACKS,
   updateNode,
   upsertDataset,
+  type FieldBindRole,
 } from './studioUtils'
 
 function colorToHex(color: Color | string): string {
@@ -109,6 +118,8 @@ export function EditorPage() {
 
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<unknown[][]>([])
+  /** FanRuan-style: fields cached per dataset id after 取数 */
+  const [fieldsByDataset, setFieldsByDataset] = useState<Record<string, string[]>>({})
   const [activeDatasetId, setActiveDatasetId] = useState('main')
   const [markdownText, setMarkdownText] = useState('')
   const [imageBase64, setImageBase64] = useState('')
@@ -123,6 +134,11 @@ export function EditorPage() {
   const [tplLoading, setTplLoading] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropHint, setDropHint] = useState<string | null>(null)
+  /** Currently dragging a data field (帆软字段拖拽) */
+  const [fieldDrag, setFieldDrag] = useState<{
+    column: string
+    datasetId: string
+  } | null>(null)
 
   const tree = artboard.tree
   const outline = useMemo(() => (tree ? flattenOutline(tree) : []), [tree])
@@ -234,6 +250,7 @@ export function EditorPage() {
       })
       setPreviewColumns(res.columns)
       setPreviewRows(res.rows)
+      setFieldsByDataset((prev) => ({ ...prev, [slot]: res.columns }))
       if (slot === 'main') {
         setArtboard((prev) => syncMainDataset(prev, dataSourceId, sql))
       } else {
@@ -246,27 +263,7 @@ export function EditorPage() {
           }),
         )
       }
-      if (tree && res.columns.length) {
-        const walk = (n: StudioNode): StudioNode => {
-          if (n.type === 'Chart' && String(n.binding?.dataset_id || 'main') === slot) {
-            const b = { ...n.binding }
-            let changed = false
-            if (!b.category_column) {
-              b.category_column = res.columns[0]
-              changed = true
-            }
-            if (!b.value_column) {
-              b.value_column =
-                res.columns.length > 1 ? res.columns[1]! : res.columns[0]!
-              changed = true
-            }
-            if (changed) return { ...n, binding: b, children: n.children?.map(walk) }
-          }
-          return { ...n, children: n.children?.map(walk) }
-        }
-        setTree(walk(tree))
-      }
-      message.success(`[${slot}] 取数 ${res.row_count} 行`)
+      message.success(`[${slot}] 取数 ${res.row_count} 行 · 请把左侧/右侧字段拖到组件槽位`)
     } catch (err) {
       message.error(getErrorMessage(err))
     } finally {
@@ -474,6 +471,47 @@ export function EditorPage() {
 
   const onDragStartNode = (id: string) => {
     setDragId(id)
+    setFieldDrag(null)
+  }
+
+  const onFieldDragStart = (column: string, datasetId: string, e: DragEvent) => {
+    setFieldDrag({ column, datasetId })
+    setDragId(null)
+    e.dataTransfer.effectAllowed = 'copy'
+    e.dataTransfer.setData(
+      'application/x-studio-field',
+      JSON.stringify({ column, datasetId }),
+    )
+    e.dataTransfer.setData('text/plain', column)
+  }
+
+  const applyFieldToNode = (
+    nodeId: string,
+    column: string,
+    datasetId: string,
+    role: FieldBindRole = 'auto',
+  ) => {
+    if (!tree) return
+    const node = findNode(tree, nodeId)
+    if (!node) return
+    const patch = applyColumnToNode(node, column, role, datasetId)
+    if (!Object.keys(patch).length) {
+      message.info('此组件不接收字段绑定')
+      return
+    }
+    setTree(updateNode(tree, nodeId, patch))
+    setSelectedId(nodeId)
+    const roleLabel =
+      role === 'category'
+        ? '分类'
+        : role === 'value'
+          ? '数值'
+          : role === 'text'
+            ? '文案'
+            : role === 'dataset'
+              ? '数据集'
+              : '自动'
+    message.success(`已绑定 ${datasetId}.${column} → ${node.type}（${roleLabel}）`)
   }
 
   const onDropOnNode = (targetId: string, asChild: boolean) => {
@@ -599,8 +637,12 @@ export function EditorPage() {
         type="info"
         showIcon
         banner
-        message="数据怎么上模板：① 选数据源写 SQL → 取数 ② 点选组件 → 在「属性」绑列（或点右侧列名芯片）③ 编译预览"
-        description="Text 用 {{列名}}；KPI 绑一个数值列（第一行）；表自动用整表；图需「分类列 + 数值列」。"
+        message="帆软式绑定：① 取数 ② 从「字段」拖字段到组件槽位（分类/数值/文案）③ 编译预览"
+        description={
+          fieldDrag
+            ? `正在拖字段：${fieldDrag.datasetId}.${fieldDrag.column} — 松手放到高亮槽位`
+            : '图表有两个槽：分类、数值；KPI 拖数值；文本拖入插入 {{列}}。也可点击字段绑定到当前选中组件。'
+        }
       />
 
       {/* Three columns */}
@@ -631,6 +673,58 @@ export function EditorPage() {
               </Button>
             ))}
           </div>
+
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            数据集字段（拖到画板组件）
+          </Typography.Text>
+          <div style={{ margin: '6px 0 4px' }}>
+            <Select
+              size="small"
+              style={{ width: '100%' }}
+              value={activeDatasetId}
+              onChange={setActiveDatasetId}
+              options={datasetOptions}
+            />
+          </div>
+          <div
+            style={{
+              marginBottom: 12,
+              minHeight: 48,
+              padding: 6,
+              background: fieldDrag ? '#e6f4ff' : '#fff',
+              border: '1px solid #f0f0f0',
+              borderRadius: 6,
+            }}
+          >
+            {(fieldsByDataset[activeDatasetId] || previewColumns).length === 0 ? (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                先在右侧「数据」取数，字段会出现在这里
+              </Typography.Text>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {(fieldsByDataset[activeDatasetId] || previewColumns).map((c) => (
+                  <Tag
+                    key={c}
+                    draggable
+                    color={fieldDrag?.column === c ? 'blue' : 'default'}
+                    style={{ cursor: 'grab', userSelect: 'none', marginBottom: 2 }}
+                    onDragStart={(e) => onFieldDragStart(c, activeDatasetId, e)}
+                    onDragEnd={() => setFieldDrag(null)}
+                    onClick={() => {
+                      if (selectedId && selected) {
+                        applyFieldToNode(selectedId, c, activeDatasetId, 'auto')
+                      } else {
+                        message.info('先选中组件，或把字段拖到组件槽位')
+                      }
+                    }}
+                  >
+                    ≡ {c}
+                  </Tag>
+                ))}
+              </div>
+            )}
+          </div>
+
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             画板结构（拖动手柄排序 / 拖到容器上移入）
           </Typography.Text>
@@ -759,6 +853,13 @@ export function EditorPage() {
                   node={node}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  fieldDragActive={!!fieldDrag}
+                  onFieldDrop={(nodeId, role) => {
+                    const fd = fieldDrag
+                    if (!fd) return
+                    applyFieldToNode(nodeId, fd.column, fd.datasetId, role)
+                    setFieldDrag(null)
+                  }}
                 />
               ))
             )}
@@ -935,37 +1036,32 @@ export function EditorPage() {
                       <>
                         <div>
                           <Typography.Text type="secondary">
-                            结果列（点击绑定到当前组件）
+                            字段（拖到画板槽位 / 点选绑当前组件）
                           </Typography.Text>
                           <div style={{ marginTop: 6 }}>
                             {previewColumns.map((c) => (
                               <Tag
                                 key={c}
+                                draggable
                                 color="processing"
-                                style={{ cursor: 'pointer', marginBottom: 4 }}
+                                style={{ cursor: 'grab', marginBottom: 4, userSelect: 'none' }}
+                                onDragStart={(e) => onFieldDragStart(c, activeDatasetId, e)}
+                                onDragEnd={() => setFieldDrag(null)}
                                 onClick={() => {
-                                  if (!selected || !tree || !selectedId) {
-                                    message.info('请先选中组件')
+                                  if (!selectedId) {
+                                    message.info('先选中组件，或把字段拖到槽位')
                                     return
                                   }
-                                  const patch = applyColumnToNode(selected, c, 'auto')
-                                  if (!Object.keys(patch).length) {
-                                    message.info('当前组件类型无需点列绑定（如表已自动用整表）')
-                                    return
-                                  }
-                                  setTree(updateNode(tree, selectedId, patch))
-                                  message.success(`已应用到列：${c}`)
+                                  applyFieldToNode(selectedId, c, activeDatasetId, 'auto')
                                 }}
                               >
-                                {c}
+                                ≡ {c}
                               </Tag>
                             ))}
                           </div>
-                          {selected?.type === 'Chart' ? (
-                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                              图表：第一次点列 → 分类；再点 → 数值。也可在「属性」里精确选择。
-                            </Typography.Text>
-                          ) : null}
+                          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                            图表请拖到「分类 / 数值」两个槽；KPI 拖数值；文本插入 {'{{列}}'}。
+                          </Typography.Text>
                         </div>
                         <Table
                           size="small"
@@ -1052,6 +1148,17 @@ export function EditorPage() {
                     node={selected}
                     columns={previewColumns}
                     datasetOptions={datasetOptions}
+                    fieldDragActive={!!fieldDrag}
+                    onFieldSlotDrop={(role) => {
+                      if (!fieldDrag || !selectedId) return
+                      applyFieldToNode(
+                        selectedId,
+                        fieldDrag.column,
+                        fieldDrag.datasetId,
+                        role,
+                      )
+                      setFieldDrag(null)
+                    }}
                     onChange={(patch) => setTree(updateNode(tree, selectedId, patch))}
                     onMove={(dir) => setTree(moveSibling(tree, selectedId, dir))}
                     onDuplicate={duplicateSelected}
@@ -1177,17 +1284,78 @@ export function EditorPage() {
   )
 }
 
+function FieldSlot({
+  label,
+  active,
+  bound,
+  onDrop,
+}: {
+  label: string
+  active: boolean
+  bound?: string
+  onDrop: () => void
+}) {
+  const [over, setOver] = useState(false)
+  return (
+    <div
+      onDragOver={(e) => {
+        if (!active) return
+        e.preventDefault()
+        e.stopPropagation()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setOver(false)
+        onDrop()
+      }}
+      style={{
+        flex: 1,
+        minHeight: 36,
+        marginTop: 6,
+        padding: '6px 8px',
+        borderRadius: 4,
+        border: over
+          ? '2px solid #1677ff'
+          : active
+            ? '1px dashed #69b1ff'
+            : '1px dashed #e8e8e8',
+        background: over ? '#bae0ff' : active ? '#f0f7ff' : '#fafafa',
+        fontSize: 11,
+        color: '#666',
+        textAlign: 'center',
+      }}
+    >
+      <div>{label}</div>
+      <div style={{ fontWeight: 600, color: bound && bound !== '？' ? '#1677ff' : '#bbb' }}>
+        {bound || '拖字段到此处'}
+      </div>
+    </div>
+  )
+}
+
 function ArtboardBlock({
   node,
   selectedId,
   onSelect,
+  fieldDragActive,
+  onFieldDrop,
 }: {
   node: StudioNode
   selectedId: string | null
   onSelect: (id: string) => void
+  fieldDragActive: boolean
+  onFieldDrop: (nodeId: string, role: FieldBindRole) => void
 }) {
   const selected = selectedId === node.id
-  const border = selected ? '2px solid #1677ff' : '1px dashed #d9d9d9'
+  const slots = fieldDropSlots(node)
+  const border = selected
+    ? '2px solid #1677ff'
+    : fieldDragActive && slots.length
+      ? '1px dashed #69b1ff'
+      : '1px dashed #d9d9d9'
   const style: CSSProperties = {
     border,
     borderRadius: 6,
@@ -1195,7 +1363,30 @@ function ArtboardBlock({
     marginBottom: 8,
     cursor: 'pointer',
     background: selected ? '#f0f7ff' : '#fff',
+    boxShadow: fieldDragActive && slots.length ? '0 0 0 2px rgba(22,119,255,0.12)' : undefined,
   }
+
+  const dropBody = fieldDragActive && slots.length > 0 && (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {slots.map((s) => (
+        <FieldSlot
+          key={s.role}
+          label={s.label}
+          active={fieldDragActive}
+          bound={
+            s.role === 'category'
+              ? String(node.binding?.category_column || '')
+              : s.role === 'value'
+                ? String(node.binding?.value_column || '')
+                : s.role === 'text'
+                  ? '文案'
+                  : String(node.binding?.dataset_id || '')
+          }
+          onDrop={() => onFieldDrop(node.id, s.role)}
+        />
+      ))}
+    </div>
+  )
 
   if (node.type === 'Container') {
     const row = String(node.props?.direction) === 'row'
@@ -1207,7 +1398,13 @@ function ArtboardBlock({
         <div style={{ display: 'flex', flexDirection: row ? 'row' : 'column', gap: 8, marginTop: 4 }}>
           {(node.children || []).map((ch) => (
             <div key={ch.id} style={{ flex: row ? 1 : undefined }}>
-              <ArtboardBlock node={ch} selectedId={selectedId} onSelect={onSelect} />
+              <ArtboardBlock
+                node={ch}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                fieldDragActive={fieldDragActive}
+                onFieldDrop={onFieldDrop}
+              />
             </div>
           ))}
         </div>
@@ -1226,6 +1423,7 @@ function ArtboardBlock({
         >
           {String(node.props?.text || '文本')}
         </Typography.Text>
+        {dropBody}
       </div>
     )
   }
@@ -1241,6 +1439,7 @@ function ArtboardBlock({
             {String(node.binding?.value_column || '—')}
           </div>
         </Card>
+        {dropBody}
       </div>
     )
   }
@@ -1248,7 +1447,9 @@ function ArtboardBlock({
   if (node.type === 'Table') {
     return (
       <div style={style} onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}>
-        <Typography.Text type="secondary">📊 数据表 · 自动用 SQL 全表</Typography.Text>
+        <Typography.Text type="secondary">
+          📊 数据表 · @{String(node.binding?.dataset_id || 'main')}
+        </Typography.Text>
         <div
           style={{
             marginTop: 6,
@@ -1259,6 +1460,7 @@ function ArtboardBlock({
             borderRadius: 4,
           }}
         />
+        {dropBody}
       </div>
     )
   }
@@ -1279,20 +1481,24 @@ function ArtboardBlock({
           @{ds} 分类=<Tag style={{ margin: 0 }}>{cat}</Tag> 数值=
           <Tag style={{ margin: 0 }}>{val}</Tag>
         </div>
-        <div
-          style={{
-            marginTop: 8,
-            height: 56,
-            borderRadius: 4,
-            background:
-              ct === 'pie'
-                ? 'conic-gradient(#1677ff 0 35%, #52c41a 0 60%, #faad14 0 80%, #ff4d4f 0)'
-                : ct === 'line'
-                  ? 'linear-gradient(180deg, transparent 40%, #e6f4ff 40%), linear-gradient(135deg, transparent 48%, #1677ff 48% 52%, transparent 52%)'
-                  : 'repeating-linear-gradient(90deg,#1677ff 0 18px,transparent 18px 28px)',
-            opacity: 0.85,
-          }}
-        />
+        {!fieldDragActive ? (
+          <div
+            style={{
+              marginTop: 8,
+              height: 56,
+              borderRadius: 4,
+              background:
+                ct === 'pie'
+                  ? 'conic-gradient(#1677ff 0 35%, #52c41a 0 60%, #faad14 0 80%, #ff4d4f 0)'
+                  : ct === 'line'
+                    ? 'linear-gradient(180deg, transparent 40%, #e6f4ff 40%), linear-gradient(135deg, transparent 48%, #1677ff 48% 52%, transparent 52%)'
+                    : 'repeating-linear-gradient(90deg,#1677ff 0 18px,transparent 18px 28px)',
+              opacity: 0.85,
+            }}
+          />
+        ) : (
+          dropBody
+        )}
       </div>
     )
   }
@@ -1313,6 +1519,7 @@ function ArtboardBlock({
         <Typography.Text style={{ color: '#a8071a', fontSize: 13 }}>
           ⚠ {String(node.props?.text || '告警')}
         </Typography.Text>
+        {dropBody}
       </div>
     )
   }
@@ -1336,6 +1543,8 @@ function ComponentProps({
   node,
   columns,
   datasetOptions,
+  fieldDragActive,
+  onFieldSlotDrop,
   onChange,
   onMove,
   onDuplicate,
@@ -1344,12 +1553,15 @@ function ComponentProps({
   node: StudioNode
   columns: string[]
   datasetOptions: { value: string; label: string }[]
+  fieldDragActive: boolean
+  onFieldSlotDrop: (role: FieldBindRole) => void
   onChange: (patch: Partial<StudioNode>) => void
   onMove: (dir: -1 | 1) => void
   onDuplicate: () => void
   onDelete: () => void
 }) {
   const visibleWhen = String(node.props?.visible_when || 'always')
+  const slots = fieldDropSlots(node)
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap>
@@ -1398,9 +1610,31 @@ function ComponentProps({
         type="success"
         showIcon
         style={{ fontSize: 12 }}
-        message="数据如何进入此组件"
+        message="帆软式：拖字段到下方槽位"
         description={bindingHint(node, columns)}
       />
+      {slots.length > 0 ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {slots.map((s) => (
+            <div key={s.role} style={{ flex: '1 1 120px' }}>
+              <FieldSlot
+                label={s.label}
+                active={fieldDragActive}
+                bound={
+                  s.role === 'category'
+                    ? String(node.binding?.category_column || '')
+                    : s.role === 'value'
+                      ? String(node.binding?.value_column || '')
+                      : s.role === 'text'
+                        ? String(node.props?.text || '').slice(0, 20)
+                        : String(node.binding?.dataset_id || '')
+                }
+                onDrop={() => onFieldSlotDrop(s.role)}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
       {['Text', 'Kpi', 'Table', 'Chart', 'Alert'].includes(String(node.type)) ? (
         <div>
           <Typography.Text type="secondary">绑定数据集</Typography.Text>

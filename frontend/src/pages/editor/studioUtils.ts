@@ -494,42 +494,80 @@ export function newComponent(type: string): StudioNode {
   }
 }
 
+export type FieldBindRole = 'category' | 'value' | 'text' | 'dataset' | 'auto'
+
+/** FanRuan-style: drag a field (column) from a dataset onto a component slot. */
 export function applyColumnToNode(
   node: StudioNode,
   column: string,
-  role?: 'category' | 'value' | 'auto',
+  role?: FieldBindRole,
+  datasetId?: string,
 ): Partial<StudioNode> {
   const t = String(node.type)
   const mode = role || 'auto'
+  const ds = datasetId || String(node.binding?.dataset_id || 'main')
+
   if (t === 'Text' || t === 'Alert') {
-    const key = t === 'Alert' ? 'text' : 'text'
-    const prev = String(node.props?.[key] || '')
+    if (mode === 'dataset') {
+      return { binding: { ...node.binding, dataset_id: ds } }
+    }
+    const prev = String(node.props?.text || '')
     const token = `{{${column}}}`
-    return { props: { ...node.props, [key]: prev ? `${prev} ${token}` : token } }
+    // text role or auto → insert placeholder
+    return {
+      props: { ...node.props, text: prev.includes(token) ? prev : prev ? `${prev} ${token}` : token },
+      binding: { ...node.binding, dataset_id: ds },
+    }
   }
   if (t === 'Kpi') {
     return {
       props: { ...node.props, label: column },
-      binding: { ...node.binding, value_column: column, label: column, dataset_id: node.binding?.dataset_id || 'main' },
+      binding: {
+        ...node.binding,
+        dataset_id: ds,
+        value_column: column,
+        label: column,
+      },
     }
   }
   if (t === 'Chart') {
     const b: Record<string, unknown> = {
       ...node.binding,
-      dataset_id: node.binding?.dataset_id || 'main',
+      dataset_id: ds,
     }
-    if (mode === 'category' || (mode === 'auto' && !b.category_column)) {
+    if (mode === 'category') {
       b.category_column = column
-    } else if (mode === 'value' || mode === 'auto') {
+    } else if (mode === 'value') {
+      b.value_column = column
+    } else if (mode === 'auto' && !b.category_column) {
+      b.category_column = column
+    } else {
       b.value_column = column
     }
     return { binding: b }
   }
   if (t === 'Table') {
-    return { binding: { ...node.binding, dataset_id: node.binding?.dataset_id || 'main' } }
+    return { binding: { ...node.binding, dataset_id: ds } }
   }
   return {}
 }
+
+/** Drop-zone labels shown while dragging a field (帆软式槽位). */
+export function fieldDropSlots(node: StudioNode): { role: FieldBindRole; label: string }[] {
+  const t = String(node.type)
+  if (t === 'Chart') {
+    return [
+      { role: 'category', label: '分类 / 横轴' },
+      { role: 'value', label: '数值 / 纵轴' },
+    ]
+  }
+  if (t === 'Kpi') return [{ role: 'value', label: '指标值' }]
+  if (t === 'Text' || t === 'Alert') return [{ role: 'text', label: '插入 {{字段}}' }]
+  if (t === 'Table') return [{ role: 'dataset', label: '使用此数据集' }]
+  return []
+}
+
+export const FIELD_DND_MIME = 'application/x-studio-field'
 
 export function extractArtboardFromJob(renderSpec: unknown): ArtboardDoc | null {
   if (!renderSpec || typeof renderSpec !== 'object' || Array.isArray(renderSpec)) return null
