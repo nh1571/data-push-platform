@@ -42,6 +42,12 @@ export type ChartStyle = {
   sort?: 'none' | 'asc' | 'desc'
   top_n?: number | null
   series_name?: string
+  /** 图表标题字号（组装画布可调） */
+  title_font_size?: number
+  /** 数据标签字号 */
+  label_font_size?: number
+  /** 坐标轴字号 */
+  axis_font_size?: number
 }
 
 /** 单条数据序列：名称 + 与 labels 等长的数值数组（缺失为 null） */
@@ -116,6 +122,12 @@ export function buildEchartsOption(
   const showGrid = style.show_grid !== false
   const title = style.title || ''
   const subtitle = style.subtitle || ''
+  const titleFs = Number(style.title_font_size)
+  const labelFs = Number(style.label_font_size)
+  const axisFs = Number(style.axis_font_size)
+  const titleSize = Number.isFinite(titleFs) && titleFs > 0 ? titleFs : 15
+  const labelSize = Number.isFinite(labelFs) && labelFs > 0 ? labelFs : 10
+  const axisSize = Number.isFinite(axisFs) && axisFs > 0 ? axisFs : 11
 
   const base: EChartsOption = {
     color: palette,
@@ -126,8 +138,8 @@ export function buildEchartsOption(
           subtext: subtitle || undefined,
           left: 'center',
           top: 6,
-          textStyle: { fontSize: 15, fontWeight: 600 },
-          subtextStyle: { fontSize: 12, color: '#888' },
+          textStyle: { fontSize: titleSize, fontWeight: 600 },
+          subtextStyle: { fontSize: Math.max(10, Math.round(titleSize * 0.8)), color: '#888' },
         }
       : undefined,
     tooltip: {
@@ -174,10 +186,10 @@ export function buildEchartsOption(
           label: {
             show: showLabel,
             formatter: '{b}\n{d}%',
-            fontSize: 11,
+            fontSize: labelSize + 1,
           },
           emphasis: {
-            label: { show: true, fontSize: 13, fontWeight: 'bold' },
+            label: { show: true, fontSize: labelSize + 3, fontWeight: 'bold' },
             itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.15)' },
           },
           data,
@@ -194,7 +206,7 @@ export function buildEchartsOption(
     axisLabel: {
       // 分类过多时自动倾斜，避免重叠
       rotate: isH ? 0 : style.x_label_rotate ?? (labels.length > 8 ? 30 : 0),
-      fontSize: 11,
+      fontSize: axisSize,
     },
     axisTick: { alignWithLabel: true },
   }
@@ -225,7 +237,7 @@ export function buildEchartsOption(
         label: {
           show: showLabel,
           position: (style.label_position as 'top') || 'top',
-          fontSize: 10,
+          fontSize: labelSize,
         },
         emphasis: { focus: 'series' },
       }
@@ -244,7 +256,7 @@ export function buildEchartsOption(
       label: {
         show: showLabel,
         position: isH ? 'right' : (style.label_position as 'top') || 'top',
-        fontSize: 10,
+        fontSize: labelSize,
       },
       emphasis: { focus: 'series' },
     }

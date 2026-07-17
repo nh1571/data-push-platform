@@ -199,6 +199,68 @@ def test_free_compose_layout_absolute_html() -> None:
     assert "height:80px" in html
 
 
+def test_multi_canvas_segments_message_order() -> None:
+    """多画布合成一条推送：文案合并为一段，不拆成多条 image。"""
+    from app.modules.studio.compile import artboard_to_message, build_artboard_html, list_canvases
+
+    doc = {
+        "artboard": {"width": 750, "show_chrome": False},
+        "canvases": [
+            {
+                "id": "c1",
+                "name": "画布A",
+                "tree": {
+                    "type": "Container",
+                    "children": [{"type": "Text", "props": {"text": "图A内容"}}],
+                },
+            },
+            {
+                "id": "c2",
+                "name": "画布B",
+                "tree": {
+                    "type": "Container",
+                    "children": [{"type": "Text", "props": {"text": "图B内容"}}],
+                },
+            },
+        ],
+        "tree": {
+            "type": "Container",
+            "children": [{"type": "Text", "props": {"text": "legacy"}}],
+        },
+        "compose": {
+            "mode": "image_primary",
+            "include_component_md": False,
+            "title": "多图画报",
+            "segments": [
+                {"id": "s1", "type": "text", "html": "开场 {{院区}}"},
+                {"id": "s2", "type": "canvas", "canvas_id": "c1"},
+                {"id": "s3", "type": "text", "html": "中间说明"},
+                {"id": "s4", "type": "canvas", "canvas_id": "c2"},
+                {"id": "s5", "type": "text", "html": "结尾"},
+            ],
+        },
+    }
+    assert len(list_canvases(doc)) == 2
+    # HTML 纵向包含两块画布
+    html = build_artboard_html(doc, {"main": _sample_result()})
+    assert "图A内容" in html
+    assert "图B内容" in html
+    assert "artboard-stack" in html
+
+    msg = artboard_to_message(doc, {"main": _sample_result()}, with_image=False)
+    texts = [str(p.content) for p in msg.parts if p.kind == "text"]
+    # 图前 / 图后拆成独立 text parts（顺序：开场 → 中间+结尾 因无图时仍按 seen 切分）
+    # with_image=False 时仍保留 text 顺序：before chunks + after chunks
+    assert any("演示院区" in t for t in texts)
+    assert any("中间说明" in t or "结尾" in t for t in texts)
+    # 图前应在图后之前
+    joined = "\n".join(texts)
+    assert joined.index("演示院区") < joined.index("结尾")
+    assert all(p.kind == "text" for p in msg.parts)
+    image_parts = [p for p in msg.parts if p.kind == "image"]
+    assert len(image_parts) == 0
+
+
 def test_design_to_artboard_migration() -> None:
     design = {
         "output_mode": "image",

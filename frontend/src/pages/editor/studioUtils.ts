@@ -220,8 +220,16 @@ export function defaultAlertArtboard(): ArtboardDoc {
   }
 }
 
-/** 空白画板（仅 root 容器 + 空主数据集） */
+/** 空白画板（主数据集 + 默认一页画布） */
 export function emptyArtboard(): ArtboardDoc {
+  const canvasId = `canvas_${nid()}`
+  const tree: StudioNode = {
+    id: 'root',
+    type: 'Container',
+    props: { direction: 'column', gap: 12 },
+    children: [],
+    binding: {},
+  }
   return {
     version: 3,
     kind: 'artboard',
@@ -233,13 +241,19 @@ export function emptyArtboard(): ArtboardDoc {
       chrome_title: '数据推送',
     },
     datasets: [{ id: 'main', name: '主查询', data_source_id: null, sql: 'SELECT 1 AS demo' }],
-    tree: {
-      id: 'root',
-      type: 'Container',
-      props: { direction: 'column', gap: 12 },
-      children: [],
-      binding: {},
-    },
+    library: [],
+    tree,
+    canvases: [
+      {
+        id: canvasId,
+        name: '画布 1',
+        width: 750,
+        show_chrome: true,
+        chrome_title: '数据推送',
+        theme: { pack: 'business', color: '#1677ff', table_style: 'business' },
+        tree,
+      },
+    ],
     compose: {
       mode: 'image_primary',
       markdown_caption: false,
@@ -248,6 +262,11 @@ export function emptyArtboard(): ArtboardDoc {
       title: '数据推送',
       text_before: '',
       text_after: '',
+      segments: [
+        { id: `seg_${nid()}`, type: 'text', html: '' },
+        { id: `seg_${nid()}`, type: 'canvas', canvas_id: canvasId },
+        { id: `seg_${nid()}`, type: 'text', html: '' },
+      ],
     },
   }
 }

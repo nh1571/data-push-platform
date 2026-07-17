@@ -2,7 +2,7 @@
  * 自由布局组装画布（步骤 3「组装画布」）。
  *
  * 对清单中的 Studio 节点做绝对定位：拖拽移动、右下角缩放、卡片风格预设。
- * 内容区嵌入 LiveComponent（活组件，非截图），改尺寸时图表/表格可 reflow。
+ * **画布高度随组件底部动态伸长**（成图长短不限，最终截整页），下方预留可编排空白区。
  *
  * 布局属性写在 node.props 的 compose_* 字段（见 ComposeLayout）。
  * 顶部把手仅编辑器可见，不进入最终推送图。
@@ -33,10 +33,32 @@ export type ComposeLayout = {
   compose_padding?: number
   compose_color?: string
   compose_opacity?: number
+  // 内容样式（组装画布可调，LiveComponent / 成图引擎读取）
+  content_font_size?: number
+  content_font_weight?: string | number
+  content_color?: string
+  content_align?: string
+  content_line_height?: number
+  label_font_size?: number
+  label_color?: string
+  label_font_weight?: string | number
+  title_font_size?: number
+  chart_label_size?: number
+  axis_font_size?: number
+  show_label?: boolean
+  show_legend?: boolean
+  show_grid?: boolean
 }
 
 /** 编辑器顶部拖拽把手高度（像素） */
 const HANDLE_H = 26
+/** 顶栏 chrome 占位（与 CSS padding 大致一致） */
+const CHROME_H = 48
+/**
+ * 内容区底部额外空白：可继续往下拖组件扩展画布。
+ * 最终成图会截到实际内容（后端按最底节点算高）。
+ */
+const EXTRA_PAD = 220
 
 type Props = {
   canvasWidth: number
@@ -48,6 +70,8 @@ type Props = {
   themeColor?: string
   onSelect: (id: string | null) => void
   onChangeLayout: (id: string, layout: Partial<ComposeLayout>) => void
+  /** 从当前画布移除组件（不删组件库） */
+  onRemove?: (id: string) => void
   typeLabel: (type: string, chart?: string) => string
 }
 
@@ -63,12 +87,15 @@ function readLayout(node: StudioNode, canvasWidth: number, index: number): Compo
     const pct = Number(p.compose_width)
     w = Number.isFinite(pct) && pct > 0 ? Math.round((canvasWidth * pct) / 100) : canvasWidth - 24
   }
-  w = Math.max(120, Math.min(canvasWidth - 8, w))
+  // 最小 40：允许小 KPI / 细分割线等更自由尺寸
+  w = Math.max(40, Math.min(canvasWidth - 4, w))
   return {
     compose_x: Number.isFinite(Number(p.compose_x)) ? Number(p.compose_x) : 12,
     compose_y: Number.isFinite(Number(p.compose_y)) ? Number(p.compose_y) : defaultY,
     compose_w: w,
-    compose_h: Number.isFinite(Number(p.compose_h)) ? Number(p.compose_h) : 200,
+    compose_h: Number.isFinite(Number(p.compose_h))
+      ? Math.max(24, Number(p.compose_h))
+      : 200,
     compose_style: String(p.compose_style || 'card'),
     compose_bg: p.compose_bg ? String(p.compose_bg) : undefined,
     compose_radius: Number(p.compose_radius ?? 8),
@@ -132,6 +159,7 @@ export function ComposeCanvas({
   themeColor,
   onSelect,
   onChangeLayout,
+  onRemove,
   typeLabel,
 }: Props) {
   const boardRef = useRef<HTMLDivElement>(null)
@@ -148,11 +176,15 @@ export function ComposeCanvas({
     layout: readLayout(n, canvasWidth, i),
   }))
 
-  // 画板高度随最底节点自动撑开
-  const maxBottom = layouts.reduce(
-    (m, { layout }) => Math.max(m, layout.compose_y + layout.compose_h + 24),
-    canvasMinHeight,
+  // 内容区高度 = max(最小高度, 最底组件 + 可扩展空白)
+  // 注意：compose_y 相对内容区（顶栏下方），不要再减 chrome
+  const contentBottom = layouts.reduce(
+    (m, { layout }) => Math.max(m, layout.compose_y + layout.compose_h),
+    0,
   )
+  const contentHeight = Math.max(canvasMinHeight, contentBottom + EXTRA_PAD)
+  const hasChrome = Boolean(chrome?.show)
+  const boardHeight = (hasChrome ? CHROME_H : 0) + contentHeight
 
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
@@ -161,11 +193,13 @@ export function ComposeCanvas({
       const dy = e.clientY - drag.startY
       if (drag.mode === 'move') {
         const x = Math.max(0, Math.min(canvasWidth - 40, drag.orig.compose_x + dx))
+        // Y 不设上限：向下拖会撑高画布
         const y = Math.max(0, drag.orig.compose_y + dy)
         onChangeLayout(drag.id, { compose_x: Math.round(x), compose_y: Math.round(y) })
       } else if (drag.mode === 'resize') {
-        const w = Math.max(120, Math.min(canvasWidth - drag.orig.compose_x, drag.orig.compose_w + dx))
-        const h = Math.max(80, drag.orig.compose_h + dy)
+        const w = Math.max(40, Math.min(canvasWidth - drag.orig.compose_x, drag.orig.compose_w + dx))
+        // 高度不设硬顶：可拉长图表区域
+        const h = Math.max(24, drag.orig.compose_h + dy)
         onChangeLayout(drag.id, { compose_w: Math.round(w), compose_h: Math.round(h) })
       }
     },
@@ -216,6 +250,27 @@ export function ComposeCanvas({
       }}
     >
       <div
+        style={{
+          fontSize: 12,
+          color: '#555',
+          marginBottom: 8,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span>
+          画布高度随内容自动伸长 · 当前约{' '}
+          <strong>{Math.round(boardHeight)}</strong> px
+          （成图截整页，长短不限）
+        </span>
+        <span style={{ color: '#888' }}>
+          内容底 {Math.round(contentBottom)} · 下方可继续拖放
+        </span>
+      </div>
+      <div
         ref={boardRef}
         onClick={() => onSelect(null)}
         style={{
@@ -223,46 +278,59 @@ export function ComposeCanvas({
           maxWidth: '100%',
           margin: '0 auto',
           background: '#fff',
-          minHeight: maxBottom,
+          height: boardHeight,
+          minHeight: boardHeight,
           borderRadius: 4,
           boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
           position: 'relative',
-          overflow: 'hidden',
+          // 不裁切子组件；高度已随最底节点 + 空白区伸长
+          overflow: 'visible',
         }}
       >
         {/* 画板顶栏 chrome（对应 artboard.show_chrome） */}
-        {chrome?.show ? (
+        {hasChrome ? (
           <div
             style={{
-              background: chrome.color || '#1677ff',
+              background: chrome?.color || '#1677ff',
               color: '#fff',
               padding: '12px 16px',
               fontWeight: 600,
               position: 'relative',
-              zIndex: 1,
+              zIndex: 2,
+              height: CHROME_H,
+              boxSizing: 'border-box',
+              flexShrink: 0,
             }}
           >
-            {chrome.title || '数据推送'}
+            {chrome?.title || '数据推送'}
           </div>
         ) : null}
 
         <div
           style={{
             position: 'relative',
-            minHeight: maxBottom - (chrome?.show ? 48 : 0),
-            height: maxBottom - (chrome?.show ? 48 : 0),
+            width: '100%',
+            height: contentHeight,
+            minHeight: contentHeight,
+            // 点状底纹标示可扩展空白区
+            backgroundImage:
+              'radial-gradient(circle, #e8e8e8 0.6px, transparent 0.7px)',
+            backgroundSize: '14px 14px',
+            backgroundPosition: '0 0',
           }}
         >
           {nodes.length === 0 ? (
             <Empty
               style={{ paddingTop: 80 }}
-              description="清单为空，请回「做组件」添加"
+              description="画布为空：请从左侧组件库点「放到画布」"
             />
           ) : (
             layouts.map(({ node, layout }, index) => {
               const selected = selectedId === node.id
-              // 内容区高度 = 总高 − 把手 − padding
-              const contentH = Math.max(40, layout.compose_h - HANDLE_H - (layout.compose_padding || 0) * 2)
+              const contentH = Math.max(
+                24,
+                layout.compose_h - HANDLE_H - (layout.compose_padding || 0) * 2,
+              )
               return (
                 <div
                   key={node.id}
@@ -277,11 +345,11 @@ export function ComposeCanvas({
                     width: layout.compose_w,
                     height: layout.compose_h,
                     zIndex: selected ? 20 : 10 + index,
-                    cursor: drag?.id === node.id && drag.mode === 'move' ? 'grabbing' : 'default',
+                    cursor:
+                      drag?.id === node.id && drag.mode === 'move' ? 'grabbing' : 'default',
                   }}
                 >
                   <div style={shellStyle(layout, selected)}>
-                    {/* 仅编辑器可见的拖拽把手，不进入最终推送图 */}
                     <div
                       onPointerDown={(e) => startDrag(e, node.id, 'move', layout)}
                       style={{
@@ -308,6 +376,28 @@ export function ComposeCanvas({
                       <span style={{ marginLeft: 'auto', opacity: 0.45, fontSize: 10 }}>
                         {layout.compose_w}×{layout.compose_h}
                       </span>
+                      {onRemove ? (
+                        <button
+                          type="button"
+                          title="从画布移除"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRemove(node.id)
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#ff4d4f',
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            padding: '0 4px',
+                            lineHeight: 1,
+                          }}
+                        >
+                          删除
+                        </button>
+                      ) : null}
                     </div>
                     <div
                       style={{
@@ -349,6 +439,29 @@ export function ComposeCanvas({
               )
             })
           )}
+
+          {/* 底部可扩展提示带 */}
+          {nodes.length > 0 ? (
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: Math.max(contentBottom + 8, contentHeight - EXTRA_PAD + 8),
+                height: Math.max(40, EXTRA_PAD - 24),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+                borderTop: '1px dashed #bfbfbf',
+                color: '#8c8c8c',
+                fontSize: 12,
+                background: 'linear-gradient(180deg, rgba(250,250,250,0.9), rgba(245,245,245,0.4))',
+              }}
+            >
+              ↓ 空白区可继续拖组件 / 放大图表 · 画布自动变高
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -382,7 +495,7 @@ export function ensureComposeLayouts(
     else if (n.type === 'Text' || n.type === 'Alert') h = 140
     else if (n.type === 'Divider') h = 40
     else if (n.type === 'Table') h = 240
-    else if (n.type === 'Chart') h = 280
+    else if (n.type === 'Chart') h = 300
     patches.push({
       id: n.id,
       patch: {

@@ -7,18 +7,18 @@
  * 1. **data**   数据：多数据集 SQL / 参数定义 / 样例取数
  * 2. **make**   做组件：字段绑定 + 本地 Live 预览 + 组件清单
  * 3. **compose** 组装画布：自由布局 ComposeCanvas（位置/大小/风格模板）
- * 4. **message** 组装推送：图外 text_before/after 富文本外壳
+ * 4. **message** 组装推送：多段落（文案/画布）组合 + 钉钉手机实时预览
  * 5. **preview** 预览推送：服务端 studioCompile 成图 + 试推 / 保存任务
  *
  * ## 状态要点
- * - `artboard`：完整 ArtboardDoc（datasets + tree + compose）
+ * - `artboard`：完整 ArtboardDoc（datasets + canvases + compose.segments）
  * - `fieldsByDataset` / `rowsByDataset`：各数据集 queryPreview 缓存
  * - `draft`：做组件步骤当前编辑中的表单；确认后写入 tree
- * - 服务端 compile 仅在 message/preview 步骤触发（见下方 useEffect）
+ * - 服务端 compile **仅在 preview 步骤**触发；组装推送用本地 Live 预览
  *
  * 路由：`/editor` | `/editor/:jobId`
  *
- * 依赖：ComposeCanvas / LiveChart / LiveComponent / RichTextEditor / studioUtils / chartOption
+ * 依赖：ComposeCanvas / CanvasLivePreview / DingTalkPhonePreview / LiveChart / RichTextEditor
  */
 import {
   ArrowLeftOutlined,
@@ -65,14 +65,28 @@ import type {
   DataSource,
   SqlParamDef,
   StudioCompileResponse,
+  StudioComposeSegment,
   StudioNode,
 } from '../../api/types'
 import { seriesFromTable, type ChartStyle } from './chartOption'
+import {
+  canvasChildren,
+  canvasContentBottom,
+  cloneNodeForCanvas,
+  listCanvases,
+  newCanvas,
+  normalizeArtboardDoc,
+  setCanvasTree,
+  updateCanvasInDoc,
+} from './artboardModel'
+import { CanvasLivePreview } from './CanvasLivePreview'
 import {
   ComposeCanvas,
   ensureComposeLayouts,
   type ComposeLayout,
 } from './ComposeCanvas'
+import { DingTalkPhonePreview, type DingTalkPushContent } from './DingTalkPhonePreview'
+import { htmlToDingTalkMd, isEmptyRich } from './dingtalkMd'
 import { LiveChart } from './LiveChart'
 import {
   appendFieldToken,
@@ -119,6 +133,21 @@ const COMPOSE_PROP_KEYS = [
   'compose_opacity',
   'compose_width',
   'preview_image',
+  // 内容样式（组装画布可调）
+  'content_font_size',
+  'content_font_weight',
+  'content_color',
+  'content_align',
+  'content_line_height',
+  'label_font_size',
+  'label_color',
+  'label_font_weight',
+  'title_font_size',
+  'chart_label_size',
+  'axis_font_size',
+  'show_label',
+  'show_legend',
+  'show_grid',
 ] as const
 
 function colorToHex(color: Color | string): string {
@@ -154,8 +183,8 @@ type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
 const STEPS = [
   { key: 'data' as const, title: '1. 数据', desc: 'SQL/参数模板' },
   { key: 'make' as const, title: '2. 做组件', desc: '绑定字段' },
-  { key: 'compose' as const, title: '3. 组装画布', desc: '图版式模板' },
-  { key: 'message' as const, title: '4. 组装推送', desc: '图外文案' },
+  { key: 'compose' as const, title: '3. 组装画布', desc: '多图画布' },
+  { key: 'message' as const, title: '4. 组装推送', desc: '文案+多图' },
   { key: 'preview' as const, title: '5. 预览推送', desc: '样例预演' },
 ]
 
@@ -376,11 +405,6 @@ function findNode(root: StudioNode, id: string): StudioNode | null {
   return null
 }
 
-/** 清单：root 下直接子节点（可推送内容组件） */
-function cartItems(tree?: StudioNode): StudioNode[] {
-  return [...(tree?.children || [])]
-}
-
 /** 组件类型中文标签 */
 function typeLabel(t: string, chart?: string): string {
   if (t === 'Chart') {
@@ -535,19 +559,45 @@ export function EditorPage() {
   const [saving, setSaving] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
+  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
   const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
 
-  const tree = artboard.tree
+  const canvases = useMemo(() => listCanvases(artboard), [artboard])
+  const effectiveCanvasId =
+    activeCanvasId && canvases.some((c) => c.id === activeCanvasId)
+      ? activeCanvasId
+      : canvases[0]?.id || null
+  const activeCanvas = canvases.find((c) => c.id === effectiveCanvasId) || canvases[0]
+  const tree = activeCanvas?.tree || artboard.tree
   const datasets = artboard.datasets || []
   const activeDs = datasets.find((d) => d.id === activeDatasetId) || datasets[0]
   const datasetOptions = datasets.map((d) => ({ value: d.id, label: d.name || d.id }))
-  const cart = useMemo(() => cartItems(tree), [tree])
+  /** 当前画布上已放置的组件 */
+  const cart = useMemo(() => canvasChildren(activeCanvas), [activeCanvas])
+  /** 组件库（做组件产出，组装时挑选） */
+  const library = useMemo(
+    () => artboard.library || [],
+    [artboard.library],
+  )
+  const libraryCount = library.length
+  /** 所有画布上已放置组件数 */
+  const allCartCount = useMemo(
+    () => canvases.reduce((n, c) => n + canvasChildren(c).length, 0),
+    [canvases],
+  )
   const draftFields = fieldsByDataset[draft?.dataset_id || activeDatasetId] || []
   const previewColumns = fieldsByDataset[activeDatasetId] || []
   const previewRows = rowsByDataset[activeDatasetId] || []
 
-  const setTree = (next: StudioNode) => setArtboard((p) => ({ ...p, tree: next }))
+  const setTree = (next: StudioNode) => {
+    setArtboard((p) => {
+      const n = normalizeArtboardDoc(p)
+      const cid = effectiveCanvasId || n.canvases?.[0]?.id
+      if (!cid) return { ...n, tree: next }
+      return setCanvasTree(n, cid, next)
+    })
+  }
 
   const loadMeta = useCallback(async () => {
     const [ds, ch] = await Promise.all([listDataSources(), listChannels()])
@@ -576,7 +626,9 @@ export function EditorPage() {
         setEnabled(job.enabled)
         const extracted = extractArtboardFromJob(job.render_spec)
         setArtboard(
-          extracted || syncMainDataset(emptyArtboard(), job.data_source_id, job.query_sql),
+          normalizeArtboardDoc(
+            extracted || syncMainDataset(emptyArtboard(), job.data_source_id, job.query_sql),
+          ),
         )
       })
       .catch((e) => message.error(getErrorMessage(e)))
@@ -592,7 +644,7 @@ export function EditorPage() {
         data_source_id: d.data_source_id || dataSourceId || null,
       })),
     }
-    return doc
+    return normalizeArtboardDoc(doc)
   }, [artboard, dataSourceId, sql])
 
   const runCompile = useCallback(
@@ -616,15 +668,15 @@ export function EditorPage() {
     }))
   }, [])
 
-  // 进入「组装推送」或「预览」时触发服务端 compile
+  // 仅第 5 步自动服务端编译；组装推送用本地实时预览（避免 Playwright 过慢）
   useEffect(() => {
-    if (step !== 'preview' && step !== 'message') return
+    if (step !== 'preview') return
     if (!dataSourceId) {
       setFinalError('请先完成数据源选择与取数')
       return
     }
-    if (cart.length === 0) {
-      setFinalError('组件清单为空，请先做组件并加入清单')
+    if (allCartCount === 0) {
+      setFinalError('画布上没有组件：请在「组装画布」从组件库放到画布')
       setFinalPreview(null)
       return
     }
@@ -640,9 +692,8 @@ export function EditorPage() {
         setFinalError(getErrorMessage(e))
       })
       .finally(() => setFinalLoading(false))
-    // Re-run when step changes or cart changes; text edits use local substitute for shell preview
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, cart.length, dataSourceId])
+  }, [step, allCartCount, dataSourceId])
 
   const activeParamDefs = useMemo((): SqlParamDef[] => {
     const ds = datasets.find((d) => d.id === activeDatasetId)
@@ -829,21 +880,62 @@ export function EditorPage() {
 
     let node = draftToNode(draft, editId || undefined)
 
-    if (editId) {
-      const old = findNode(tree, editId)
-      if (old?.props) {
+    // 组件写入「组件库」；不自动铺到画布，需在组装步挑选
+    setArtboard((prev) => {
+      const n = normalizeArtboardDoc(prev)
+      let lib = [...(n.library || [])]
+      if (editId) {
+        const oldLib = lib.find((x) => x.id === editId)
         const kept: Record<string, unknown> = {}
-        for (const k of COMPOSE_PROP_KEYS) {
-          if (old.props[k] !== undefined) kept[k] = old.props[k]
+        if (oldLib?.props) {
+          for (const k of COMPOSE_PROP_KEYS) {
+            if (oldLib.props[k] !== undefined) kept[k] = oldLib.props[k]
+          }
         }
-        node.props = { ...node.props, ...kept }
+        const nextNode = {
+          ...node,
+          id: editId,
+          props: {
+            ...node.props,
+            ...kept,
+            library_id: String(oldLib?.props?.library_id || editId),
+          },
+        }
+        lib = lib.map((x) => (x.id === editId ? nextNode : x))
+        // 同步已放到各画布、同源的实例（保留 compose_* 布局）
+        const libKey = String(nextNode.props?.library_id || editId)
+        const canvasesNext = (n.canvases || []).map((c) => {
+          if (!c.tree) return c
+          let t = c.tree
+          for (const ch of c.tree.children || []) {
+            const src = String(ch.props?.library_id || ch.id)
+            if (src !== libKey && ch.id !== editId) continue
+            const layoutKeep: Record<string, unknown> = {}
+            for (const k of COMPOSE_PROP_KEYS) {
+              if (ch.props?.[k] !== undefined) layoutKeep[k] = ch.props[k]
+            }
+            t = updateNode(t, ch.id, {
+              ...nextNode,
+              id: ch.id,
+              props: { ...nextNode.props, ...layoutKeep, library_id: libKey },
+            })
+          }
+          return { ...c, tree: t }
+        })
+        return {
+          ...n,
+          library: lib,
+          canvases: canvasesNext,
+          tree: canvasesNext[0]?.tree || n.tree,
+        }
       }
-      setTree(updateNode(tree, editId, node))
-      message.success('组件已更新')
-    } else {
-      setTree(appendChild(tree, 'root', node))
-      message.success('已加入清单')
-    }
+      const withLib = {
+        ...node,
+        props: { ...node.props, library_id: node.id },
+      }
+      return { ...n, library: [...lib, withLib] }
+    })
+    message.success(editId ? '组件已更新' : '已加入组件库（请到组装画布挑选上板）')
     setDraft(null)
     setEditId(null)
   }
@@ -978,14 +1070,13 @@ export function EditorPage() {
   const selectedCompose = selectedComposeId && tree ? findNode(tree, selectedComposeId) : null
   const canvasWidth = Number(artboard.artboard?.width) || 750
 
-  /** Local substitute for push shell text (instant, no recompile). */
-  const shellPreview = useMemo(() => {
+  /** 首行字段映射（图外 {{列}} 本地替换，不重编译） */
+  const firstRowForShell = useMemo(() => {
     const row = firstRowMap(
       { main: { columns: fieldsByDataset.main || [], rows: rowsByDataset.main || [] } },
       'main',
     )
-    // fallback to active dataset first row if main empty
-    const row2 =
+    return (
       row ||
       firstRowMap(
         {
@@ -996,6 +1087,12 @@ export function EditorPage() {
         },
         activeDatasetId,
       )
+    )
+  }, [fieldsByDataset, rowsByDataset, activeDatasetId])
+
+  /** Local substitute for push shell text (instant, no recompile). */
+  const shellPreview = useMemo(() => {
+    const row2 = firstRowForShell
     return {
       title: substituteRow(String(artboard.compose?.title || name || '数据推送'), row2),
       before: substituteRow(String(artboard.compose?.text_before || ''), row2),
@@ -1005,42 +1102,264 @@ export function EditorPage() {
     artboard.compose?.title,
     artboard.compose?.text_before,
     artboard.compose?.text_after,
-    fieldsByDataset,
-    rowsByDataset,
-    activeDatasetId,
+    firstRowForShell,
     name,
   ])
 
-  const patchComposeLayout = useCallback((id: string, layout: Partial<ComposeLayout>) => {
-    setArtboard((prev) => {
-      if (!prev.tree) return prev
-      const node = findNode(prev.tree, id)
-      if (!node) return prev
-      return {
-        ...prev,
-        tree: updateNode(prev.tree, id, {
-          props: { ...node.props, ...layout },
-        }),
+  const composeSegments = useMemo((): StudioComposeSegment[] => {
+    return normalizeArtboardDoc(artboard).compose?.segments || []
+  }, [artboard])
+
+  /**
+   * 钉钉「一条推送」实时内容：
+   * - 图前文案 / 图后文案按 segments 相对画布位置切分（不会把图后文案画到图前）
+   * - 多画布纵向合成一块图
+   */
+  const livePushContent = useMemo((): DingTalkPushContent => {
+    const mode = String(artboard.compose?.mode || 'image_primary')
+    const segs = composeSegments
+    const row = firstRowForShell
+    const title = substituteRow(String(artboard.compose?.title || name || '数据推送'), row)
+
+    const beforeParts: string[] = []
+    const afterParts: string[] = []
+    let seenCanvas = false
+    for (const s of segs) {
+      if (s.type === 'canvas') {
+        seenCanvas = true
+        continue
       }
-    })
+      if (s.type !== 'text') continue
+      const raw = substituteRow(String(s.html || ''), row)
+      if (isEmptyRich(raw) || isEmptyRichHtml(raw)) continue
+      const md = htmlToDingTalkMd(raw) || raw
+      if (seenCanvas) afterParts.push(md)
+      else beforeParts.push(md)
+    }
+    const markdownBefore = mode === 'image_only' ? '' : beforeParts.join('\n\n')
+    const markdownAfter = mode === 'image_only' ? '' : afterParts.join('\n\n')
+
+    const canvasOrder = segs
+      .filter((s): s is Extract<StudioComposeSegment, { type: 'canvas' }> => s.type === 'canvas')
+      .map((s) => canvases.find((c) => c.id === s.canvas_id))
+      .filter(Boolean) as typeof canvases
+    const canvasList = (canvasOrder.length > 0 ? canvasOrder : canvases).filter(
+      (c) => canvasChildren(c).length > 0,
+    )
+
+    const imgW = 248
+    const showImage = mode !== 'markdown_primary' && canvasList.length > 0
+    const image = showImage ? (
+      <CanvasLivePreview
+        canvases={canvasList.map((c) => ({
+          id: c.id,
+          name: c.name,
+          nodes: canvasChildren(c),
+          logicalWidth: Number(c.width) || 750,
+          chrome: {
+            show: c.show_chrome !== false,
+            title: String(c.chrome_title || name || '数据推送'),
+            color: String(c.theme?.color || artboard.artboard?.theme?.color || '#1677ff'),
+          },
+        }))}
+        data={{ fieldsByDataset, rowsByDataset }}
+        displayWidth={imgW}
+        showHint={false}
+      />
+    ) : undefined
+
+    return {
+      title,
+      botName: '数据推送机器人',
+      markdownBefore,
+      markdownAfter,
+      image,
+      emptyHint:
+        mode === 'markdown_primary'
+          ? '仅 Markdown 模式：请填写文案段'
+          : '请填写文案，并在组装画布把组件放到画布上',
+    }
+  }, [
+    artboard.compose?.mode,
+    artboard.compose?.title,
+    artboard.artboard?.theme?.color,
+    composeSegments,
+    canvases,
+    fieldsByDataset,
+    rowsByDataset,
+    firstRowForShell,
+    name,
+  ])
+
+  const placeLibraryOnCanvas = useCallback(
+    (libNode: StudioNode) => {
+      if (!tree || !effectiveCanvasId) return
+      const already = cart.some(
+        (n) =>
+          n.id === libNode.id ||
+          String(n.props?.library_id || '') === libNode.id ||
+          String(n.props?.library_id || '') === String(libNode.props?.library_id || ''),
+      )
+      if (already) {
+        message.info('该组件已在当前画布上')
+        return
+      }
+      // 新组件接在当前画布内容底部下方，避免叠在已有图表上
+      const gap = 16
+      const nextY = cart.length === 0 ? 12 : canvasContentBottom(cart) + gap
+      const clone = cloneNodeForCanvas(libNode, {
+        nextY,
+        canvasWidth: Number(activeCanvas?.width) || canvasWidth,
+      })
+      setTree(appendChild(tree, 'root', clone))
+      setSelectedComposeId(clone.id)
+      message.success('已放到画布下方（可再拖动编排）')
+    },
+    [tree, effectiveCanvasId, cart, setTree, activeCanvas?.width, canvasWidth],
+  )
+
+  const removeFromCanvas = useCallback(
+    (nodeId: string) => {
+      if (!tree) return
+      setTree(removeNode(tree, nodeId))
+      if (selectedComposeId === nodeId) setSelectedComposeId(null)
+      message.success('已从画布移除')
+    },
+    [tree, selectedComposeId],
+  )
+
+  const removeFromLibrary = useCallback(
+    (libId: string) => {
+      setArtboard((prev) => {
+        const n = normalizeArtboardDoc(prev)
+        const lib = (n.library || []).filter((x) => x.id !== libId)
+        const canvasesNext = (n.canvases || []).map((c) => {
+          if (!c.tree) return c
+          let t = c.tree
+          for (const ch of [...(c.tree.children || [])]) {
+            const src = String(ch.props?.library_id || ch.id)
+            if (src === libId || ch.id === libId) {
+              t = removeNode(t, ch.id)
+            }
+          }
+          return { ...c, tree: t }
+        })
+        return {
+          ...n,
+          library: lib,
+          canvases: canvasesNext,
+          tree: canvasesNext[0]?.tree || n.tree,
+        }
+      })
+      message.success('已从组件库删除')
+    },
+    [],
+  )
+
+  /** 同步 segments 并回写兼容字段 text_before/after */
+  const setSegments = useCallback((segs: StudioComposeSegment[]) => {
+    const texts = segs.filter((s): s is Extract<StudioComposeSegment, { type: 'text' }> => s.type === 'text')
+    setArtboard((prev) => ({
+      ...normalizeArtboardDoc(prev),
+      compose: {
+        ...prev.compose,
+        text_format: 'html',
+        segments: segs,
+        text_before: texts[0]?.html || '',
+        text_after: texts.length > 1 ? texts[texts.length - 1]?.html || '' : '',
+      },
+    }))
   }, [])
 
-  // 进入组装画布时为缺失 compose 坐标的节点补默认布局
+  const patchSegmentHtml = useCallback(
+    (segId: string, html: string) => {
+      const segs = composeSegments.map((s) =>
+        s.id === segId && s.type === 'text' ? { ...s, html } : s,
+      )
+      setSegments(segs)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const moveSegment = useCallback(
+    (index: number, dir: -1 | 1) => {
+      const next = [...composeSegments]
+      const j = index + dir
+      if (j < 0 || j >= next.length) return
+      const tmp = next[index]!
+      next[index] = next[j]!
+      next[j] = tmp
+      setSegments(next)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const addTextSegment = useCallback(
+    (afterIndex?: number) => {
+      const seg: StudioComposeSegment = { id: `seg_${nid()}`, type: 'text', html: '' }
+      const next = [...composeSegments]
+      if (afterIndex == null || afterIndex < 0) next.push(seg)
+      else next.splice(afterIndex + 1, 0, seg)
+      setSegments(next)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const removeSegment = useCallback(
+    (segId: string) => {
+      const target = composeSegments.find((s) => s.id === segId)
+      if (!target) return
+      // 画布段不可在此删除（回第 3 步删画布）；文案段至少保留 1 个
+      if (target.type === 'canvas') return
+      const textCount = composeSegments.filter((s) => s.type === 'text').length
+      if (textCount <= 1) {
+        patchSegmentHtml(segId, '')
+        return
+      }
+      setSegments(composeSegments.filter((s) => s.id !== segId))
+    },
+    [composeSegments, setSegments, patchSegmentHtml],
+  )
+
+  const patchComposeLayout = useCallback(
+    (id: string, layout: Partial<ComposeLayout>) => {
+      setArtboard((prev) => {
+        const n = normalizeArtboardDoc(prev)
+        const cid = effectiveCanvasId || n.canvases?.[0]?.id
+        if (!cid) return prev
+        const canvas = (n.canvases || []).find((c) => c.id === cid)
+        if (!canvas?.tree) return prev
+        const node = findNode(canvas.tree, id)
+        if (!node) return prev
+        const tree = updateNode(canvas.tree, id, {
+          props: { ...node.props, ...layout },
+        })
+        return setCanvasTree(n, cid, tree)
+      })
+    },
+    [effectiveCanvasId],
+  )
+
+  // 进入组装画布时为当前画布缺失坐标的节点补默认布局
   useEffect(() => {
     if (step !== 'compose') return
     setArtboard((prev) => {
-      if (!prev.tree) return prev
-      const patches = ensureComposeLayouts(cartItems(prev.tree), canvasWidth)
-      if (!patches.length) return prev
-      let next = prev.tree
+      const n = normalizeArtboardDoc(prev)
+      const cid = effectiveCanvasId || n.canvases?.[0]?.id
+      if (!cid) return n
+      const canvas = (n.canvases || []).find((c) => c.id === cid)
+      if (!canvas?.tree) return n
+      const patches = ensureComposeLayouts(canvasChildren(canvas), canvas.width || canvasWidth)
+      if (!patches.length) return n
+      let tree = canvas.tree
       for (const { id, patch } of patches) {
-        const n = findNode(next, id)
-        if (!n) continue
-        next = updateNode(next, id, { props: { ...n.props, ...patch } })
+        const node = findNode(tree, id)
+        if (!node) continue
+        tree = updateNode(tree, id, { props: { ...node.props, ...patch } })
       }
-      return { ...prev, tree: next }
+      return setCanvasTree(n, cid, tree)
     })
-  }, [step, cart.length, canvasWidth])
+  }, [step, cart.length, canvasWidth, effectiveCanvasId])
 
   const applyTemplate = (kind: 'daily' | 'alert') => {
     const board = kind === 'daily' ? defaultDailyArtboard() : defaultAlertArtboard()
@@ -1104,7 +1423,7 @@ export function EditorPage() {
               disabled={loading}
             />
             <Tag icon={<ShoppingCartOutlined />} color="blue">
-              {cart.length}
+              库 {libraryCount} · 画布 {allCartCount}
             </Tag>
           </Space>
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void onSave()}>
@@ -1886,7 +2205,7 @@ export function EditorPage() {
                     <Alert type="warning" showIcon message="请先回「数据」取数" style={{ marginBottom: 8 }} />
                   ) : null}
                   <Button type="primary" block onClick={() => void addToCart()}>
-                    {editId ? '更新组件' : '确认并加入清单'}
+                    {editId ? '更新组件' : '确认并加入组件库'}
                   </Button>
                   <Button
                     block
@@ -1909,7 +2228,7 @@ export function EditorPage() {
                   type="primary"
                   ghost
                   style={{ marginTop: 8 }}
-                  disabled={!cart.length}
+                  disabled={!libraryCount}
                   onClick={() => setStep('compose')}
                 >
                   去组装画布 →
@@ -2022,10 +2341,10 @@ export function EditorPage() {
               </div>
             </div>
 
-            {/* 小清单 */}
+            {/* 组件库（做组件产出） */}
             <div
               style={{
-                width: 160,
+                width: 168,
                 background: '#fafafa',
                 borderLeft: '1px solid #f0f0f0',
                 overflow: 'auto',
@@ -2034,49 +2353,52 @@ export function EditorPage() {
               }}
             >
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                清单 {cart.length}
+                组件库 {libraryCount}
               </Typography.Text>
-              {cart.length === 0 ? (
+              <div style={{ fontSize: 10, color: '#999', marginTop: 4, lineHeight: 1.3 }}>
+                不会自动上画布；到「组装画布」挑选
+              </div>
+              {libraryCount === 0 ? (
                 <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>暂无</div>
               ) : (
-                cart.map((n, i) => (
-                    <div
-                      key={n.id}
-                      style={{
-                        marginTop: 8,
-                        background: '#fff',
-                        borderRadius: 6,
-                        border: '1px solid #eee',
-                        padding: 6,
-                        fontSize: 11,
+                library.map((n, i) => (
+                  <div
+                    key={n.id}
+                    style={{
+                      marginTop: 8,
+                      background: '#fff',
+                      borderRadius: 6,
+                      border: '1px solid #eee',
+                      padding: 6,
+                      fontSize: 11,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Tag style={{ margin: 0 }}>{i + 1}</Tag>
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeFromLibrary(n.id)}
+                      />
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      {typeLabel(String(n.type), String(n.props?.chart_type || ''))}
+                    </div>
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0 }}
+                      onClick={() => {
+                        setEditId(n.id)
+                        setDraft(nodeToDraft(n))
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Tag style={{ margin: 0 }}>{i + 1}</Tag>
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={() => tree && setTree(removeNode(tree, n.id))}
-                        />
-                      </div>
-                      <div style={{ marginTop: 4 }}>
-                        {typeLabel(String(n.type), String(n.props?.chart_type || ''))}
-                      </div>
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ padding: 0 }}
-                        onClick={() => {
-                          setEditId(n.id)
-                          setDraft(nodeToDraft(n))
-                        }}
-                      >
-                        编辑
-                      </Button>
-                    </div>
-                  ))
+                      编辑
+                    </Button>
+                  </div>
+                ))
               )}
             </div>
           </div>
@@ -2084,37 +2406,175 @@ export function EditorPage() {
 
         {/* ============================================================
             步骤 3 · 组装画布（compose）
-            - ComposeCanvas 自由布局（拖拽/缩放/风格）
-            - 排版的是「推送图模板」；业务数字仍来自字段绑定
-            - 进入时 ensureComposeLayouts 补默认坐标
+            - 左侧组件库挑选上板；画布内可删除
             ============================================================ */}
         {step === 'compose' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
+            <div
+              style={{
+                width: 200,
+                background: '#fafafa',
+                borderRight: '1px solid #f0f0f0',
+                overflow: 'auto',
+                padding: 10,
+                flexShrink: 0,
+              }}
+            >
+              <Typography.Text strong style={{ fontSize: 13 }}>
+                组件库
+              </Typography.Text>
+              <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 4 }}>
+                点「放到画布」加入当前画布；可删除。
+              </Typography.Paragraph>
+              {libraryCount === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="请回「做组件」添加"
+                  style={{ marginTop: 24 }}
+                />
+              ) : (
+                library.map((n) => {
+                  const onBoard = cart.some(
+                    (c) =>
+                      c.id === n.id ||
+                      String(c.props?.library_id || '') === n.id ||
+                      String(c.props?.library_id || '') ===
+                        String(n.props?.library_id || ''),
+                  )
+                  return (
+                    <div
+                      key={n.id}
+                      style={{
+                        marginBottom: 8,
+                        background: '#fff',
+                        border: '1px solid #eee',
+                        borderRadius: 8,
+                        padding: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 500 }}>
+                        {typeLabel(String(n.type), String(n.props?.chart_type || ''))}
+                      </div>
+                      <Space size={4} style={{ marginTop: 6 }} wrap>
+                        <Button
+                          size="small"
+                          type={onBoard ? 'default' : 'primary'}
+                          disabled={onBoard}
+                          onClick={() => placeLibraryOnCanvas(n)}
+                        >
+                          {onBoard ? '已在画布' : '放到画布'}
+                        </Button>
+                        <Button
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => removeFromLibrary(n.id)}
+                        />
+                      </Space>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('make')}>← 做组件</Button>
-                <Button type="primary" disabled={!cart.length} onClick={() => setStep('message')}>
+                <Button
+                  type="primary"
+                  disabled={allCartCount === 0}
+                  onClick={() => setStep('message')}
+                >
                   组装推送 →
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                排版的是<strong>推送图模板</strong>（位置/大小/风格）；业务数字来自字段绑定，推送时按当时数据重绘。
-                图外说明在下一步写。把手拖动 · 右下角改大小 · 右侧选风格
+                从左侧<strong>挑选</strong>组件（自动排在已有内容下方）；画布<strong>高度随内容自动伸长</strong>，
+                可向下拖放编排。成图截整页，长短不限。手柄可删除/缩放。
               </Typography.Paragraph>
+              <Space wrap style={{ marginBottom: 10 }}>
+                {canvases.map((c) => (
+                  <Button
+                    key={c.id}
+                    type={c.id === effectiveCanvasId ? 'primary' : 'default'}
+                    size="small"
+                    onClick={() => setActiveCanvasId(c.id)}
+                  >
+                    {c.name}
+                    <Typography.Text type="secondary" style={{ marginLeft: 6, fontSize: 11 }}>
+                      ({canvasChildren(c).length})
+                    </Typography.Text>
+                  </Button>
+                ))}
+                <Button
+                  size="small"
+                  type="dashed"
+                  onClick={() => {
+                    setArtboard((prev) => {
+                      const n = normalizeArtboardDoc(prev)
+                      const c = newCanvas(`画布 ${(n.canvases?.length || 0) + 1}`)
+                      // 只加画布，segments 由 normalize 自动插入
+                      return normalizeArtboardDoc({
+                        ...n,
+                        canvases: [...(n.canvases || []), c],
+                      })
+                    })
+                  }}
+                >
+                  + 新画布
+                </Button>
+                {canvases.length > 1 ? (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => {
+                      if (!effectiveCanvasId) return
+                      setArtboard((prev) => {
+                        const n = normalizeArtboardDoc(prev)
+                        const canvasesNext = (n.canvases || []).filter(
+                          (c) => c.id !== effectiveCanvasId,
+                        )
+                        const segs = (n.compose?.segments || []).filter(
+                          (s) => s.type !== 'canvas' || s.canvas_id !== effectiveCanvasId,
+                        )
+                        setActiveCanvasId(canvasesNext[0]?.id || null)
+                        return {
+                          ...n,
+                          canvases: canvasesNext,
+                          tree: canvasesNext[0]?.tree,
+                          compose: { ...n.compose, segments: segs },
+                        }
+                      })
+                    }}
+                  >
+                    删除当前画布
+                  </Button>
+                ) : null}
+              </Space>
               <ComposeCanvas
-                canvasWidth={canvasWidth}
-                canvasMinHeight={420}
+                canvasWidth={Number(activeCanvas?.width) || canvasWidth}
+                canvasMinHeight={560}
                 chrome={{
-                  show: artboard.artboard?.show_chrome !== false,
-                  title: String(artboard.artboard?.chrome_title || name || '数据推送'),
-                  color: String(artboard.artboard?.theme?.color || '#1677ff'),
+                  show: activeCanvas?.show_chrome !== false,
+                  title: String(
+                    activeCanvas?.chrome_title ||
+                      artboard.artboard?.chrome_title ||
+                      name ||
+                      '数据推送',
+                  ),
+                  color: String(
+                    activeCanvas?.theme?.color || artboard.artboard?.theme?.color || '#1677ff',
+                  ),
                 }}
                 nodes={cart}
                 selectedId={selectedComposeId}
                 data={{ fieldsByDataset, rowsByDataset }}
-                themeColor={String(artboard.artboard?.theme?.color || '#1677ff')}
+                themeColor={String(
+                  activeCanvas?.theme?.color || artboard.artboard?.theme?.color || '#1677ff',
+                )}
                 onSelect={setSelectedComposeId}
                 onChangeLayout={patchComposeLayout}
+                onRemove={removeFromCanvas}
                 typeLabel={typeLabel}
               />
             </div>
@@ -2130,26 +2590,51 @@ export function EditorPage() {
                 flexShrink: 0,
               }}
             >
-              <Typography.Text strong>画布设置</Typography.Text>
+              <Typography.Text strong>当前画布设置</Typography.Text>
+              <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+                已放置 {cart.length} 个组件
+                {selectedComposeId ? (
+                  <Button
+                    size="small"
+                    danger
+                    type="link"
+                    style={{ marginLeft: 4 }}
+                    onClick={() => removeFromCanvas(selectedComposeId)}
+                  >
+                    删除选中
+                  </Button>
+                ) : null}
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Typography.Text type="secondary">画布名称</Typography.Text>
+                <Input
+                  style={{ marginTop: 4 }}
+                  value={String(activeCanvas?.name || '')}
+                  onChange={(e) => {
+                    if (!effectiveCanvasId) return
+                    setArtboard((prev) =>
+                      updateCanvasInDoc(prev, effectiveCanvasId, { name: e.target.value }),
+                    )
+                  }}
+                />
+              </div>
               <div style={{ marginTop: 12 }}>
                 <Typography.Text type="secondary">整页主题</Typography.Text>
                 <Select
                   style={{ width: '100%', marginTop: 4 }}
-                  value={artboard.artboard?.theme?.pack || 'business'}
+                  value={activeCanvas?.theme?.pack || artboard.artboard?.theme?.pack || 'business'}
                   onChange={(packId) => {
                     const pack = THEME_PACKS.find((p) => p.id === packId)
-                    if (!pack) return
-                    setArtboard((prev) => ({
-                      ...prev,
-                      artboard: {
-                        ...prev.artboard,
+                    if (!pack || !effectiveCanvasId) return
+                    setArtboard((prev) =>
+                      updateCanvasInDoc(prev, effectiveCanvasId, {
                         theme: {
-                          ...prev.artboard?.theme,
+                          ...(activeCanvas?.theme || {}),
                           pack: pack.id,
                           color: pack.color,
                         },
-                      },
-                    }))
+                      }),
+                    )
                   }}
                   options={THEME_PACKS.map((p) => ({ value: p.id, label: p.label }))}
                 />
@@ -2158,24 +2643,26 @@ export function EditorPage() {
                 <Typography.Text type="secondary">顶栏标题</Typography.Text>
                 <Input
                   style={{ marginTop: 4 }}
-                  value={String(artboard.artboard?.chrome_title || '')}
-                  onChange={(e) =>
-                    setArtboard((prev) => ({
-                      ...prev,
-                      artboard: { ...prev.artboard, chrome_title: e.target.value },
-                    }))
-                  }
+                  value={String(activeCanvas?.chrome_title || '')}
+                  onChange={(e) => {
+                    if (!effectiveCanvasId) return
+                    setArtboard((prev) =>
+                      updateCanvasInDoc(prev, effectiveCanvasId, {
+                        chrome_title: e.target.value,
+                      }),
+                    )
+                  }}
                 />
               </div>
               <div style={{ marginTop: 12 }}>
                 <Switch
-                  checked={artboard.artboard?.show_chrome !== false}
-                  onChange={(v) =>
-                    setArtboard((prev) => ({
-                      ...prev,
-                      artboard: { ...prev.artboard, show_chrome: v },
-                    }))
-                  }
+                  checked={activeCanvas?.show_chrome !== false}
+                  onChange={(v) => {
+                    if (!effectiveCanvasId) return
+                    setArtboard((prev) =>
+                      updateCanvasInDoc(prev, effectiveCanvasId, { show_chrome: v }),
+                    )
+                  }}
                 />{' '}
                 显示顶栏
               </div>
@@ -2241,12 +2728,13 @@ export function EditorPage() {
                       <Typography.Text type="secondary">宽</Typography.Text>
                       <InputNumber
                         style={{ width: '100%', marginTop: 4 }}
-                        min={120}
+                        min={40}
                         max={canvasWidth}
+                        step={4}
                         value={Number(selectedCompose.props?.compose_w ?? canvasWidth - 24)}
                         onChange={(v) =>
                           patchComposeLayout(selectedCompose.id, {
-                            compose_w: Math.round(Number(v ?? 120)),
+                            compose_w: Math.round(Number(v ?? 40)),
                           })
                         }
                       />
@@ -2255,15 +2743,275 @@ export function EditorPage() {
                       <Typography.Text type="secondary">高</Typography.Text>
                       <InputNumber
                         style={{ width: '100%', marginTop: 4 }}
-                        min={80}
+                        min={24}
+                        max={2000}
+                        step={4}
                         value={Number(selectedCompose.props?.compose_h ?? 200)}
                         onChange={(v) =>
                           patchComposeLayout(selectedCompose.id, {
-                            compose_h: Math.round(Number(v ?? 80)),
+                            compose_h: Math.round(Number(v ?? 24)),
                           })
                         }
                       />
                     </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#999' }}>
+                    也可在画布上拖右下角自由缩放（最小 40×24）
+                  </div>
+
+                  {/* —— 内容样式：字号 / 字重 / 颜色 / 对齐 —— */}
+                  <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+                    <Typography.Text strong>内容样式</Typography.Text>
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                      字号、字重、颜色、对齐（文案/KPI/告警/表）；图表另可调标题与标签
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 8,
+                      }}
+                    >
+                      <div>
+                        <Typography.Text type="secondary">正文字号</Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={10}
+                          max={72}
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_font_size != null
+                              ? Number(selectedCompose.props.content_font_size)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_font_size: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">字重</Typography.Text>
+                        <Select
+                          style={{ width: '100%', marginTop: 4 }}
+                          allowClear
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_font_weight != null
+                              ? String(selectedCompose.props.content_font_weight)
+                              : undefined
+                          }
+                          options={[
+                            { value: '400', label: '常规' },
+                            { value: '500', label: '中等' },
+                            { value: '600', label: '半粗' },
+                            { value: '700', label: '加粗' },
+                          ]}
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_font_weight: v || undefined,
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">对齐</Typography.Text>
+                        <Select
+                          style={{ width: '100%', marginTop: 4 }}
+                          allowClear
+                          placeholder="默认"
+                          value={
+                            selectedCompose.props?.content_align
+                              ? String(selectedCompose.props.content_align)
+                              : undefined
+                          }
+                          options={[
+                            { value: 'left', label: '左' },
+                            { value: 'center', label: '中' },
+                            { value: 'right', label: '右' },
+                          ]}
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_align: v || undefined,
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Typography.Text type="secondary">行高</Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={1}
+                          max={3}
+                          step={0.05}
+                          placeholder="1.55"
+                          value={
+                            selectedCompose.props?.content_line_height != null
+                              ? Number(selectedCompose.props.content_line_height)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_line_height: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <Typography.Text type="secondary">文字颜色</Typography.Text>
+                      <div style={{ marginTop: 4 }}>
+                        <ColorPicker
+                          allowClear
+                          value={
+                            selectedCompose.props?.content_color
+                              ? String(selectedCompose.props.content_color)
+                              : undefined
+                          }
+                          onChange={(c) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              content_color: c ? colorToHex(c) : '',
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {(selectedCompose.type === 'Kpi' ||
+                      selectedCompose.type === 'Text' ||
+                      selectedCompose.type === 'Alert') && (
+                      <div style={{ marginTop: 10 }}>
+                        <Typography.Text type="secondary">
+                          {selectedCompose.type === 'Kpi' ? '标签字号' : '辅助字号'}
+                        </Typography.Text>
+                        <InputNumber
+                          style={{ width: '100%', marginTop: 4 }}
+                          min={10}
+                          max={48}
+                          placeholder={selectedCompose.type === 'Kpi' ? '自动' : '可选'}
+                          value={
+                            selectedCompose.props?.label_font_size != null
+                              ? Number(selectedCompose.props.label_font_size)
+                              : undefined
+                          }
+                          onChange={(v) =>
+                            patchComposeLayout(selectedCompose.id, {
+                              label_font_size: v == null ? undefined : Number(v),
+                            } as Partial<ComposeLayout>)
+                          }
+                        />
+                      </div>
+                    )}
+
+                    {selectedCompose.type === 'Chart' ? (
+                      <div style={{ marginTop: 12 }}>
+                        <Typography.Text type="secondary">图表字号</Typography.Text>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 8,
+                          }}
+                        >
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              标题
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={10}
+                              max={36}
+                              placeholder="15"
+                              value={
+                                selectedCompose.props?.title_font_size != null
+                                  ? Number(selectedCompose.props.title_font_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  title_font_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              数据标签
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={8}
+                              max={24}
+                              placeholder="10"
+                              value={
+                                selectedCompose.props?.chart_label_size != null
+                                  ? Number(selectedCompose.props.chart_label_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  chart_label_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              坐标轴
+                            </Typography.Text>
+                            <InputNumber
+                              style={{ width: '100%', marginTop: 2 }}
+                              min={8}
+                              max={20}
+                              placeholder="11"
+                              value={
+                                selectedCompose.props?.axis_font_size != null
+                                  ? Number(selectedCompose.props.axis_font_size)
+                                  : undefined
+                              }
+                              onChange={(v) =>
+                                patchComposeLayout(selectedCompose.id, {
+                                  axis_font_size: v == null ? undefined : Number(v),
+                                } as Partial<ComposeLayout>)
+                              }
+                            />
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <Switch
+                            size="small"
+                            checked={selectedCompose.props?.show_label !== false}
+                            onChange={(v) =>
+                              patchComposeLayout(selectedCompose.id, {
+                                show_label: v,
+                              } as Partial<ComposeLayout>)
+                            }
+                          />{' '}
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            显示数据标签
+                          </Typography.Text>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <Switch
+                            size="small"
+                            checked={Boolean(selectedCompose.props?.show_legend)}
+                            onChange={(v) =>
+                              patchComposeLayout(selectedCompose.id, {
+                                show_legend: v,
+                              } as Partial<ComposeLayout>)
+                            }
+                          />{' '}
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            显示图例
+                          </Typography.Text>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div style={{ marginTop: 12 }}>
@@ -2349,7 +3097,7 @@ export function EditorPage() {
                   style={{ marginTop: 16 }}
                   type="info"
                   showIcon
-                  message="点画布上的组件，可拖拽、缩放并改风格"
+                  message="点画布上的组件：拖拽缩放尺寸，右侧调字号/颜色/对齐等"
                 />
               )}
             </div>
@@ -2358,9 +3106,8 @@ export function EditorPage() {
 
         {/* ============================================================
             步骤 4 · 组装推送（message）
-            - 编辑 compose.title / text_before / text_after（RichText）
-            - 图外文案 + 画布图共同构成钉钉消息 parts
-            - 可触发 studioCompile 做外壳预览
+            - segments：文案 / 多画布交错，顺序即钉钉 parts
+            - 右侧钉钉手机实时预览（本地 Live，无 Playwright）
             ============================================================ */}
         {step === 'message' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
@@ -2370,49 +3117,15 @@ export function EditorPage() {
                 <Button type="primary" onClick={() => setStep('preview')}>
                   预览推送 →
                 </Button>
-                <Button
-                  size="small"
-                  loading={finalLoading}
-                  onClick={() => {
-                    setFinalLoading(true)
-                    setFinalError(null)
-                    runCompile(buildDoc())
-                      .then((res) => {
-                        setFinalPreview(res)
-                        if (!res.image_base64 && res.image_error)
-                          setFinalError(res.image_error)
-                      })
-                      .catch((e) => setFinalError(getErrorMessage(e)))
-                      .finally(() => setFinalLoading(false))
-                  }}
-                >
-                  刷新画布图
+                <Button size="small" onClick={() => addTextSegment()}>
+                  + 文案段
                 </Button>
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                图前 / 图后是<strong>文案模板</strong>（工具栏：标题、加粗、颜色、列表、链接）。
-                {'{{列名}}'} 在每次推送时用当次查询首行替换；发送时转钉钉 Markdown。
+                本步编排的是<strong>一条钉钉推送</strong>：多画布会<strong>纵向合成一张图</strong>，文案合并为一段钉钉
+                Markdown，不会变成多条群消息。右侧按真实手机宽度模拟到达效果（本地实时，无消息内滚动条）。
+                {'{{列名}}'} 用样例首行替换示意。
               </Typography.Paragraph>
-              {finalPreview?.resolved_params &&
-              Object.keys(finalPreview.resolved_params).length > 0 ? (
-                <Alert
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 12 }}
-                  message="本次刷新画布图时 SQL 参数"
-                  description={
-                    <span style={{ fontSize: 12 }}>
-                      {Object.entries(finalPreview.resolved_params)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(' · ')}
-                      <span style={{ color: '#888' }}>
-                        {' '}
-                        （完整表见第 5 步预览）
-                      </span>
-                    </span>
-                  }
-                />
-              ) : null}
 
               <div style={{ marginBottom: 16 }}>
                 <Typography.Text type="secondary">消息标题（钉钉通知标题，纯文本）</Typography.Text>
@@ -2424,95 +3137,149 @@ export function EditorPage() {
                 />
               </div>
 
-              <div style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 6,
-                  }}
-                >
-                  <Typography.Text strong>图前文案</Typography.Text>
-                  <Select
-                    size="small"
-                    placeholder="插入字段"
-                    style={{ width: 140 }}
-                    options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
-                      (c) => ({ value: c, label: c }),
-                    )}
-                    onChange={(col: string) => {
-                      if (!col) return
-                      patchCompose({
-                        text_before: appendFieldToken(
-                          String(artboard.compose?.text_before || ''),
-                          col,
-                        ),
-                      })
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                消息段落（拖序用上下箭头）
+              </Typography.Text>
+
+              {composeSegments.map((seg, idx) => {
+                if (seg.type === 'canvas') {
+                  const c = canvases.find((x) => x.id === seg.canvas_id)
+                  return (
+                    <div
+                      key={seg.id}
+                      style={{
+                        marginBottom: 12,
+                        padding: 12,
+                        border: '1px dashed #91caff',
+                        borderRadius: 8,
+                        background: '#f0f7ff',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <div>
+                          <Tag color="blue">画布（合成进一张图）</Tag>
+                          <Typography.Text strong>
+                            {c?.name || seg.canvas_id}
+                          </Typography.Text>
+                          <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                            {canvasChildren(c).length} 个组件 · 与其它画布纵向拼成 1 条推送
+                          </Typography.Text>
+                        </div>
+                        <Space size={4}>
+                          <Button
+                            size="small"
+                            disabled={idx === 0}
+                            onClick={() => moveSegment(idx, -1)}
+                          >
+                            ↑
+                          </Button>
+                          <Button
+                            size="small"
+                            disabled={idx >= composeSegments.length - 1}
+                            onClick={() => moveSegment(idx, 1)}
+                          >
+                            ↓
+                          </Button>
+                          <Button size="small" onClick={() => setStep('compose')}>
+                            编辑画布
+                          </Button>
+                        </Space>
+                      </div>
+                    </div>
+                  )
+                }
+                return (
+                  <div
+                    key={seg.id}
+                    style={{
+                      marginBottom: 12,
+                      padding: 12,
+                      border: '1px solid #f0f0f0',
+                      borderRadius: 8,
+                      background: '#fff',
                     }}
-                  />
-                </div>
-                <RichTextEditor
-                  compact
-                  minHeight={140}
-                  value={String(artboard.compose?.text_before || '')}
-                  onChange={(html) => patchCompose({ text_before: html })}
-                  placeholder="图上方说明：可加粗、着色、列表… 例：【{{院区}}】运营日报"
-                />
-              </div>
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 8,
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <Space size={6}>
+                        <Tag>文案</Tag>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          第 {idx + 1} 段
+                        </Typography.Text>
+                      </Space>
+                      <Space size={4} wrap>
+                        <Select
+                          size="small"
+                          placeholder="插入字段"
+                          style={{ width: 130 }}
+                          options={(
+                            fieldsByDataset.main ||
+                            fieldsByDataset[activeDatasetId] ||
+                            []
+                          ).map((col) => ({ value: col, label: col }))}
+                          onChange={(col: string) => {
+                            if (!col) return
+                            patchSegmentHtml(
+                              seg.id,
+                              appendFieldToken(String(seg.html || ''), col),
+                            )
+                          }}
+                        />
+                        <Button
+                          size="small"
+                          disabled={idx === 0}
+                          onClick={() => moveSegment(idx, -1)}
+                        >
+                          ↑
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={idx >= composeSegments.length - 1}
+                          onClick={() => moveSegment(idx, 1)}
+                        >
+                          ↓
+                        </Button>
+                        <Button size="small" onClick={() => addTextSegment(idx)}>
+                          + 后插
+                        </Button>
+                        <Button size="small" danger onClick={() => removeSegment(seg.id)}>
+                          清空/删
+                        </Button>
+                      </Space>
+                    </div>
+                    <RichTextEditor
+                      compact
+                      minHeight={110}
+                      value={String(seg.html || '')}
+                      onChange={(html) => patchSegmentHtml(seg.id, html)}
+                      placeholder="钉钉风格文案：标题、加粗、颜色、列表、链接… 例：【{{院区}}】运营日报"
+                    />
+                  </div>
+                )
+              })}
 
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="中间固定插入「组装画布」生成的推送图"
-                description="图内布局请回第 3 步调整；本步用工具栏编排图外文字样式。"
-              />
-
-              <div style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 6,
-                  }}
-                >
-                  <Typography.Text strong>图后文案</Typography.Text>
-                  <Select
-                    size="small"
-                    placeholder="插入字段"
-                    style={{ width: 140 }}
-                    options={(fieldsByDataset.main || fieldsByDataset[activeDatasetId] || []).map(
-                      (c) => ({ value: c, label: c }),
-                    )}
-                    onChange={(col: string) => {
-                      if (!col) return
-                      patchCompose({
-                        text_after: appendFieldToken(
-                          String(artboard.compose?.text_after || ''),
-                          col,
-                        ),
-                      })
-                    }}
-                  />
-                </div>
-                <RichTextEditor
-                  compact
-                  minHeight={120}
-                  value={String(artboard.compose?.text_after || '')}
-                  onChange={(html) => patchCompose({ text_after: html })}
-                  placeholder="图下方脚注、说明、免责声明…"
-                />
-              </div>
-
-              <div style={{ marginBottom: 12 }}>
+              <div style={{ marginBottom: 12, marginTop: 8 }}>
                 <Switch
                   checked={Boolean(artboard.compose?.include_component_md)}
                   onChange={(v) => patchCompose({ include_component_md: v, markdown_caption: v })}
                 />{' '}
                 <Typography.Text type="secondary">
-                  额外附带组件树 Markdown 摘要（一般不需要，图已包含内容）
+                  额外附带组件树 Markdown 摘要（一般不需要）
                 </Typography.Text>
               </div>
 
@@ -2523,8 +3290,8 @@ export function EditorPage() {
                   value={String(artboard.compose?.mode || 'image_primary')}
                   onChange={(v) => patchCompose({ mode: v })}
                   options={[
-                    { value: 'image_primary', label: '图为主（推荐：文案 + 图 + 文案）' },
-                    { value: 'image_only', label: '仅推送图' },
+                    { value: 'image_primary', label: '图为主（推荐：按段落发文案 + 多图画布）' },
+                    { value: 'image_only', label: '仅推送画布图' },
                     { value: 'markdown_primary', label: '仅 Markdown 文案（不成图）' },
                     { value: 'mixed', label: '混合（图 + 组件 Markdown）' },
                   ]}
@@ -2532,137 +3299,44 @@ export function EditorPage() {
               </div>
             </div>
 
-            {/* 右侧：消息结构预览 */}
+            {/* 右侧：钉钉手机实时预览 */}
             <div
               style={{
                 flex: 1,
                 overflow: 'auto',
                 padding: 16,
-                background: '#f0f2f5',
-                borderLeft: '1px solid #f0f0f0',
+                background: 'linear-gradient(160deg,#e8eef5 0%,#f5f5f5 50%,#eceff3 100%)',
+                borderLeft: '1px solid #e8e8e8',
               }}
             >
-              <Typography.Title level={5} style={{ marginTop: 0 }}>
-                推送消息预览
+              <Typography.Title level={5} style={{ marginTop: 0, textAlign: 'center' }}>
+                推送到达效果（一条消息）
               </Typography.Title>
-              <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-                模拟钉钉会话中的一条消息：上图下文顺序与最终 parts 一致
-              </Typography.Paragraph>
-              <div
-                style={{
-                  maxWidth: 480,
-                  margin: '0 auto',
-                  background: '#fff',
-                  borderRadius: 8,
-                  padding: 16,
-                  border: '1px solid #e8e8e8',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                }}
+              <Typography.Paragraph
+                type="secondary"
+                style={{ fontSize: 12, textAlign: 'center', marginBottom: 12 }}
               >
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
-                  标题：{shellPreview.title || '数据推送'}
-                </div>
-                {!isEmptyRichHtml(shellPreview.before) ? (
-                  looksLikeHtml(shellPreview.before) ? (
-                    <div
-                      className="comp-rich-preview"
-                      style={{
-                        fontSize: 14,
-                        lineHeight: 1.6,
-                        marginBottom: 12,
-                        color: '#222',
-                      }}
-                      dangerouslySetInnerHTML={{ __html: shellPreview.before }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        whiteSpace: 'pre-wrap',
-                        fontSize: 14,
-                        lineHeight: 1.6,
-                        marginBottom: 12,
-                        color: '#222',
-                      }}
-                    >
-                      {shellPreview.before}
-                    </div>
-                  )
-                ) : (
-                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                    （无图前文案）
-                  </Typography.Text>
-                )}
-
-                {String(artboard.compose?.mode || '') === 'markdown_primary' ? (
-                  <Alert type="warning" showIcon message="当前为「仅 Markdown」，不会附带画布图" />
-                ) : (
-                  <div
-                    style={{
-                      border: '1px dashed #d9d9d9',
-                      borderRadius: 6,
-                      padding: 8,
-                      background: '#fafafa',
-                      marginBottom: 12,
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>📷 画布推送图</div>
-                    <RenderPreview
-                      loading={finalLoading}
-                      image={finalPreview?.image_base64}
-                      html={null}
-                      error={finalPreview?.image_error || finalError}
-                      emptyHint="点「刷新画布图」生成"
-                      minHeight={200}
-                    />
-                  </div>
-                )}
-
-                {!isEmptyRichHtml(shellPreview.after) ? (
-                  looksLikeHtml(shellPreview.after) ? (
-                    <div
-                      className="comp-rich-preview"
-                      style={{ fontSize: 14, lineHeight: 1.6, color: '#222' }}
-                      dangerouslySetInnerHTML={{ __html: shellPreview.after }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        whiteSpace: 'pre-wrap',
-                        fontSize: 14,
-                        lineHeight: 1.6,
-                        color: '#222',
-                      }}
-                    >
-                      {shellPreview.after}
-                    </div>
-                  )
-                ) : (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    （无图后文案）
-                  </Typography.Text>
-                )}
-
-                {artboard.compose?.include_component_md ? (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
-                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                      + 组件 Markdown 摘要（开启时附加）
-                    </Typography.Text>
-                    <pre
-                      style={{
-                        fontSize: 11,
-                        maxHeight: 120,
-                        overflow: 'auto',
-                        background: '#fafafa',
-                        padding: 8,
-                        borderRadius: 4,
-                      }}
-                    >
-                      {finalPreview?.markdown_text || '（编译后显示）'}
-                    </pre>
-                  </div>
-                ) : null}
-              </div>
+                375 逻辑宽手机 · 钉钉 Markdown 卡片 + 合成推送图
+                <br />
+                终片 PNG 见第 5 步编译（与正式投递一致）
+              </Typography.Paragraph>
+              <DingTalkPhonePreview content={livePushContent} deviceWidth={375} deviceHeight={780} />
+              {String(artboard.compose?.mode || '') === 'markdown_primary' ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 12, maxWidth: 375, marginLeft: 'auto', marginRight: 'auto' }}
+                  message="当前为「仅 Markdown」，不会附带画布截图"
+                />
+              ) : null}
+              {canvases.length > 1 ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginTop: 12, maxWidth: 375, marginLeft: 'auto', marginRight: 'auto' }}
+                  message={`当前 ${canvases.length} 个画布将合成 1 张推送图（1 条消息）`}
+                />
+              ) : null}
             </div>
           </div>
         )}

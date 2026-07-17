@@ -397,6 +397,36 @@ def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s or "")
 
 
+def _content_inline_style(props: dict[str, Any], *, default_fs: int | None = None) -> str:
+    """组装画布内容样式 → inline style（字号/字重/色/对齐/行高）。"""
+    parts: list[str] = []
+    fs = props.get("content_font_size")
+    try:
+        if fs is not None and float(fs) > 0:
+            parts.append(f"font-size:{float(fs):g}px")
+        elif default_fs:
+            parts.append(f"font-size:{default_fs}px")
+    except (TypeError, ValueError):
+        if default_fs:
+            parts.append(f"font-size:{default_fs}px")
+    fw = props.get("content_font_weight")
+    if fw not in (None, ""):
+        parts.append(f"font-weight:{_esc(str(fw))}")
+    color = props.get("content_color")
+    if color:
+        parts.append(f"color:{_esc(str(color))}")
+    align = props.get("content_align")
+    if align in ("left", "center", "right"):
+        parts.append(f"text-align:{align}")
+    lh = props.get("content_line_height")
+    try:
+        if lh is not None and float(lh) > 0:
+            parts.append(f"line-height:{float(lh):g}")
+    except (TypeError, ValueError):
+        pass
+    return ";".join(parts)
+
+
 def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
     """渲染文本组件 HTML：先做 {{列}} 替换；富文本原样嵌入，纯文本按 variant 套样式。"""
     props = dict(node.get("props") or {})
@@ -404,8 +434,10 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
     result = _get_dataset(data_ctx, binding)
     raw = str(props.get("html") or props.get("text") or "")
     text = substitute_first_row(raw, result)
+    style = _content_inline_style(props)
+    style_attr = f" style='{style}'" if style else ""
     if _looks_like_html(text):
-        return f"<div class='comp-rich'>{text}</div>"
+        return f"<div class='comp-rich'{style_attr}>{text}</div>"
     variant = str(props.get("variant") or "body")
     cls = {
         "h1": "comp-text-h1",
@@ -416,7 +448,7 @@ def _render_text_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) ->
         "rich": "comp-text-body",
     }.get(variant, "comp-text-body")
     tag = "h1" if cls == "comp-text-h1" else "p"
-    return f"<{tag} class='{cls}'>{_esc(text)}</{tag}>"
+    return f"<{tag} class='{cls}'{style_attr}>{_esc(text)}</{tag}>"
 
 
 def _render_text_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
@@ -476,11 +508,39 @@ def _resolve_kpi(
 
 
 def _render_kpi_html(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """KPI 卡片 HTML。"""
+    """KPI 卡片 HTML（支持组装画布 content_* / label_* 字号颜色）。"""
+    props = dict(node.get("props") or {})
     label, value = _resolve_kpi(node, data_ctx)
+    label_style_parts: list[str] = []
+    value_style_parts: list[str] = []
+    try:
+        lfs = props.get("label_font_size")
+        if lfs is not None and float(lfs) > 0:
+            label_style_parts.append(f"font-size:{float(lfs):g}px")
+    except (TypeError, ValueError):
+        pass
+    if props.get("label_color"):
+        label_style_parts.append(f"color:{_esc(str(props['label_color']))}")
+    try:
+        vfs = props.get("content_font_size")
+        if vfs is not None and float(vfs) > 0:
+            value_style_parts.append(f"font-size:{float(vfs):g}px")
+    except (TypeError, ValueError):
+        pass
+    if props.get("content_color"):
+        value_style_parts.append(f"color:{_esc(str(props['content_color']))}")
+    fw = props.get("content_font_weight")
+    if fw not in (None, ""):
+        value_style_parts.append(f"font-weight:{_esc(str(fw))}")
+    align = props.get("content_align")
+    wrap = ""
+    if align in ("left", "center", "right"):
+        wrap = f" style='text-align:{align}'"
+    ls = f" style='{';'.join(label_style_parts)}'" if label_style_parts else ""
+    vs = f" style='{';'.join(value_style_parts)}'" if value_style_parts else ""
     return (
-        f"<div class='comp-kpi'><div class='label'>{_esc(label)}</div>"
-        f"<div class='value'>{_esc(value)}</div></div>"
+        f"<div class='comp-kpi'{wrap}><div class='label'{ls}>{_esc(label)}</div>"
+        f"<div class='value'{vs}>{_esc(value)}</div></div>"
     )
 
 
@@ -1047,23 +1107,91 @@ def _walk_md(node: dict[str, Any], data_ctx: dict[str, QueryResult]) -> list[str
     return []
 
 
-def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """组装完整 HTML 文档：主题 CSS + chrome 顶栏 + 组件树 body。
-
-    输出含 ``id='artboard'`` 根节点，供 Playwright 精确截图。
-    """
-    ab = dict(doc.get("artboard") or {})
-    pack = resolve_theme(ab)
-    width = int(ab.get("width") or 750)
+def list_canvases(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """列出画布；兼容仅有 ``tree`` 的旧文档（升为单画布）。"""
+    raw = doc.get("canvases")
+    if isinstance(raw, list) and raw:
+        out: list[dict[str, Any]] = []
+        for i, c in enumerate(raw):
+            if not isinstance(c, dict):
+                continue
+            out.append(
+                {
+                    **c,
+                    "id": str(c.get("id") or f"canvas_{i}"),
+                    "name": str(c.get("name") or f"画布 {i + 1}"),
+                    "tree": c.get("tree")
+                    if isinstance(c.get("tree"), dict)
+                    else {"type": "Container", "children": []},
+                }
+            )
+        if out:
+            return out
     tree = doc.get("tree") or {"type": "Container", "children": []}
-    tree_dict = tree if isinstance(tree, dict) else {}
-    body = _walk_html(tree_dict, data_ctx, canvas_width=width)
+    ab = dict(doc.get("artboard") or {})
+    return [
+        {
+            "id": "canvas_main",
+            "name": "画布 1",
+            "width": ab.get("width") or 750,
+            "show_chrome": ab.get("show_chrome"),
+            "chrome_title": ab.get("chrome_title"),
+            "theme": ab.get("theme"),
+            "tree": tree if isinstance(tree, dict) else {"type": "Container", "children": []},
+        }
+    ]
+
+
+def canvas_to_doc(parent: dict[str, Any], canvas: dict[str, Any]) -> dict[str, Any]:
+    """将单个画布提升为可独立编译的 artboard 文档。"""
+    ab = dict(parent.get("artboard") or {})
+    theme = canvas.get("theme") if isinstance(canvas.get("theme"), dict) else ab.get("theme")
+    ab = {
+        **ab,
+        "width": canvas.get("width") or ab.get("width") or 750,
+        "show_chrome": canvas.get("show_chrome")
+        if canvas.get("show_chrome") is not None
+        else ab.get("show_chrome"),
+        "chrome_title": canvas.get("chrome_title") or ab.get("chrome_title"),
+        "theme": theme,
+    }
+    tree = canvas.get("tree") if isinstance(canvas.get("tree"), dict) else {
+        "type": "Container",
+        "children": [],
+    }
+    return {
+        **{k: v for k, v in parent.items() if k not in ("tree", "canvases", "artboard", "compose")},
+        "artboard": ab,
+        "tree": tree,
+        "canvases": [canvas],
+    }
+
+
+def _render_one_canvas_block(
+    canvas: dict[str, Any],
+    data_ctx: dict[str, QueryResult],
+    *,
+    default_width: int = 750,
+) -> tuple[str, int]:
+    """渲染单个画布的 chrome+body HTML 片段，返回 (html, width)。"""
+    ab = {
+        "width": canvas.get("width") or default_width,
+        "show_chrome": canvas.get("show_chrome"),
+        "chrome_title": canvas.get("chrome_title") or "数据推送",
+        "theme": canvas.get("theme") if isinstance(canvas.get("theme"), dict) else {},
+    }
+    pack = resolve_theme(ab)
+    width = int(ab.get("width") or default_width)
+    tree = canvas.get("tree") if isinstance(canvas.get("tree"), dict) else {
+        "type": "Container",
+        "children": [],
+    }
+    body = _walk_html(tree, data_ctx, canvas_width=width)
     free = _children_use_free_layout(
-        [ch for ch in (tree_dict.get("children") or []) if isinstance(ch, dict)]
+        [ch for ch in (tree.get("children") or []) if isinstance(ch, dict)]
     )
     body_cls = "artboard-body free" if free else "artboard-body"
-    chrome_title = str(ab.get("chrome_title") or doc.get("scene_id") or "数据推送")
-    # chrome 标题也支持 {{列}}，默认取 main 数据集首行
+    chrome_title = str(ab.get("chrome_title") or "数据推送")
     main = data_ctx.get("main") or (next(iter(data_ctx.values())) if data_ctx else None)
     if main:
         chrome_title = substitute_first_row(chrome_title, main)
@@ -1072,18 +1200,89 @@ def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -
     chrome_html = (
         f"<div class='{bar_cls}'>{_esc(chrome_title)}</div>" if show_chrome else ""
     )
+    # 主题色写到本块，多画布可各自主题
+    block = (
+        f"<div class='artboard-panel' style='width:{width}px;"
+        f"{theme_css_vars(pack)}'>"
+        f"{chrome_html}<div class='{body_cls}'>{body}</div></div>"
+    )
+    return block, width
+
+
+def ordered_canvases_for_push(
+    doc: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """推送用画布顺序：优先 compose.segments 中的 canvas，否则全部画布。"""
+    canvases = list_canvases(doc)
+    by_id = {str(c.get("id")): c for c in canvases}
+    compose = dict(doc.get("compose") or {})
+    segs = _compose_segments(compose, canvases)
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for s in segs:
+        if str(s.get("type")) != "canvas":
+            continue
+        cid = str(s.get("canvas_id") or "")
+        c = by_id.get(cid)
+        if c and cid not in seen:
+            ordered.append(c)
+            seen.add(cid)
+    return ordered or canvases
+
+
+def build_artboard_html(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
+    """组装完整 HTML 文档：主题 CSS + 画布 body。
+
+    输出含 ``id='artboard'`` 根节点，供 Playwright 精确截图。
+    **多画布纵向合成一张图**（一条推送 = 一张成图），顺序见
+    :func:`ordered_canvases_for_push`。
+    """
+    panels = ordered_canvases_for_push(doc)
+    if not panels:
+        panels = list_canvases(doc)
+    default_w = int((doc.get("artboard") or {}).get("width") or 750)
+    blocks: list[str] = []
+    max_w = default_w
+    # 外层用第一画布主题做 :root
+    first_ab = {
+        "width": panels[0].get("width") if panels else default_w,
+        "theme": (panels[0].get("theme") if panels else None)
+        or (doc.get("artboard") or {}).get("theme"),
+    }
+    pack = resolve_theme(first_ab)
+    for c in panels:
+        block, w = _render_one_canvas_block(c, data_ctx, default_width=default_w)
+        blocks.append(block)
+        max_w = max(max_w, w)
+    stack_css = (
+        ".artboard-stack{display:flex;flex-direction:column;gap:16px;align-items:stretch;}"
+        ".artboard-panel{background:#fff;}"
+    )
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<style>{_CSS}\n:root {{ {theme_css_vars(pack)} --ab-width: {width}px; }}</style>"
+        f"<style>{_CSS}\n{stack_css}\n:root {{ {theme_css_vars(pack)} --ab-width: {max_w}px; }}</style>"
         "</head><body>"
-        f"<div class='artboard' id='artboard'>{chrome_html}"
-        f"<div class='{body_cls}'>{body}</div></div>"
+        f"<div class='artboard' id='artboard' style='width:{max_w}px'>"
+        f"<div class='artboard-stack'>{''.join(blocks)}</div></div>"
         "</body></html>"
     )
 
 
 def build_artboard_markdown(doc: dict[str, Any], data_ctx: dict[str, QueryResult]) -> str:
-    """组件树 → 单一 Markdown 字符串（段落间空行分隔）。"""
+    """组件树 → 单一 Markdown 字符串（段落间空行分隔）。
+
+    多画布时拼接各画布 Markdown。
+    """
+    canvases = list_canvases(doc)
+    chunks: list[str] = []
+    for c in canvases:
+        tree = c.get("tree") or {}
+        parts = _walk_md(tree if isinstance(tree, dict) else {}, data_ctx)
+        md = "\n\n".join(p for p in parts if p)
+        if md:
+            chunks.append(md)
+    if chunks:
+        return "\n\n".join(chunks)
     tree = doc.get("tree") or {}
     parts = _walk_md(tree if isinstance(tree, dict) else {}, data_ctx)
     return "\n\n".join(p for p in parts if p)
@@ -1189,6 +1388,32 @@ def _compose_include_component_md(compose: dict[str, Any], *, has_shell_text: bo
     return compose.get("markdown_caption", True) is not False
 
 
+def _compose_segments(compose: dict[str, Any], canvases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """解析 compose.segments；缺失时由 text_before/after + 全画布生成默认顺序。"""
+    raw = compose.get("segments")
+    if isinstance(raw, list) and raw:
+        ids = {str(c.get("id")) for c in canvases}
+        out: list[dict[str, Any]] = []
+        for s in raw:
+            if not isinstance(s, dict):
+                continue
+            st = str(s.get("type") or "")
+            if st == "text":
+                out.append(s)
+            elif st == "canvas" and str(s.get("canvas_id") or "") in ids:
+                out.append(s)
+        if out:
+            return out
+    # 默认：图前文案 → 各画布 → 图后文案
+    segs: list[dict[str, Any]] = [
+        {"id": "seg_before", "type": "text", "html": compose.get("text_before") or ""},
+    ]
+    for c in canvases:
+        segs.append({"id": f"seg_{c.get('id')}", "type": "canvas", "canvas_id": c.get("id")})
+    segs.append({"id": "seg_after", "type": "text", "html": compose.get("text_after") or ""})
+    return segs
+
+
 def artboard_to_message(
     doc: dict[str, Any],
     data_ctx: dict[str, QueryResult],
@@ -1197,11 +1422,19 @@ def artboard_to_message(
 ) -> Message:
     """画板 + 推送外壳 → 出站 :class:`Message`。
 
+    **产品约束：**
+
+    - 多画布 **纵向合成一张 PNG**（不按画布拆多条 image）
+    - 文案按 segments 相对画布位置拆成 **图前 / 图后**，顺序：
+      ``text_before → image → text_after``
+    - 通道应按 parts 顺序投递，避免图后文案跑到图前
+
     compose 字段（``doc.compose``）::
 
         mode: image_primary | markdown_primary | mixed | image_only
-        text_before / text_after: 画板图前后的外壳文案
-        title: 钉钉等渠道的消息标题
+        segments: 编辑顺序（文案/画布）；成图时画布按出现顺序堆叠
+        text_before / text_after: 兼容旧单画布
+        title: 钉钉 markdown.title / 通知标题
         include_component_md / markdown_caption: 是否附带组件树 MD
 
     成图失败时按 mode 降级为纯文本，保证渠道仍可收到内容。
@@ -1209,14 +1442,39 @@ def artboard_to_message(
     md_auto = build_artboard_markdown(doc, data_ctx)
     compose = dict(doc.get("compose") or {})
     mode = str(compose.get("mode") or "image_primary")
-    text_before = _resolve_compose_text(compose.get("text_before"), data_ctx)
-    text_after = _resolve_compose_text(compose.get("text_after"), data_ctx)
+    canvases = list_canvases(doc)
+    segments = _compose_segments(compose, canvases)
+
+    # 图前文案 / 图后文案（按 segments 中画布出现位置切分）
+    before_chunks: list[str] = []
+    after_chunks: list[str] = []
+    seen_canvas = False
+    for s in segments:
+        st = str(s.get("type") or "")
+        if st == "canvas":
+            seen_canvas = True
+            continue
+        if st == "text":
+            t = _resolve_compose_text(s.get("html"), data_ctx)
+            if not t:
+                continue
+            if seen_canvas:
+                after_chunks.append(t)
+            else:
+                before_chunks.append(t)
+    text_before = "\n\n".join(before_chunks)
+    text_after = "\n\n".join(after_chunks)
+    # 兼容旧字段（无有效 segments 文案时）
+    if not text_before and not text_after:
+        text_before = _resolve_compose_text(compose.get("text_before"), data_ctx)
+        text_after = _resolve_compose_text(compose.get("text_after"), data_ctx)
+
     has_shell = bool(text_before or text_after)
     include_auto = _compose_include_component_md(compose, has_shell_text=has_shell)
     auto_md = md_auto if include_auto else ""
     title = _resolve_compose_text(compose.get("title"), data_ctx)
     if not title:
-        title = (auto_md or md_auto or text_before or "数据推送").split("\n")[0][:80]
+        title = (text_before or text_after or auto_md or md_auto or "数据推送").split("\n")[0][:80]
 
     parts: list[MessagePart] = []
 
@@ -1224,40 +1482,53 @@ def artboard_to_message(
         if content:
             parts.append(MessagePart(kind="text", content=content))
 
-    if mode == "markdown_primary":
-        body = "\n\n".join(x for x in (text_before, auto_md or md_auto, text_after) if x)
-        parts.append(MessagePart(kind="text", content=body or "（空内容）"))
-        return Message(parts=parts)
-
-    # image_primary / mixed / image_only：可选文案 → 图 → 可选文案
-    _append_text(text_before)
-
-    image_added = False
-    if with_image and mode != "markdown_primary":
+    def _append_combined_image() -> bool:
+        """多画布合成一张图，只产生一个 image part。"""
         html_doc = build_artboard_html(doc, data_ctx)
         width = int((doc.get("artboard") or {}).get("width") or 750)
+        for c in ordered_canvases_for_push(doc):
+            width = max(width, int(c.get("width") or width))
         _png, path = _html_to_png(html_doc, width=width)
         if path:
             parts.append(
                 MessagePart(kind="image", content={"path": path, "title": title})
             )
-            image_added = True
-        elif mode == "image_only":
-            parts.append(MessagePart(kind="text", content="（成图失败）"))
-            return Message(parts=parts)
-        elif mode != "mixed" and not has_shell and not auto_md:
-            # 无截图引擎且无其它内容 — 回退组件 MD
-            parts.append(MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）"))
-            return Message(parts=parts)
+            return True
+        return False
 
-    if text_after:
-        _append_text(text_after)
-    elif auto_md and (mode == "mixed" or include_auto or not image_added):
-        # 兼容/混合：用户未设 text_after 时用组件 MD 作图注
-        _append_text(auto_md)
+    if mode == "markdown_primary":
+        body = "\n\n".join(
+            x for x in (text_before, text_after, auto_md or md_auto) if x
+        )
+        parts.append(MessagePart(kind="text", content=body or "（空内容）"))
+        return Message(parts=parts)
+
+    if mode == "image_only":
+        if with_image and _append_combined_image():
+            return Message(parts=parts)
+        parts.append(MessagePart(kind="text", content="（成图失败）"))
+        return Message(parts=parts)
+
+    # image_primary / mixed：图前 → 合成图 → 图后（顺序重要）
+    before_body = text_before
+    if auto_md and (mode == "mixed" or include_auto) and not text_after:
+        # 自动 MD 作为图注：放图后
+        pass
+    _append_text(before_body)
+
+    image_added = False
+    if with_image:
+        image_added = _append_combined_image()
+
+    after_body = text_after
+    if auto_md and (mode == "mixed" or include_auto or (not image_added and not has_shell)):
+        after_body = "\n\n".join(x for x in (after_body, auto_md) if x)
+    _append_text(after_body)
 
     if not parts:
-        parts.append(MessagePart(kind="text", content="（空内容）"))
+        parts.append(
+            MessagePart(kind="text", content=md_auto or "（成图失败，仅文本）")
+        )
 
     return Message(parts=parts)
 

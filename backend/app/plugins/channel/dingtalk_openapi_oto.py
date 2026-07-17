@@ -222,11 +222,9 @@ class DingTalkOpenAPIOtoRobotPlugin:
         user_ids = _parse_user_ids(config)
         batch_size = int(config.get("batch_size") or _DEFAULT_BATCH)
         title = str(config.get("title") or "数据推送")
-        text = self._message_to_text(message)
-        images = self._image_parts(message)
         provider_ids: list[str] = []
 
-        if (not text or text == "(empty message)") and not images:
+        if not message.parts:
             return DeliveryResult(success=False, error="empty message")
 
         try:
@@ -235,26 +233,14 @@ class DingTalkOpenAPIOtoRobotPlugin:
                 oapi_token: str | None = None
 
                 for batch in _chunked(user_ids, batch_size):
-                    if text and text != "(empty message)":
-                        data = self._send_oto(
-                            client,
-                            access_token,
-                            config,
-                            batch,
-                            msg_key="sampleMarkdown",
-                            msg_param={"title": title, "text": text},
-                        )
-                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
-                        if pid is not None:
-                            provider_ids.append(str(pid))
-
-                    if images:
-                        if oapi_token is None:
-                            oapi_token = self._fetch_oapi_access_token(client, config)
-                        for part in images:
+                    # 严格按 parts 顺序：图前 MD → 图 → 图后 MD
+                    for part in message.parts:
+                        if part.kind == "image":
                             path = self._part_path(part)
                             if not path:
                                 continue
+                            if oapi_token is None:
+                                oapi_token = self._fetch_oapi_access_token(client, config)
                             media_id = self._upload_image(client, oapi_token, path)
                             data = self._send_oto(
                                 client,
@@ -267,6 +253,21 @@ class DingTalkOpenAPIOtoRobotPlugin:
                             pid = data.get("processQueryKey") or data.get("processQueryKeys")
                             if pid is not None:
                                 provider_ids.append(str(pid))
+                            continue
+                        text = self._part_to_text(part).strip()
+                        if not text:
+                            continue
+                        data = self._send_oto(
+                            client,
+                            access_token,
+                            config,
+                            batch,
+                            msg_key="sampleMarkdown",
+                            msg_param={"title": title, "text": text},
+                        )
+                        pid = data.get("processQueryKey") or data.get("processQueryKeys")
+                        if pid is not None:
+                            provider_ids.append(str(pid))
 
         except httpx.HTTPError as exc:
             return DeliveryResult(success=False, error=f"http error: {exc}")
