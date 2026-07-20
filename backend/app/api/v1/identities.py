@@ -50,6 +50,7 @@ def create_identity(body: IdentityCreate, db: Session = Depends(get_db)) -> Iden
         kind=body.kind,
         channel_type=body.channel_type,
         external_id=body.external_id,
+        external_extra=body.external_extra,
         external_name=body.external_name,
     )
     db.add(row)

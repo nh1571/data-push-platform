@@ -13,6 +13,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './auth/RequireAuth'
 import { AppLayout } from './layouts/AppLayout'
 import { IdentityFormPage } from './pages/address-book/Form'
+import { RecipientGroupFormPage } from './pages/address-book/GroupForm'
 import { IdentityListPage } from './pages/address-book/List'
 import { ChannelFormPage } from './pages/channels/Form'
 import { ChannelListPage } from './pages/channels/List'
@@ -87,6 +88,8 @@ export default function App() {
               <Route path="/channels/:id" element={<ChannelFormPage />} />
               <Route path="/address-book" element={<IdentityListPage />} />
               <Route path="/address-book/new" element={<IdentityFormPage />} />
+              <Route path="/address-book/group/new" element={<RecipientGroupFormPage />} />
+              <Route path="/address-book/group/:id" element={<RecipientGroupFormPage />} />
               <Route path="/address-book/:id" element={<IdentityFormPage />} />
               <Route path="/push-jobs" element={<PushJobListPage />} />
               {/* 新建任务统一走列表弹窗 → 编辑器，避免旧 Form 入口 */}

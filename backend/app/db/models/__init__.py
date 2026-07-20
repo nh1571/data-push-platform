@@ -5,9 +5,8 @@
 
 from app.db.models.api_token import ApiToken
 from app.db.models.channel import Channel
-from app.db.models.identity import ChannelRecipient
+from app.db.models.identity import ChannelRecipient, Identity, RecipientGroup, RecipientGroupMember
 from app.db.models.data_source import DataSource
-from app.db.models.identity import Identity
 from app.db.models.delivery import Delivery
 from app.db.models.enums import (
     ChannelType,
@@ -39,6 +38,8 @@ __all__ = [
     "LogLevel",
     "Operator",
     "PushJob",
+    "RecipientGroup",
+    "RecipientGroupMember",
     "StudioTemplate",
     "TriggerType",
 ]

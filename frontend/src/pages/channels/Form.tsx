@@ -11,9 +11,9 @@ import { ApiOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { Alert, Button, Form, Input, message, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { createChannel, getChannel, listIdentities, testChannel, updateChannel } from '../../api'
+import { createChannel, getChannel, listIdentities, listRecipientGroups, testChannel, updateChannel } from '../../api'
 import { getErrorMessage } from '../../api/client'
-import type { Identity } from '../../api/types'
+import type { Identity, RecipientGroup } from '../../api/types'
 
 /** 通道提供商（目前仅钉钉） */
 const PROVIDERS = [{ value: 'dingtalk', label: '钉钉' }]
@@ -84,6 +84,7 @@ export function ChannelFormPage() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [identities, setIdentities] = useState<Identity[]>([])
+  const [recGroups, setRecGroups] = useState<RecipientGroup[]>([])
   const channelType = Form.useWatch('type', form)
   const isWebhook =
     !channelType ||
@@ -97,16 +98,57 @@ export function ChannelFormPage() {
   const personIdentities = identities.filter(
     (i) => i.kind === 'person' && i.channel_type === 'dingtalk',
   )
-  /** 选取钉钉群身份 */
+  /** 选取钉钉群聊身份 */
   const groupIdentities = identities.filter(
     (i) => i.kind === 'group' && i.channel_type === 'dingtalk',
   )
+  /** 选取钉钉收件人组 */
+  const dingtalkRecGroups = recGroups.filter((g) => g.channel_type === 'dingtalk')
 
-  // 加载通讯录身份列表
+  /** 获取收件人组的展开成员 ID 列表 */
+  const expandGroupMembers = (selectedIds: string[]): string[] => {
+    const expanded = new Set<string>()
+    for (const sid of selectedIds) {
+      const grp = dingtalkRecGroups.find((g) => g.id === sid)
+      if (grp) {
+        grp.member_ids.forEach((mid) => expanded.add(mid))
+      } else {
+        expanded.add(sid)
+      }
+    }
+    return Array.from(expanded)
+  }
+
+  /** 构建个人 + 收件人组的 optgroup 选项（用于 OTO / 工作通知收件人 Select） */
+  const personWithGroupOptions = [
+    {
+      label: '个人',
+      options: personIdentities.map((i) => ({
+        value: i.id,
+        label: `${i.name} (${i.external_id})`,
+      })),
+    },
+    ...(dingtalkRecGroups.length > 0
+      ? [
+          {
+            label: '收件人组',
+            options: dingtalkRecGroups.map((g) => ({
+              value: g.id,
+              label: `${g.name} (${g.member_count}人)`,
+            })),
+          },
+        ]
+      : []),
+  ]
+
+  // 加载通讯录身份列表 + 收件人组
   useEffect(() => {
     listIdentities({ channel_type: 'dingtalk' })
       .then(setIdentities)
-      .catch(() => {}) // 通讯录加载失败不影响通道编辑
+      .catch(() => {})
+    listRecipientGroups({ channel_type: 'dingtalk' })
+      .then(setRecGroups)
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -172,7 +214,7 @@ export function ChannelFormPage() {
       if (values.agent_id) config.agent_id = values.agent_id
       if (values.dept_id_list) config.dept_id_list = values.dept_id_list
       if (values.recipient_identity_ids?.length) {
-        config.recipient_identity_ids = values.recipient_identity_ids
+        config.recipient_identity_ids = expandGroupMembers(values.recipient_identity_ids)
       }
       if (values.title) config.title = values.title
       return config
@@ -199,7 +241,7 @@ export function ChannelFormPage() {
       }
       if (values.robot_code) config.robot_code = values.robot_code
       if (values.recipient_identity_ids?.length) {
-        config.recipient_identity_ids = values.recipient_identity_ids
+        config.recipient_identity_ids = expandGroupMembers(values.recipient_identity_ids)
       }
       if (values.title) config.title = values.title
       return config
@@ -288,7 +330,7 @@ export function ChannelFormPage() {
               dept_id_list: values.dept_id_list || '',
             }
             if (values.recipient_identity_ids?.length) {
-              body.config.recipient_identity_ids = values.recipient_identity_ids
+              body.config.recipient_identity_ids = expandGroupMembers(values.recipient_identity_ids)
             }
             if (values.title) body.config.title = values.title
           } else {
@@ -317,7 +359,7 @@ export function ChannelFormPage() {
               robot_code: values.robot_code,
             }
             if (values.recipient_identity_ids?.length) {
-              body.config.recipient_identity_ids = values.recipient_identity_ids
+              body.config.recipient_identity_ids = expandGroupMembers(values.recipient_identity_ids)
             }
             if (values.title) body.config.title = values.title
           } else {
@@ -471,11 +513,8 @@ export function ChannelFormPage() {
                 mode="multiple"
                 showSearch
                 optionFilterProp="label"
-                placeholder="搜索并选择用户"
-                options={personIdentities.map((i) => ({
-                  value: i.id,
-                  label: `${i.name} (${i.external_id})`,
-                }))}
+                placeholder="搜索并选择用户或收件人组"
+                options={personWithGroupOptions}
               />
             </Form.Item>
             <Form.Item
@@ -574,17 +613,14 @@ export function ChannelFormPage() {
               name="recipient_identity_ids"
               label="收件人"
               rules={[{ required: true, message: '请选择收件人' }]}
-              extra="从通讯录中选择已登记的钉钉用户；超过 20 人自动拆批发送"
+              extra="从通讯录中选择已登记的钉钉用户或收件人组；超过 20 人自动拆批发送"
             >
               <Select
                 mode="multiple"
                 showSearch
                 optionFilterProp="label"
-                placeholder="搜索并选择用户"
-                options={personIdentities.map((i) => ({
-                  value: i.id,
-                  label: `${i.name} (${i.external_id})`,
-                }))}
+                placeholder="搜索并选择用户或收件人组"
+                options={personWithGroupOptions}
               />
             </Form.Item>
             <Form.Item name="title" label="消息标题">
