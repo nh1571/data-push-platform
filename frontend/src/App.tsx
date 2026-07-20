@@ -21,7 +21,6 @@ import { DashboardPage } from './pages/Dashboard'
 import { DataSourceFormPage } from './pages/data-sources/Form'
 import { DataSourceListPage } from './pages/data-sources/List'
 import { EditorPage } from './pages/editor/EditorPage'
-import { EditorPageV2 } from './pages/editor/EditorPageV2'
 import { JobRunDetailPage } from './pages/job-runs/Detail'
 import { JobRunListPage } from './pages/job-runs/List'
 import { LoginPage } from './pages/Login'
@@ -81,8 +80,6 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/editor" element={<EditorPage />} />
               <Route path="/editor/:jobId" element={<EditorPage />} />
-              <Route path="/editor-v2" element={<EditorPageV2 />} />
-              <Route path="/editor-v2/:jobId" element={<EditorPageV2 />} />
               <Route path="/data-sources" element={<DataSourceListPage />} />
               <Route path="/data-sources/new" element={<DataSourceFormPage />} />
               <Route path="/data-sources/:id" element={<DataSourceFormPage />} />
