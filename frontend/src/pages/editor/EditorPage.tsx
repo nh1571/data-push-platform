@@ -82,7 +82,6 @@ import {
 } from './artboardModel'
 import { CanvasLivePreview } from './CanvasLivePreview'
 import { ChannelRecipientInfo } from './ChannelRecipientInfo'
-import { useEditorState } from './hooks/useEditorState'
 import {
   ComposeCanvas,
   ensureComposeLayouts,
@@ -603,7 +602,7 @@ function RenderPreview({
           style={{
             maxWidth: '100%',
             borderRadius: 8,
-            border: '1px solid #e8e8e8',
+            border: '1px solid #f0f0f0',
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
           }}
         />
@@ -633,7 +632,7 @@ function RenderPreview({
           style={{
             width: '100%',
             minHeight,
-            border: '1px solid #e8e8e8',
+            border: '1px solid #f0f0f0',
             borderRadius: 8,
             background: '#fff',
           }}
@@ -655,95 +654,956 @@ function RenderPreview({
  */
 export function EditorPage() {
   const { jobId } = useParams<{ jobId?: string }>()
-  const s = useEditorState(jobId)
+  const navigate = useNavigate()
 
-  if (s.loading) {
-    return (
-      <div style={{ minHeight: 360, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Spin tip="渲染中…" />
-      </div>
+  const [step, setStep] = useState<StepKey>('data')
+  const [loading, setLoading] = useState(false)
+  const [sources, setSources] = useState<DataSource[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
+
+  const [name, setName] = useState('')
+  const [dataSourceId, setDataSourceId] = useState<string | undefined>()
+  const [sql, setSql] = useState(
+    "SELECT '演示院区' AS 院区, 1200 AS 门诊量, 80 AS 住院\nUNION ALL SELECT '对照', 980, 72",
+  )
+  const [channelIds, setChannelIds] = useState<string[]>([])
+  const [enabled, setEnabled] = useState(true)
+  const [currentJobId, setCurrentJobId] = useState<string | null>(jobId ?? null)
+
+  const [artboard, setArtboard] = useState<ArtboardDoc>(() => emptyArtboard())
+  const [editId, setEditId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<DraftForm | null>(null)
+
+  const [fieldsByDataset, setFieldsByDataset] = useState<Record<string, string[]>>({})
+  const [rowsByDataset, setRowsByDataset] = useState<Record<string, unknown[][]>>({})
+  const [activeDatasetId, setActiveDatasetId] = useState('main')
+
+  // 最终预览：服务端 compile 结果（主要在 preview / message 步骤使用）
+  const [finalPreview, setFinalPreview] = useState<StudioCompileResponse | null>(null)
+  const [finalLoading, setFinalLoading] = useState(false)
+  const [finalError, setFinalError] = useState<string | null>(null)
+
+  const [querying, setQuerying] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [selectedComposeId, setSelectedComposeId] = useState<string | null>(null)
+  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
+  const [resolvedPreview, setResolvedPreview] = useState<Record<string, string>>({})
+  const [renderedSqlPreview, setRenderedSqlPreview] = useState('')
+  /** 导出试推 Markdown 中的图片路径占位（用户可改成推送环境路径） */
+  const [exportImageRef, setExportImageRef] = useState('push-image.png')
+
+  const canvases = useMemo(() => listCanvases(artboard), [artboard])
+  const effectiveCanvasId =
+    activeCanvasId && canvases.some((c) => c.id === activeCanvasId)
+      ? activeCanvasId
+      : canvases[0]?.id || null
+  const activeCanvas = canvases.find((c) => c.id === effectiveCanvasId) || canvases[0]
+  const tree = activeCanvas?.tree || artboard.tree
+  const datasets = artboard.datasets || []
+  const activeDs = datasets.find((d) => d.id === activeDatasetId) || datasets[0]
+  const datasetOptions = datasets.map((d) => ({ value: d.id, label: d.name || d.id }))
+  /** 当前画布上已放置的组件 */
+  const cart = useMemo(() => canvasChildren(activeCanvas), [activeCanvas])
+  /** 组件库（做组件产出，组装时挑选） */
+  const library = useMemo(
+    () => artboard.library || [],
+    [artboard.library],
+  )
+  const libraryCount = library.length
+  /** 所有画布上已放置组件数 */
+  const allCartCount = useMemo(
+    () => canvases.reduce((n, c) => n + canvasChildren(c).length, 0),
+    [canvases],
+  )
+  const draftFields = fieldsByDataset[draft?.dataset_id || activeDatasetId] || []
+  const previewColumns = fieldsByDataset[activeDatasetId] || []
+  const previewRows = rowsByDataset[activeDatasetId] || []
+
+  const setTree = (next: StudioNode) => {
+    setArtboard((p) => {
+      const n = normalizeArtboardDoc(p)
+      const cid = effectiveCanvasId || n.canvases?.[0]?.id
+      if (!cid) return { ...n, tree: next }
+      return setCanvasTree(n, cid, next)
+    })
+  }
+
+  const loadMeta = useCallback(async () => {
+    const [ds, ch] = await Promise.all([listDataSources(), listChannels()])
+    setSources(ds)
+    setChannels(ch)
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    loadMeta()
+      .then(async () => {
+        if (!jobId) {
+          setArtboard(emptyArtboard())
+          setCurrentJobId(null)
+          setName('')
+          setDataSourceId(undefined)
+          setStep('data')
+          return
+        }
+        const job = await getPushJob(jobId)
+        setCurrentJobId(job.id)
+        setName(job.name)
+        setDataSourceId(job.data_source_id)
+        setSql(job.query_sql)
+        setChannelIds(job.channel_ids ?? [])
+        setEnabled(job.enabled)
+        const extracted = extractArtboardFromJob(job.render_spec)
+        setArtboard(
+          normalizeArtboardDoc(
+            extracted || syncMainDataset(emptyArtboard(), job.data_source_id, job.query_sql),
+          ),
+        )
+      })
+      .catch((e) => message.error(getErrorMessage(e)))
+      .finally(() => setLoading(false))
+  }, [jobId, loadMeta])
+
+  const buildDoc = useCallback((): ArtboardDoc => {
+    let doc = syncMainDataset(artboard, dataSourceId, sql)
+    doc = {
+      ...doc,
+      datasets: (doc.datasets || []).map((d) => ({
+        ...d,
+        data_source_id: d.data_source_id || dataSourceId || null,
+      })),
+    }
+    return normalizeArtboardDoc(doc)
+  }, [artboard, dataSourceId, sql])
+
+  const runCompile = useCallback(
+    async (doc: ArtboardDoc) => {
+      if (!dataSourceId) throw new Error('请先选择数据源并取数')
+      return studioCompile({
+        artboard: doc,
+        data_source_id: dataSourceId,
+        sql,
+        want_image: true,
+        max_rows: 50,
+      })
+    },
+    [dataSourceId, sql],
+  )
+
+  const patchCompose = useCallback((patch: NonNullable<ArtboardDoc['compose']>) => {
+    setArtboard((prev) => ({
+      ...prev,
+      compose: { ...prev.compose, text_format: 'html', ...patch },
+    }))
+  }, [])
+
+  // 仅第 5 步自动服务端编译；组装推送用本地实时预览（避免 Playwright 过慢）
+  useEffect(() => {
+    if (step !== 'preview') return
+    if (!dataSourceId) {
+      setFinalError('请先完成数据源选择与取数')
+      return
+    }
+    if (allCartCount === 0) {
+      setFinalError('画布上没有组件：请在「组装画布」从组件库放到画布')
+      setFinalPreview(null)
+      return
+    }
+    setFinalLoading(true)
+    setFinalError(null)
+    runCompile(buildDoc())
+      .then((res) => {
+        setFinalPreview(res)
+        if (!res.image_base64 && res.image_error) setFinalError(res.image_error)
+      })
+      .catch((e) => {
+        setFinalPreview(null)
+        setFinalError(getErrorMessage(e))
+      })
+      .finally(() => setFinalLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, allCartCount, dataSourceId])
+
+  const activeParamDefs = useMemo((): SqlParamDef[] => {
+    const ds = datasets.find((d) => d.id === activeDatasetId)
+    return (ds?.params as SqlParamDef[]) || []
+  }, [datasets, activeDatasetId])
+
+  const setActiveParamDefs = (params: SqlParamDef[]) => {
+    const ds = datasets.find((d) => d.id === activeDatasetId)
+    setArtboard((p) =>
+      upsertDataset(p, {
+        id: activeDatasetId,
+        name: ds?.name || (activeDatasetId === 'main' ? '主查询' : activeDatasetId),
+        data_source_id:
+          activeDatasetId === 'main'
+            ? dataSourceId
+            : ds?.data_source_id || dataSourceId || null,
+        sql: activeDatasetId === 'main' ? sql : String(ds?.sql || ''),
+        params,
+      }),
     )
   }
 
-  const {
-    step, setStep, sources, channels,
-    name, setName, dataSourceId, setDataSourceId, sql, setSql,
-    channelIds, setChannelIds, enabled, setEnabled, currentJobId,
-    artboard, editId, draft,
-    fieldsByDataset, rowsByDataset, activeDatasetId,
-    finalPreview, finalLoading, finalError,
-    querying, saving, pushing,
-    selectedComposeId, activeCanvasId,
-    resolvedPreview, renderedSqlPreview, exportImageRef,
-    canvases, effectiveCanvasId, activeCanvas, tree, datasets, activeDs, datasetOptions,
-    cart, library, libraryCount, allCartCount,
-    draftFields, previewColumns, previewRows, setTree,
-    loadMeta, buildDoc, runCompile, patchCompose,
-    activeParamDefs, setActiveParamDefs, refreshResolvedPreview,
-    onQueryDataset, addDataset, removeDataset,
-    startNew, addToCart,
-    placeLibraryOnCanvas, removeFromCanvas, removeFromLibrary,
-    patchComposeLayout, onAddCanvas,
-    setSegments, patchSegmentHtml, moveSegment, addTextSegment, removeSegment,
-    applyTemplate, onSave, onTestPush,
-    navigate,
-  } = s
+  const refreshResolvedPreview = async () => {
+    const slotSql =
+      activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')
+    try {
+      const res = await resolveSqlParams({
+        sql: slotSql,
+        param_defs: activeParamDefs,
+      })
+      setResolvedPreview(res.resolved || {})
+    } catch {
+      /* ignore */
+    }
+  }
 
+  useEffect(() => {
+    void refreshResolvedPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDatasetId, sql, activeDs?.sql, JSON.stringify(activeParamDefs)])
+
+  const onQueryDataset = async (datasetId: string) => {
+    const dsMeta = datasets.find((d) => d.id === datasetId)
+    const slotSql =
+      datasetId === 'main' ? sql : String(dsMeta?.sql || '')
+    const slotDs = String(
+      datasetId === 'main'
+        ? dataSourceId
+        : dsMeta?.data_source_id || dataSourceId || '',
+    )
+    if (!slotDs) {
+      message.error('请先为该数据集选择数据源')
+      return
+    }
+    if (!slotSql.trim()) {
+      message.error('请填写 SQL')
+      return
+    }
+    const paramDefs = (dsMeta?.params as SqlParamDef[]) || []
+    setQuerying(true)
+    try {
+      const res = await queryPreview({
+        data_source_id: slotDs,
+        sql: slotSql,
+        param_defs: paramDefs,
+        max_rows: 200,
+      })
+      setFieldsByDataset((p) => ({ ...p, [datasetId]: res.columns }))
+      setRowsByDataset((p) => ({ ...p, [datasetId]: res.rows }))
+      if (res.resolved_params) setResolvedPreview(res.resolved_params)
+      if (res.rendered_sql) setRenderedSqlPreview(res.rendered_sql)
+      if (datasetId === 'main') {
+        setArtboard((p) =>
+          upsertDataset(syncMainDataset(p, slotDs, slotSql), {
+            id: 'main',
+            name: dsMeta?.name || '主查询',
+            data_source_id: slotDs,
+            sql: slotSql,
+            params: paramDefs,
+          }),
+        )
+        setDataSourceId(slotDs)
+        setSql(slotSql)
+      } else {
+        setArtboard((p) =>
+          upsertDataset(p, {
+            id: datasetId,
+            name: dsMeta?.name,
+            data_source_id: slotDs,
+            sql: slotSql,
+            params: paramDefs,
+          }),
+        )
+      }
+      const rp = res.resolved_params || {}
+      const hint = Object.keys(rp).length
+        ? ` · 参数 ${Object.entries(rp)
+            .slice(0, 4)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(', ')}`
+        : ''
+      message.success(`「${dsMeta?.name || datasetId}」取数 ${res.row_count} 行${hint}`)
+    } catch (e) {
+      message.error(getErrorMessage(e))
+    } finally {
+      setQuerying(false)
+    }
+  }
+
+  const addDataset = () => {
+    const id = `ds_${nid().slice(0, 6)}`
+    const nameDs = `数据集${datasets.length + 1}`
+    setArtboard((p) =>
+      upsertDataset(p, {
+        id,
+        name: nameDs,
+        data_source_id: dataSourceId || null,
+        sql: 'SELECT 1 AS demo',
+      }),
+    )
+    setActiveDatasetId(id)
+    message.success(`已添加 ${nameDs}，请配置 SQL 并取数`)
+  }
+
+  const removeDataset = (id: string) => {
+    if (id === 'main') {
+      message.error('主数据集不可删除')
+      return
+    }
+    setArtboard((p) => ({
+      ...p,
+      datasets: (p.datasets || []).filter((d) => d.id !== id),
+    }))
+    setFieldsByDataset((p) => {
+      const n = { ...p }
+      delete n[id]
+      return n
+    })
+    setRowsByDataset((p) => {
+      const n = { ...p }
+      delete n[id]
+      return n
+    })
+    if (activeDatasetId === id) setActiveDatasetId('main')
+  }
+
+  const readyDsOptions = readyDatasets(datasets, fieldsByDataset)
+
+  const startNew = (paletteType: string) => {
+    setEditId(null)
+    const preferDs =
+      readyDsOptions.find((d) => d.value === activeDatasetId)?.value ||
+      readyDsOptions[0]?.value ||
+      activeDatasetId
+    setDraft(emptyDraft(paletteType, preferDs))
+  }
+
+  const addToCart = async () => {
+    if (!draft || !tree) return
+    const vcols =
+      draft.value_columns && draft.value_columns.length
+        ? draft.value_columns
+        : draft.value_column
+          ? [draft.value_column]
+          : []
+    if (draft.type === 'Kpi' && !draft.value_column && !vcols.length) {
+      message.error('请选择数值字段')
+      return
+    }
+    if (draft.type === 'Chart' && (!draft.category_column || !vcols.length)) {
+      message.error('请选择分类字段和至少一个数值字段')
+      return
+    }
+    if (draft.type === 'Text' || draft.type === 'Alert') {
+      const plain = String(draft.text || '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim()
+      if (!plain) {
+        message.error('请填写文案')
+        return
+      }
+    }
+
+    let node = draftToNode(draft, editId || undefined)
+
+    // 组件写入「组件库」；不自动铺到画布，需在组装步挑选
+    setArtboard((prev) => {
+      const n = normalizeArtboardDoc(prev)
+      let lib = [...(n.library || [])]
+      if (editId) {
+        const oldLib = lib.find((x) => x.id === editId)
+        const kept: Record<string, unknown> = {}
+        if (oldLib?.props) {
+          for (const k of COMPOSE_PROP_KEYS) {
+            if (oldLib.props[k] !== undefined) kept[k] = oldLib.props[k]
+          }
+        }
+        const nextNode = {
+          ...node,
+          id: editId,
+          props: {
+            ...node.props,
+            ...kept,
+            library_id: String(oldLib?.props?.library_id || editId),
+          },
+        }
+        lib = lib.map((x) => (x.id === editId ? nextNode : x))
+        // 同步已放到各画布、同源的实例（保留 compose_* 布局）
+        const libKey = String(nextNode.props?.library_id || editId)
+        const canvasesNext = (n.canvases || []).map((c) => {
+          if (!c.tree) return c
+          let t = c.tree
+          for (const ch of c.tree.children || []) {
+            const src = String(ch.props?.library_id || ch.id)
+            if (src !== libKey && ch.id !== editId) continue
+            // 只保留画布布局，样式以做组件新配置为准
+            const layoutKeep: Record<string, unknown> = {}
+            for (const k of COMPOSE_LAYOUT_KEYS) {
+              if (ch.props?.[k] !== undefined) layoutKeep[k] = ch.props[k]
+            }
+            t = updateNode(t, ch.id, {
+              ...nextNode,
+              id: ch.id,
+              props: { ...nextNode.props, ...layoutKeep, library_id: libKey },
+            })
+          }
+          return { ...c, tree: t }
+        })
+        return {
+          ...n,
+          library: lib,
+          canvases: canvasesNext,
+          tree: canvasesNext[0]?.tree || n.tree,
+        }
+      }
+      const withLib = {
+        ...node,
+        props: { ...node.props, library_id: node.id },
+      }
+      return { ...n, library: [...lib, withLib] }
+    })
+    message.success(editId ? '组件已更新' : '已加入组件库（请到组装画布挑选上板）')
+    setDraft(null)
+    setEditId(null)
+  }
+
+  /** Instant local preview data for current draft (no server). */
+  const makerLocal = useMemo(() => {
+    if (!draft) return null
+    const dsId = draft.dataset_id || 'main'
+    const cols = fieldsByDataset[dsId] || []
+    const rows = rowsByDataset[dsId] || []
+    const ctx: DataPreviewCtx = { [dsId]: { columns: cols, rows } }
+    if (draft.type === 'Chart') {
+      const vcols =
+        draft.value_columns && draft.value_columns.length
+          ? draft.value_columns
+          : draft.value_column
+            ? [draft.value_column]
+            : []
+      if (!draft.category_column || !vcols.length || !cols.length) return { kind: 'empty' as const }
+      const { labels, series } = seriesFromTable(cols, rows, draft.category_column, vcols)
+      const style: ChartStyle = {
+        chart_type: draft.chart_type || 'bar',
+        title: draft.title,
+        subtitle: draft.subtitle,
+        show_label: draft.show_label !== false,
+        show_legend: Boolean(draft.show_legend) || vcols.length > 1,
+        show_grid: draft.show_grid !== false,
+        smooth: draft.smooth !== false,
+        stack: Boolean(draft.stack),
+        donut: Boolean(draft.donut),
+        rose: Boolean(draft.rose),
+        sort: draft.sort || 'none',
+        top_n: draft.top_n,
+        x_label_rotate: draft.x_label_rotate,
+        bar_border_radius: draft.bar_border_radius,
+        line_width: draft.line_width,
+        area_opacity: draft.area_opacity,
+        title_font_size: draft.title_font_size,
+        label_font_size: draft.chart_label_size,
+        axis_font_size: draft.axis_font_size,
+        color_palette: draft.color_palette,
+        x_axis_name: draft.x_axis_name,
+        y_axis_name: draft.y_axis_name,
+      }
+      return { kind: 'chart' as const, labels, series, style }
+    }
+    if (draft.type === 'Kpi') {
+      const col = draft.value_column || ''
+      const row = firstRowMap(ctx, dsId)
+      const val = row && col ? row[col] : null
+      return {
+        kind: 'kpi' as const,
+        label: draft.label || col || '指标',
+        value: val === null || val === undefined ? '—' : String(val),
+        hint: col ? `${dsId}.${col}` : '未选字段',
+        valueSize: draft.content_font_size,
+        labelSize: draft.label_font_size,
+        valueColor: draft.content_color,
+        labelColor: draft.label_color,
+        align: draft.content_align || 'center',
+        weight: draft.content_font_weight,
+      }
+    }
+    if (draft.type === 'Table') {
+      return { kind: 'table' as const, columns: cols, rows: rows.slice(0, 8) }
+    }
+    if (draft.type === 'Text' || draft.type === 'Alert') {
+      const row = firstRowMap(ctx, dsId)
+      const text = substituteRow(draft.text || '', row)
+      return {
+        kind: 'text' as const,
+        text,
+        alert: draft.type === 'Alert',
+        level: draft.level || 'error',
+        variant: draft.variant || 'body',
+      }
+    }
+    if (draft.type === 'Divider') return { kind: 'divider' as const }
+    return { kind: 'empty' as const }
+  }, [draft, fieldsByDataset, rowsByDataset])
+
+  const onSave = async () => {
+    if (!name.trim() || !dataSourceId) {
+      message.error('请填写名称并选择数据源')
+      return
+    }
+    setSaving(true)
+    try {
+      const saved = await studioSaveJob({
+        id: currentJobId,
+        name: name.trim(),
+        data_source_id: dataSourceId,
+        query_sql: sql,
+        artboard: buildDoc(),
+        channel_ids: channelIds,
+        enabled,
+      })
+      setCurrentJobId(saved.id)
+      message.success('模板已保存（运行时按参数动态渲染）')
+      if (jobId !== saved.id) navigate(`/editor/${saved.id}`, { replace: true })
+    } catch (e) {
+      message.error(getErrorMessage(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onTestPush = async () => {
+    if (!dataSourceId || !channelIds.length) {
+      message.error('需要数据源和通道')
+      return
+    }
+    setPushing(true)
+    try {
+      const res = await studioTestPush({
+        artboard: buildDoc(),
+        data_source_id: dataSourceId,
+        sql,
+        channel_ids: channelIds,
+        push_job_id: currentJobId,
+      })
+      if (res.success) message.success('试推成功')
+      else message.error('试推失败')
+    } catch (e) {
+      message.error(getErrorMessage(e))
+    } finally {
+      setPushing(false)
+    }
+  }
+
+  const tableData = useMemo(
+    () =>
+      previewRows.map((row, i) => {
+        const r: Record<string, unknown> = { __key: i }
+        previewColumns.forEach((c, j) => {
+          r[c] = row[j]
+        })
+        return r
+      }),
+    [previewRows, previewColumns],
+  )
+
+  const stepIndex = STEPS.findIndex((s) => s.key === step)
+  const selectedCompose = selectedComposeId && tree ? findNode(tree, selectedComposeId) : null
+  const canvasWidth = Number(artboard.artboard?.width) || 750
+
+  /** 首行字段映射（图外 {{列}} 本地替换，不重编译） */
+  const firstRowForShell = useMemo(() => {
+    const row = firstRowMap(
+      { main: { columns: fieldsByDataset.main || [], rows: rowsByDataset.main || [] } },
+      'main',
+    )
+    return (
+      row ||
+      firstRowMap(
+        {
+          [activeDatasetId]: {
+            columns: fieldsByDataset[activeDatasetId] || [],
+            rows: rowsByDataset[activeDatasetId] || [],
+          },
+        },
+        activeDatasetId,
+      )
+    )
+  }, [fieldsByDataset, rowsByDataset, activeDatasetId])
+
+  /** Local substitute for push shell text (instant, no recompile). */
+  const shellPreview = useMemo(() => {
+    const row2 = firstRowForShell
+    return {
+      title: substituteRow(String(artboard.compose?.title || name || '数据推送'), row2),
+      before: substituteRow(String(artboard.compose?.text_before || ''), row2),
+      after: substituteRow(String(artboard.compose?.text_after || ''), row2),
+    }
+  }, [
+    artboard.compose?.title,
+    artboard.compose?.text_before,
+    artboard.compose?.text_after,
+    firstRowForShell,
+    name,
+  ])
+
+  const composeSegments = useMemo((): StudioComposeSegment[] => {
+    return normalizeArtboardDoc(artboard).compose?.segments || []
+  }, [artboard])
+
+  /**
+   * 钉钉「一条推送」实时内容：
+   * - 图前文案 / 图后文案按 segments 相对画布位置切分（不会把图后文案画到图前）
+   * - 多画布纵向合成一块图
+   */
+  const livePushContent = useMemo((): DingTalkPushContent => {
+    const mode = String(artboard.compose?.mode || 'image_primary')
+    const segs = composeSegments
+    const row = firstRowForShell
+    const title = substituteRow(String(artboard.compose?.title || name || '数据推送'), row)
+
+    const beforeParts: string[] = []
+    const afterParts: string[] = []
+    let seenCanvas = false
+    for (const s of segs) {
+      if (s.type === 'canvas') {
+        seenCanvas = true
+        continue
+      }
+      if (s.type !== 'text') continue
+      const raw = substituteRow(String(s.html || ''), row)
+      if (isEmptyRich(raw) || isEmptyRichHtml(raw)) continue
+      const md = htmlToDingTalkMd(raw) || raw
+      if (seenCanvas) afterParts.push(md)
+      else beforeParts.push(md)
+    }
+    const markdownBefore = mode === 'image_only' ? '' : beforeParts.join('\n\n')
+    const markdownAfter = mode === 'image_only' ? '' : afterParts.join('\n\n')
+
+    const canvasOrder = segs
+      .filter((s): s is Extract<StudioComposeSegment, { type: 'canvas' }> => s.type === 'canvas')
+      .map((s) => canvases.find((c) => c.id === s.canvas_id))
+      .filter(Boolean) as typeof canvases
+    const canvasList = (canvasOrder.length > 0 ? canvasOrder : canvases).filter(
+      (c) => canvasChildren(c).length > 0,
+    )
+
+    const imgW = 248
+    const showImage = mode !== 'markdown_primary' && canvasList.length > 0
+    const image = showImage ? (
+      <CanvasLivePreview
+        canvases={canvasList.map((c) => ({
+          id: c.id,
+          name: c.name,
+          nodes: canvasChildren(c),
+          logicalWidth: Number(c.width) || 750,
+          chrome: {
+            show: c.show_chrome !== false,
+            title: String(c.chrome_title || name || '数据推送'),
+            color: String(c.theme?.color || artboard.artboard?.theme?.color || '#1677ff'),
+          },
+        }))}
+        data={{ fieldsByDataset, rowsByDataset }}
+        displayWidth={imgW}
+        showHint={false}
+      />
+    ) : undefined
+
+    return {
+      title,
+      botName: '数据推送机器人',
+      markdownBefore,
+      markdownAfter,
+      image,
+      emptyHint:
+        mode === 'markdown_primary'
+          ? '仅 Markdown 模式：请填写文案段'
+          : '请填写文案，并在组装画布把组件放到画布上',
+    }
+  }, [
+    artboard.compose?.mode,
+    artboard.compose?.title,
+    artboard.artboard?.theme?.color,
+    composeSegments,
+    canvases,
+    fieldsByDataset,
+    rowsByDataset,
+    firstRowForShell,
+    name,
+  ])
+
+  const placeLibraryOnCanvas = useCallback(
+    (libNode: StudioNode) => {
+      if (!tree || !effectiveCanvasId) return
+      const already = cart.some(
+        (n) =>
+          n.id === libNode.id ||
+          String(n.props?.library_id || '') === libNode.id ||
+          String(n.props?.library_id || '') === String(libNode.props?.library_id || ''),
+      )
+      if (already) {
+        message.info('该组件已在当前画布上')
+        return
+      }
+      // 新组件接在当前画布内容底部下方，避免叠在已有图表上
+      const gap = 16
+      const nextY = cart.length === 0 ? 12 : canvasContentBottom(cart) + gap
+      const clone = cloneNodeForCanvas(libNode, {
+        nextY,
+        canvasWidth: Number(activeCanvas?.width) || canvasWidth,
+      })
+      setTree(appendChild(tree, 'root', clone))
+      setSelectedComposeId(clone.id)
+      message.success('已放到画布下方（可再拖动编排）')
+    },
+    [tree, effectiveCanvasId, cart, setTree, activeCanvas?.width, canvasWidth],
+  )
+
+  const removeFromCanvas = useCallback(
+    (nodeId: string) => {
+      if (!tree) return
+      setTree(removeNode(tree, nodeId))
+      if (selectedComposeId === nodeId) setSelectedComposeId(null)
+      message.success('已从画布移除')
+    },
+    [tree, selectedComposeId],
+  )
+
+  const removeFromLibrary = useCallback(
+    (libId: string) => {
+      setArtboard((prev) => {
+        const n = normalizeArtboardDoc(prev)
+        const lib = (n.library || []).filter((x) => x.id !== libId)
+        const canvasesNext = (n.canvases || []).map((c) => {
+          if (!c.tree) return c
+          let t = c.tree
+          for (const ch of [...(c.tree.children || [])]) {
+            const src = String(ch.props?.library_id || ch.id)
+            if (src === libId || ch.id === libId) {
+              t = removeNode(t, ch.id)
+            }
+          }
+          return { ...c, tree: t }
+        })
+        return {
+          ...n,
+          library: lib,
+          canvases: canvasesNext,
+          tree: canvasesNext[0]?.tree || n.tree,
+        }
+      })
+      message.success('已从组件库删除')
+    },
+    [],
+  )
+
+  /** 同步 segments 并回写兼容字段 text_before/after */
+  const setSegments = useCallback((segs: StudioComposeSegment[]) => {
+    const texts = segs.filter((s): s is Extract<StudioComposeSegment, { type: 'text' }> => s.type === 'text')
+    setArtboard((prev) => ({
+      ...normalizeArtboardDoc(prev),
+      compose: {
+        ...prev.compose,
+        text_format: 'html',
+        segments: segs,
+        text_before: texts[0]?.html || '',
+        text_after: texts.length > 1 ? texts[texts.length - 1]?.html || '' : '',
+      },
+    }))
+  }, [])
+
+  const patchSegmentHtml = useCallback(
+    (segId: string, html: string) => {
+      const segs = composeSegments.map((s) =>
+        s.id === segId && s.type === 'text' ? { ...s, html } : s,
+      )
+      setSegments(segs)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const moveSegment = useCallback(
+    (index: number, dir: -1 | 1) => {
+      const next = [...composeSegments]
+      const j = index + dir
+      if (j < 0 || j >= next.length) return
+      const tmp = next[index]!
+      next[index] = next[j]!
+      next[j] = tmp
+      setSegments(next)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const addTextSegment = useCallback(
+    (afterIndex?: number) => {
+      const seg: StudioComposeSegment = { id: `seg_${nid()}`, type: 'text', html: '' }
+      const next = [...composeSegments]
+      if (afterIndex == null || afterIndex < 0) next.push(seg)
+      else next.splice(afterIndex + 1, 0, seg)
+      setSegments(next)
+    },
+    [composeSegments, setSegments],
+  )
+
+  const removeSegment = useCallback(
+    (segId: string) => {
+      const target = composeSegments.find((s) => s.id === segId)
+      if (!target) return
+      // 画布段不可在此删除（回第 3 步删画布）；文案段至少保留 1 个
+      if (target.type === 'canvas') return
+      const textCount = composeSegments.filter((s) => s.type === 'text').length
+      if (textCount <= 1) {
+        patchSegmentHtml(segId, '')
+        return
+      }
+      setSegments(composeSegments.filter((s) => s.id !== segId))
+    },
+    [composeSegments, setSegments, patchSegmentHtml],
+  )
+
+  const patchComposeLayout = useCallback(
+    (id: string, layout: Partial<ComposeLayout>) => {
+      setArtboard((prev) => {
+        const n = normalizeArtboardDoc(prev)
+        const cid = effectiveCanvasId || n.canvases?.[0]?.id
+        if (!cid) return prev
+        const canvas = (n.canvases || []).find((c) => c.id === cid)
+        if (!canvas?.tree) return prev
+        const node = findNode(canvas.tree, id)
+        if (!node) return prev
+        const tree = updateNode(canvas.tree, id, {
+          props: { ...node.props, ...layout },
+        })
+        return setCanvasTree(n, cid, tree)
+      })
+    },
+    [effectiveCanvasId],
+  )
+
+  // 进入组装画布时为当前画布缺失坐标的节点补默认布局
+  useEffect(() => {
+    if (step !== 'compose') return
+    setArtboard((prev) => {
+      const n = normalizeArtboardDoc(prev)
+      const cid = effectiveCanvasId || n.canvases?.[0]?.id
+      if (!cid) return n
+      const canvas = (n.canvases || []).find((c) => c.id === cid)
+      if (!canvas?.tree) return n
+      const patches = ensureComposeLayouts(canvasChildren(canvas), canvas.width || canvasWidth)
+      if (!patches.length) return n
+      let tree = canvas.tree
+      for (const { id, patch } of patches) {
+        const node = findNode(tree, id)
+        if (!node) continue
+        tree = updateNode(tree, id, { props: { ...node.props, ...patch } })
+      }
+      return setCanvasTree(n, cid, tree)
+    })
+  }, [step, cart.length, canvasWidth, effectiveCanvasId])
+
+  const applyTemplate = (kind: 'daily' | 'alert') => {
+    const board = kind === 'daily' ? defaultDailyArtboard() : defaultAlertArtboard()
+    const next = dataSourceId
+      ? syncMainDataset(board, dataSourceId, board.datasets?.[0]?.sql || sql)
+      : board
+    if (board.datasets?.[0]?.sql) setSql(String(board.datasets[0].sql))
+    // flatten to cart
+    if (next.tree) {
+      const flat: StudioNode[] = []
+      const walk = (n: StudioNode) => {
+        if (n.id === 'root' || n.type === 'Container') {
+          for (const ch of n.children || []) walk(ch)
+          return
+        }
+        flat.push({ ...n, children: undefined })
+      }
+      walk(next.tree)
+      next.tree = {
+        id: 'root',
+        type: 'Container',
+        props: { direction: 'column', gap: 12 },
+        children: flat,
+        binding: {},
+      }
+    }
+    setArtboard(next)
+    setDraft(null)
+    setStep('data')
+    message.info('模板已载入，请取数后在「做组件」中检查预览')
+  }
 
   return (
     <div style={{ margin: -24, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
       <div
         style={{
-          padding: '10px 16px',
+          padding: '0 24px',
           borderBottom: '1px solid #f0f0f0',
           background: '#fff',
           flexShrink: 0,
         }}
       >
-        <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-          <Space wrap>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/push-jobs')}>
-              任务
-            </Button>
-            <div>
-              <Typography.Title level={5} style={{ margin: 0 }}>
-                内容工作台
-                <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
-                  制作推送模板 · 每次推送按参数动态取数成图
-                </Typography.Text>
-              </Typography.Title>
-            </div>
-            <Input
-              style={{ width: 200 }}
-              placeholder="模板 / 任务名称"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={loading}
-            />
-            <Tag icon={<ShoppingCartOutlined />} color="blue">
-              库 {libraryCount} · 画布 {allCartCount}
-            </Tag>
-          </Space>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void onSave()}>
-            保存模板
-          </Button>
-        </Space>
-        <div style={{ marginTop: 8 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            此处配置的是<strong>模板</strong>（SQL、参数、组件绑定、画布版式、图外文案）。调度/试推时会重新解析参数、取数并渲染，不是固定一张截图。
-          </Typography.Text>
-        </div>
-        <div style={{ marginTop: 12, maxWidth: 900 }}>
-          <Steps
-            size="small"
-            current={stepIndex}
-            onChange={(i) => setStep(STEPS[i]!.key)}
-            items={STEPS.map((s) => ({ title: s.title, description: s.desc }))}
+        {/* 第一行：导航 + 名称 + 步骤 + 保存 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, height: 44 }}>
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/push-jobs')} style={{ flexShrink: 0 }} />
+          <Input
+            style={{ width: 180 }}
+            variant="borderless"
+            placeholder="模板名称"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={loading}
           />
+          <div style={{ flex: 1 }} />
+          {/* 步骤指示器 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {STEPS.map((s, i) => {
+              const done = i < stepIndex
+              const active = i === stepIndex
+              return (
+                <div
+                  key={s.key}
+                  onClick={() => setStep(s.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '4px 12px',
+                    borderRadius: 20,
+                    cursor: 'pointer',
+                    background: active ? '#1677ff' : done ? '#f0f5ff' : 'transparent',
+                    color: active ? '#fff' : done ? '#1677ff' : '#bbb',
+                    fontSize: 12, fontWeight: active ? 600 : 400,
+                    transition: 'all 0.15s',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: active ? 'rgba(255,255,255,0.3)' : done ? '#1677ff' : '#eee',
+                    color: active ? '#fff' : done ? '#fff' : '#999',
+                    fontSize: 10, fontWeight: 700,
+                    flexShrink: 0,
+                  }}>
+                    {done ? '✓' : i + 1}
+                  </span>
+                  {s.title.slice(3)}
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ flex: 1 }} />
+          <Tag icon={<ShoppingCartOutlined />} color="blue" style={{ margin: 0 }}>
+            {libraryCount} / {allCartCount}
+          </Tag>
+          <Button type="primary" size="small" icon={<SaveOutlined />} loading={saving} onClick={() => void onSave()}>
+            保存
+          </Button>
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#eef0f3' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F6F8' }}>
         {/* ============================================================
             步骤 1 · 数据（data）
             - 多数据集 SQL / 参数模板
@@ -751,378 +1611,183 @@ export function EditorPage() {
             - 主数据集与任务级 dataSourceId、sql 同步
             ============================================================ */}
         {step === 'data' && (
-          <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-            <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-              <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div>
-                  <Typography.Title level={5} style={{ margin: 0 }}>
-                    数据集管理
-                  </Typography.Title>
-                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                    配置模板侧的 SQL 与参数（如 {'{{yesterday}}'}）；此处「取数」仅用于绑字段样例。正式推送每次重新执行 SQL。
-                  </Typography.Text>
-                </div>
-                <Space>
-                  <Button type="dashed" icon={<PlusOutlined />} onClick={addDataset}>
-                    新建数据集
-                  </Button>
-                  <Button
-                    type="primary"
-                    disabled={readyDsOptions.length === 0}
-                    onClick={() => setStep('make')}
-                  >
-                    下一步：做组件 →
-                  </Button>
-                </Space>
-              </Space>
+          <div style={{ height: '100%', overflow: 'auto', padding: 24 }}>
+            <div style={{ maxWidth: 1400 }}>
 
+              {/* ---- 数据集标签栏 ---- */}
+              <div style={{
+                display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap',
+                padding: 4, background: '#fafafa', borderRadius: 10,
+              }}>
+                {datasets.map((d) => {
+                  const ready = (fieldsByDataset[d.id] || []).length > 0
+                  const rows = (rowsByDataset[d.id] || []).length
+                  const active = activeDatasetId === d.id
+                  return (
+                    <div
+                      key={d.id}
+                      onClick={() => setActiveDatasetId(d.id)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        background: active ? '#1677ff' : '#fff',
+                        color: active ? '#fff' : undefined,
+                        border: active ? '1px solid #1677ff' : '1px solid #e8e8e8',
+                        borderRadius: 8,
+                        padding: '8px 16px',
+                        cursor: 'pointer',
+                        fontSize: 14,
+                        fontWeight: active ? 600 : 400,
+                        boxShadow: active ? '0 2px 6px rgba(22,119,255,0.25)' : '0 1px 2px rgba(0,0,0,0.04)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <span>{d.name || d.id}</span>
+                      {ready
+                        ? <span style={{ fontSize: 10, opacity: 0.75 }}>✓{rows}r</span>
+                        : <span style={{ fontSize: 10, opacity: 0.5 }}>空</span>}
+                      {d.id === 'main' && (
+                        <Tag style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }} color={active ? 'default' : 'blue'}>主</Tag>
+                      )}
+                      {d.id !== 'main' && (
+                        <DeleteOutlined
+                          style={{ fontSize: 11, opacity: 0.5, cursor: 'pointer' }}
+                          onClick={(e) => { e.stopPropagation(); removeDataset(d.id) }}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+                <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addDataset} style={{ borderRadius: 8 }}>
+                  新建数据集
+                </Button>
+                <div style={{ flex: 1 }} />
+                <Button type="primary" disabled={readyDsOptions.length === 0} onClick={() => setStep('make')}>
+                  下一步：做组件 →
+                </Button>
+              </div>
+
+              {/* 编辑 + 预览：左右双栏 */}
               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                {/* 数据集列表 */}
-                <div style={{ width: 240, flexShrink: 0 }}>
-                  {datasets.map((d) => {
-                    const ready = (fieldsByDataset[d.id] || []).length > 0
-                    const rows = (rowsByDataset[d.id] || []).length
-                    const active = activeDatasetId === d.id
-                    return (
-                      <div
-                        key={d.id}
-                        onClick={() => setActiveDatasetId(d.id)}
-                        style={{
-                          background: active ? '#e6f4ff' : '#fff',
-                          border: active ? '1px solid #1677ff' : '1px solid #f0f0f0',
-                          borderRadius: 8,
-                          padding: 10,
-                          marginBottom: 8,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                          <Typography.Text strong style={{ fontSize: 13 }}>
-                            {d.name || d.id}
-                          </Typography.Text>
-                          {d.id !== 'main' ? (
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                removeDataset(d.id)
-                              }}
-                            />
-                          ) : (
-                            <Tag style={{ margin: 0 }}>主</Tag>
-                          )}
-                        </Space>
-                        <div style={{ marginTop: 4 }}>
-                          {ready ? (
-                            <Tag color="success">
-                              已取数 {rows} 行 / {fieldsByDataset[d.id]?.length} 列
-                            </Tag>
-                          ) : (
-                            <Tag>未取数</Tag>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {/* 当前数据集编辑 */}
-                <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16 }}>
-                  <Typography.Title level={5} style={{ marginTop: 0 }}>
-                    编辑：{activeDs?.name || activeDatasetId}
-                  </Typography.Title>
-                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                    <div>
-                      <Typography.Text type="secondary">名称</Typography.Text>
+                {/* 左侧编辑卡片 */}
+                <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', border: '1px solid #f0f0f0' }}>
+                  {/* 名称 + 数据源 行内 */}
+                  <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                    <div style={{ flex: 1 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 13 }}>数据集名称</Typography.Text>
                       <Input
                         style={{ marginTop: 4 }}
                         value={String(activeDs?.name || '')}
                         onChange={(e) => {
                           const v = e.target.value
                           if (activeDatasetId === 'main') {
-                            setArtboard((p) =>
-                              upsertDataset(p, {
-                                id: 'main',
-                                name: v,
-                                data_source_id: dataSourceId,
-                                sql,
-                              }),
-                            )
+                            setArtboard((p) => upsertDataset(p, { id: 'main', name: v, data_source_id: dataSourceId, sql }))
                           } else {
-                            setArtboard((p) =>
-                              upsertDataset(p, {
-                                id: activeDatasetId,
-                                name: v,
-                                data_source_id: activeDs?.data_source_id,
-                                sql: activeDs?.sql,
-                              }),
-                            )
+                            setArtboard((p) => upsertDataset(p, { id: activeDatasetId, name: v, data_source_id: activeDs?.data_source_id, sql: activeDs?.sql }))
                           }
                         }}
                       />
                     </div>
-                    <div>
-                      <Typography.Text type="secondary">数据源</Typography.Text>
+                    <div style={{ flex: 1 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 13 }}>数据源</Typography.Text>
                       <Select
                         style={{ width: '100%', marginTop: 4 }}
                         showSearch
                         optionFilterProp="label"
-                        value={
-                          activeDatasetId === 'main'
-                            ? dataSourceId
-                            : (activeDs?.data_source_id as string) || dataSourceId
-                        }
+                        value={activeDatasetId === 'main' ? dataSourceId : (activeDs?.data_source_id as string) || dataSourceId}
                         onChange={(v) => {
                           if (activeDatasetId === 'main') setDataSourceId(v)
-                          else
-                            setArtboard((p) =>
-                              upsertDataset(p, {
-                                id: activeDatasetId,
-                                data_source_id: v,
-                                sql: activeDs?.sql,
-                                name: activeDs?.name,
-                              }),
-                            )
+                          else setArtboard((p) => upsertDataset(p, { id: activeDatasetId, data_source_id: v, sql: activeDs?.sql, name: activeDs?.name }))
                         }}
-                        options={sources.map((s) => ({
-                          value: s.id,
-                          label: `${s.name} (${s.type})`,
-                        }))}
+                        options={sources.map((s) => ({ value: s.id, label: `${s.name} (${s.type})` }))}
                       />
                     </div>
-                    <div>
-                      <Typography.Text type="secondary">
-                        SQL（支持 {'{{参数名}}'}，如 {'{{yesterday}}'} / {'{{today}}'} / 自定义）
-                      </Typography.Text>
-                      <Input.TextArea
-                        rows={6}
-                        style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 12 }}
-                        value={
-                          activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')
-                        }
-                        onChange={(e) => {
-                          if (activeDatasetId === 'main') setSql(e.target.value)
-                          else
-                            setArtboard((p) =>
-                              upsertDataset(p, {
-                                id: activeDatasetId,
-                                sql: e.target.value,
-                                data_source_id: activeDs?.data_source_id,
-                                name: activeDs?.name,
-                                params: activeParamDefs,
-                              }),
-                            )
-                        }}
-                        placeholder={
-                          "SELECT * FROM t WHERE dt = '{{yesterday}}'"
-                        }
-                      />
-                    </div>
+                  </div>
 
-                    <div>
-                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                        <Typography.Text type="secondary">SQL 参数</Typography.Text>
-                        <Button
-                          size="small"
-                          type="dashed"
-                          onClick={() => {
-                            const n = activeParamDefs.length + 1
-                            setActiveParamDefs([
-                              ...activeParamDefs,
-                              {
-                                name: n === 1 ? 'biz_date' : `param_${n}`,
-                                label: n === 1 ? '业务日期' : `参数${n}`,
-                                source: 'auto',
-                                auto: 'yesterday',
-                                format: '%Y-%m-%d',
-                              },
-                            ])
-                          }}
-                        >
-                          + 参数
-                        </Button>
-                      </Space>
-                      <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
-                        内置可用：today / yesterday / tomorrow / now / this_month_start …
-                        每次取数与推送都会重新计算自动参数。
-                      </Typography.Paragraph>
-                      {activeParamDefs.length === 0 ? (
-                        <Alert
-                          type="info"
-                          showIcon
-                          style={{ marginBottom: 8 }}
-                          message="未自定义参数时，SQL 里写 {{yesterday}} 等内置名也会自动替换"
-                        />
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {activeParamDefs.map((p, idx) => (
-                            <div
-                              key={`${p.name}-${idx}`}
-                              style={{
-                                border: '1px solid #f0f0f0',
-                                borderRadius: 6,
-                                padding: 8,
-                                background: '#fafafa',
-                              }}
-                            >
-                              <Space wrap style={{ width: '100%' }}>
-                                <Input
-                                  style={{ width: 110 }}
-                                  placeholder="name"
-                                  value={p.name}
-                                  onChange={(e) => {
-                                    const next = [...activeParamDefs]
-                                    next[idx] = { ...p, name: e.target.value }
-                                    setActiveParamDefs(next)
-                                  }}
-                                />
-                                <Select
-                                  style={{ width: 100 }}
-                                  value={p.source || 'auto'}
-                                  onChange={(v) => {
-                                    const next = [...activeParamDefs]
-                                    next[idx] = { ...p, source: v }
-                                    setActiveParamDefs(next)
-                                  }}
-                                  options={[
-                                    { value: 'auto', label: '自动' },
-                                    { value: 'static', label: '固定值' },
-                                    { value: 'runtime', label: '运行时' },
-                                  ]}
-                                />
-                                {(p.source || 'auto') === 'auto' ? (
-                                  <Select
-                                    style={{ width: 140 }}
-                                    value={p.auto || 'yesterday'}
-                                    onChange={(v) => {
-                                      const next = [...activeParamDefs]
-                                      next[idx] = { ...p, auto: v }
-                                      setActiveParamDefs(next)
-                                    }}
-                                    options={[
-                                      { value: 'yesterday', label: '昨天' },
-                                      { value: 'today', label: '今天' },
-                                      { value: 'tomorrow', label: '明天' },
-                                      { value: 'now', label: '当前时间' },
-                                      { value: 'this_month_start', label: '本月1日' },
-                                      { value: 'this_month_end', label: '本月末' },
-                                      { value: 'last_month_start', label: '上月1日' },
-                                      { value: 'last_month_end', label: '上月末' },
-                                      { value: 'last_7_days_start', label: '近7天起' },
-                                      { value: 'last_30_days_start', label: '近30天起' },
-                                    ]}
-                                  />
-                                ) : (
-                                  <Input
-                                    style={{ width: 140 }}
-                                    placeholder="固定值/默认值"
-                                    value={p.value || p.default || ''}
-                                    onChange={(e) => {
-                                      const next = [...activeParamDefs]
-                                      next[idx] = {
-                                        ...p,
-                                        value: e.target.value,
-                                        default: e.target.value,
-                                      }
-                                      setActiveParamDefs(next)
-                                    }}
-                                  />
-                                )}
-                                <Input
-                                  style={{ width: 120 }}
-                                  placeholder="格式 %Y-%m-%d"
-                                  value={p.format || ''}
-                                  onChange={(e) => {
-                                    const next = [...activeParamDefs]
-                                    next[idx] = { ...p, format: e.target.value }
-                                    setActiveParamDefs(next)
-                                  }}
-                                />
-                                <Button
-                                  size="small"
-                                  danger
-                                  type="text"
-                                  icon={<DeleteOutlined />}
-                                  onClick={() =>
-                                    setActiveParamDefs(
-                                      activeParamDefs.filter((_, i) => i !== idx),
-                                    )
-                                  }
-                                />
-                              </Space>
-                              {p.name && resolvedPreview[p.name] !== undefined ? (
-                                <div style={{ fontSize: 12, color: '#1677ff', marginTop: 4 }}>
-                                  本次解析：{p.name} = {resolvedPreview[p.name]}
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {Object.keys(resolvedPreview).length > 0 ? (
-                        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
-                          SQL 中将替换：
-                          {Object.entries(resolvedPreview).map(([k, v]) => (
-                            <Tag key={k} style={{ marginBottom: 4 }}>
-                              {`{{${k}}}`}→{v}
-                            </Tag>
-                          ))}
-                        </div>
-                      ) : null}
-                      {renderedSqlPreview ? (
-                        <Input.TextArea
-                          style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 11 }}
-                          rows={2}
-                          readOnly
-                          value={renderedSqlPreview}
-                          placeholder="取数后显示实际执行 SQL"
-                        />
-                      ) : null}
-                    </div>
+                  {/* SQL */}
+                  <div style={{ marginBottom: 16 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      SQL · 支持 {'{{yesterday}}'} / {'{{today}}'} / {'{{自定义}}'}
+                    </Typography.Text>
+                    <Input.TextArea
+                      rows={6}
+                      style={{ marginTop: 4, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 }}
+                      value={activeDatasetId === 'main' ? sql : String(activeDs?.sql || '')}
+                      onChange={(e) => {
+                        if (activeDatasetId === 'main') setSql(e.target.value)
+                        else setArtboard((p) => upsertDataset(p, { id: activeDatasetId, sql: e.target.value, data_source_id: activeDs?.data_source_id, name: activeDs?.name, params: activeParamDefs }))
+                      }}
+                      placeholder={"SELECT * FROM t WHERE dt = '{{yesterday}}'"}
+                    />
+                  </div>
 
-                    <Button
-                      type="primary"
-                      loading={querying}
-                      onClick={() => void onQueryDataset(activeDatasetId)}
-                    >
-                      运行取数（应用参数）
-                    </Button>
-                  </Space>
+                  {/* 参数 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 13 }}>参数</Typography.Text>
+                      <Button type="dashed" onClick={() => {
+                        const n = activeParamDefs.length + 1
+                        setActiveParamDefs([...activeParamDefs, { name: n === 1 ? 'biz_date' : `param_${n}`, label: n === 1 ? '业务日期' : `参数${n}`, source: 'auto', auto: 'yesterday', format: '%Y-%m-%d' }])
+                      }}>+ 参数</Button>
+                    </div>
+                    {activeParamDefs.length === 0 ? (
+                      <Alert type="info" showIcon message="不需自定义参数时，SQL 里直接写 {{yesterday}} 等内置名即可" />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {activeParamDefs.map((p, idx) => (
+                          <div key={`${p.name}-${idx}`} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, background: '#fafafa' }}>
+                            <Space wrap size={8}>
+                              <Input style={{ width: 120 }} placeholder="参数名" value={p.name} onChange={(e) => { const next = [...activeParamDefs]; next[idx] = { ...p, name: e.target.value }; setActiveParamDefs(next) }} />
+                              <Select style={{ width: 100 }} value={p.source || 'auto'} onChange={(v) => { const next = [...activeParamDefs]; next[idx] = { ...p, source: v }; setActiveParamDefs(next) }} options={[{ value: 'auto', label: '自动' }, { value: 'static', label: '固定值' }, { value: 'runtime', label: '运行时' }]} />
+                              {(p.source || 'auto') === 'auto' ? (
+                                <Select style={{ width: 140 }} value={p.auto || 'yesterday'} onChange={(v) => { const next = [...activeParamDefs]; next[idx] = { ...p, auto: v }; setActiveParamDefs(next) }} options={[{ value: 'yesterday', label: '昨天' }, { value: 'today', label: '今天' }, { value: 'tomorrow', label: '明天' }, { value: 'now', label: '当前时间' }, { value: 'this_month_start', label: '本月1日' }, { value: 'this_month_end', label: '本月末' }, { value: 'last_month_start', label: '上月1日' }, { value: 'last_month_end', label: '上月末' }, { value: 'last_7_days_start', label: '近7天起' }, { value: 'last_30_days_start', label: '近30天起' }]} />
+                              ) : (
+                                <Input style={{ width: 140 }} placeholder="默认值" value={p.value || p.default || ''} onChange={(e) => { const next = [...activeParamDefs]; next[idx] = { ...p, value: e.target.value, default: e.target.value }; setActiveParamDefs(next) }} />
+                              )}
+                              <Input style={{ width: 130 }} placeholder="格式 %Y-%m-%d" value={p.format || ''} onChange={(e) => { const next = [...activeParamDefs]; next[idx] = { ...p, format: e.target.value }; setActiveParamDefs(next) }} />
+                              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => setActiveParamDefs(activeParamDefs.filter((_, i) => i !== idx))} />
+                            </Space>
+                            {p.name && resolvedPreview[p.name] !== undefined ? (
+                              <div style={{ fontSize: 12, color: '#1677ff', marginTop: 4 }}>本次解析：{p.name} = {resolvedPreview[p.name]}</div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {Object.keys(resolvedPreview).length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+                        替换预览：{Object.entries(resolvedPreview).map(([k, v]) => (<Tag key={k} style={{ marginBottom: 2 }}>{`{{${k}}}`} → {v}</Tag>))}
+                      </div>
+                    )}
+                    {renderedSqlPreview && (
+                      <Input.TextArea style={{ marginTop: 8, fontFamily: 'monospace', fontSize: 12 }} rows={2} readOnly value={renderedSqlPreview} />
+                    )}
+                  </div>
+
+                  <Button type="primary" loading={querying} onClick={() => void onQueryDataset(activeDatasetId)}>
+                    取数预览
+                  </Button>
                 </div>
 
-                {/* 预览当前结果 */}
-                <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, minWidth: 0 }}>
-                  <Typography.Title level={5} style={{ marginTop: 0 }}>
-                    结果预览
-                  </Typography.Title>
+                {/* 右侧结果 */}
+                <div style={{ flex: 1.2, background: '#fff', borderRadius: 8, padding: 24, minWidth: 0, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', border: '1px solid #f0f0f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Typography.Title level={5} style={{ margin: 0 }}>查询结果</Typography.Title>
+                    {previewColumns.length > 0 && <Tag color="blue">{previewColumns.length} 列 · {previewRows.length} 行</Tag>}
+                  </div>
                   {!previewColumns.length ? (
-                    <Empty description="对该数据集取数后显示字段与样例行" />
+                    <Empty description="点击「取数预览」查询样例数据" />
                   ) : (
                     <>
                       <div style={{ marginBottom: 8 }}>
-                        {previewColumns.map((c) => (
-                          <Tag key={c} color="blue">
-                            {c}
-                          </Tag>
-                        ))}
+                        {previewColumns.map((c) => (<Tag key={c} style={{ marginBottom: 4 }}>{c}</Tag>))}
                       </div>
                       <Table
                         size="small"
                         pagination={false}
-                        scroll={{ y: 360, x: true }}
+                        scroll={{ y: 400, x: true }}
                         rowKey="__key"
                         dataSource={tableData}
-                        columns={previewColumns.map((c) => ({
-                          title: c,
-                          dataIndex: c,
-                          ellipsis: true,
-                          width: 100,
-                          render: (v: unknown) =>
-                            v === null || v === undefined ? '—' : String(v),
-                        }))}
+                        columns={previewColumns.map((c) => ({ title: c, dataIndex: c, ellipsis: true, width: 100, render: (v: unknown) => v === null || v === undefined ? '—' : String(v) }))}
                       />
                     </>
                   )}
@@ -1143,23 +1808,23 @@ export function EditorPage() {
             {/* 配置 */}
             <div
               style={{
-                width: 300,
+                width: 320,
                 background: '#fff',
                 borderRight: '1px solid #f0f0f0',
                 overflow: 'auto',
-                padding: 12,
+                padding: 24,
                 flexShrink: 0,
               }}
             >
-              <Typography.Text strong>选择组件类型</Typography.Text>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 12px' }}>
+              <Typography.Text strong style={{ fontSize: 14 }}>组件类型</Typography.Text>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '12px 0 16px' }}>
                 {CART_TYPES.map((p) => (
-                  <Button key={p.type} size="small" icon={<PlusOutlined />} onClick={() => startNew(p.type)}>
+                  <Button key={p.type} icon={<PlusOutlined />} onClick={() => startNew(p.type)}>
                     {p.label}
                   </Button>
                 ))}
               </div>
-              <Button size="small" type="link" onClick={() => applyTemplate('daily')}>
+              <Button type="link" onClick={() => applyTemplate('daily')}>
                 载入日报模板到清单
               </Button>
 
@@ -1283,7 +1948,8 @@ export function EditorPage() {
                   borderRadius: 8,
                   padding: 16,
                   minHeight: 400,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid #f0f0f0',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
                 {!draft || !makerLocal ? (
@@ -1389,11 +2055,11 @@ export function EditorPage() {
             {/* 组件库（做组件产出） */}
             <div
               style={{
-                width: 168,
+                width: 200,
                 background: '#fafafa',
                 borderLeft: '1px solid #f0f0f0',
                 overflow: 'auto',
-                padding: 8,
+                padding: 16,
                 flexShrink: 0,
               }}
             >
@@ -1412,9 +2078,10 @@ export function EditorPage() {
                     style={{
                       marginTop: 8,
                       background: '#fff',
-                      borderRadius: 6,
-                      border: '1px solid #eee',
-                      padding: 6,
+                      borderRadius: 8,
+                      border: '1px solid #f0f0f0',
+                      padding: 10,
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                       fontSize: 11,
                     }}
                   >
@@ -1457,18 +2124,18 @@ export function EditorPage() {
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div
               style={{
-                width: 200,
+                width: 280,
                 background: '#fafafa',
                 borderRight: '1px solid #f0f0f0',
                 overflow: 'auto',
-                padding: 10,
+                padding: 20,
                 flexShrink: 0,
               }}
             >
-              <Typography.Text strong style={{ fontSize: 13 }}>
+              <Typography.Text strong style={{ fontSize: 14 }}>
                 组件库
               </Typography.Text>
-              <Typography.Paragraph type="secondary" style={{ fontSize: 11, marginTop: 4 }}>
+              <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 4 }}>
                 点「放到画布」加入当前画布；可删除。
               </Typography.Paragraph>
               {libraryCount === 0 ? (
@@ -1492,17 +2159,17 @@ export function EditorPage() {
                       style={{
                         marginBottom: 8,
                         background: '#fff',
-                        border: '1px solid #eee',
+                        border: '1px solid #f0f0f0',
                         borderRadius: 8,
-                        padding: 8,
+                        padding: 12,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                       }}
                     >
-                      <div style={{ fontSize: 12, fontWeight: 500 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
                         {typeLabel(String(n.type), String(n.props?.chart_type || ''))}
                       </div>
-                      <Space size={4} style={{ marginTop: 6 }} wrap>
+                      <Space size={8} style={{ marginTop: 8 }} wrap>
                         <Button
-                          size="small"
                           type={onBoard ? 'default' : 'primary'}
                           disabled={onBoard}
                           onClick={() => placeLibraryOnCanvas(n)}
@@ -1510,7 +2177,6 @@ export function EditorPage() {
                           {onBoard ? '已在画布' : '放到画布'}
                         </Button>
                         <Button
-                          size="small"
                           danger
                           icon={<DeleteOutlined />}
                           onClick={() => removeFromLibrary(n.id)}
@@ -1522,7 +2188,7 @@ export function EditorPage() {
               )}
             </div>
 
-            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+            <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('make')}>← 做组件</Button>
                 <Button
@@ -1630,7 +2296,7 @@ export function EditorPage() {
                 width: 280,
                 background: '#fff',
                 borderLeft: '1px solid #f0f0f0',
-                padding: 12,
+                padding: 20,
                 overflow: 'auto',
                 flexShrink: 0,
               }}
@@ -2168,7 +2834,7 @@ export function EditorPage() {
             ============================================================ */}
         {step === 'message' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
-            <div style={{ flex: '1 1 52%', overflow: 'auto', padding: 16, minWidth: 360 }}>
+            <div style={{ flex: '1 1 55%', overflow: 'auto', padding: 24, minWidth: 400 }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('compose')}>← 组装画布</Button>
                 <Button type="primary" onClick={() => setStep('preview')}>
@@ -2210,6 +2876,7 @@ export function EditorPage() {
                         border: '1px dashed #91caff',
                         borderRadius: 8,
                         background: '#f0f7ff',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                       }}
                     >
                       <div
@@ -2261,6 +2928,7 @@ export function EditorPage() {
                       border: '1px solid #f0f0f0',
                       borderRadius: 8,
                       background: '#fff',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                     }}
                   >
                     <div
@@ -2406,7 +3074,7 @@ export function EditorPage() {
             ============================================================ */}
         {step === 'preview' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
-            <div style={{ maxWidth: 900, margin: '0 auto' }}>
+            <div style={{ maxWidth: 1100, margin: '0 auto' }}>
               <Space style={{ marginBottom: 12 }} wrap>
                 <Button onClick={() => setStep('message')}>← 组装推送</Button>
                 <Button
@@ -2448,8 +3116,9 @@ export function EditorPage() {
                   background: '#fff',
                   borderRadius: 8,
                   padding: 16,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid #f0f0f0',
                   marginBottom: 16,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
                 <Typography.Text strong>本次编译解析参数</Typography.Text>
@@ -2519,8 +3188,9 @@ export function EditorPage() {
                   background: '#fff',
                   borderRadius: 8,
                   padding: 16,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid #f0f0f0',
                   marginBottom: 16,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
                 {!isEmptyRichHtml(shellPreview.before) ? (
@@ -2583,8 +3253,9 @@ export function EditorPage() {
                   background: '#fff',
                   borderRadius: 8,
                   padding: 16,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid #f0f0f0',
                   marginBottom: 16,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
                 <Typography.Text strong>导出试推 Markdown</Typography.Text>
@@ -2697,11 +3368,12 @@ export function EditorPage() {
 
               <div
                 style={{
-                  marginTop: 8,
+                  marginTop: 16,
                   background: '#fff',
                   padding: 16,
                   borderRadius: 8,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid #f0f0f0',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
                 <Typography.Text strong>投递通道</Typography.Text>
