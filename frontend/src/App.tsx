@@ -78,10 +78,8 @@ export default function App() {
               }
             >
               <Route path="/" element={<DashboardPage />} />
-              <Route path="/editor" element={<EditorPageV2 />} />
-              <Route path="/editor/:jobId" element={<EditorPageV2 />} />
-              <Route path="/editor-v1" element={<EditorPage />} />
-              <Route path="/editor-v1/:jobId" element={<EditorPage />} />
+              <Route path="/editor" element={<EditorPage />} />
+              <Route path="/editor/:jobId" element={<EditorPage />} />
               <Route path="/data-sources" element={<DataSourceListPage />} />
               <Route path="/data-sources/new" element={<DataSourceFormPage />} />
               <Route path="/data-sources/:id" element={<DataSourceFormPage />} />
