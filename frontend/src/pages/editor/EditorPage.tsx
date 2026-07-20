@@ -25,9 +25,12 @@ import {
   CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  LinkOutlined,
   PlusOutlined,
   SaveOutlined,
   ShoppingCartOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import {
   Alert,
@@ -39,7 +42,6 @@ import {
   Select,
   Space,
   Spin,
-  Steps,
   Switch,
   Table,
   Tag,
@@ -53,6 +55,7 @@ import {
   getPushJob,
   listChannels,
   listDataSources,
+  listPushTargets,
   queryPreview,
   resolveSqlParams,
   studioCompile,
@@ -64,6 +67,7 @@ import type {
   ArtboardDoc,
   Channel,
   DataSource,
+  PushTarget,
   SqlParamDef,
   StudioCompileResponse,
   StudioComposeSegment,
@@ -81,7 +85,6 @@ import {
   updateCanvasInDoc,
 } from './artboardModel'
 import { CanvasLivePreview } from './CanvasLivePreview'
-import { ChannelRecipientInfo } from './ChannelRecipientInfo'
 import {
   ComposeCanvas,
   ensureComposeLayouts,
@@ -668,6 +671,9 @@ export function EditorPage() {
   )
   const [channelIds, setChannelIds] = useState<string[]>([])
   const [enabled, setEnabled] = useState(true)
+  // 推送目标（PushTarget = 通道能力 + 目的身份的组合实体）
+  const [pushTargets, setPushTargets] = useState<PushTarget[]>([])
+  const [pushTargetIds, setPushTargetIds] = useState<string[]>([])
   const [currentJobId, setCurrentJobId] = useState<string | null>(jobId ?? null)
 
   const [artboard, setArtboard] = useState<ArtboardDoc>(() => emptyArtboard())
@@ -730,9 +736,15 @@ export function EditorPage() {
   }
 
   const loadMeta = useCallback(async () => {
-    const [ds, ch] = await Promise.all([listDataSources(), listChannels()])
+    const [ds, ch, pts] = await Promise.all([
+      listDataSources(),
+      listChannels(),
+      listPushTargets(),
+    ])
     setSources(ds)
     setChannels(ch)
+    setPushTargets(pts)
+    return { ch, pts }
   }, [])
 
   useEffect(() => {
@@ -753,6 +765,7 @@ export function EditorPage() {
         setDataSourceId(job.data_source_id)
         setSql(job.query_sql)
         setChannelIds(job.channel_ids ?? [])
+        setPushTargetIds(job.push_target_ids ?? [])
         setEnabled(job.enabled)
         const extracted = extractArtboardFromJob(job.render_spec)
         setArtboard(
@@ -765,6 +778,7 @@ export function EditorPage() {
       .finally(() => setLoading(false))
   }, [jobId, loadMeta])
 
+  // ─── 数据操作 ─────────────────────────────────────────────────────
   const buildDoc = useCallback((): ArtboardDoc => {
     let doc = syncMainDataset(artboard, dataSourceId, sql)
     doc = {
@@ -1162,6 +1176,7 @@ export function EditorPage() {
         query_sql: sql,
         artboard: buildDoc(),
         channel_ids: channelIds,
+        push_target_ids: pushTargetIds,
         enabled,
       })
       setCurrentJobId(saved.id)
@@ -1175,8 +1190,8 @@ export function EditorPage() {
   }
 
   const onTestPush = async () => {
-    if (!dataSourceId || !channelIds.length) {
-      message.error('需要数据源和通道')
+    if (!dataSourceId || (!channelIds.length && !pushTargetIds.length)) {
+      message.error('需要投递目标（通讯录或通道）')
       return
     }
     setPushing(true)
@@ -1186,6 +1201,7 @@ export function EditorPage() {
         data_source_id: dataSourceId,
         sql,
         channel_ids: channelIds,
+        push_target_ids: pushTargetIds,
         push_job_id: currentJobId,
       })
       if (res.success) message.success('试推成功')
@@ -3366,27 +3382,134 @@ export function EditorPage() {
                 ) : null}
               </div>
 
+              {/* 投递目标（PushTarget） */}
               <div
                 style={{
                   marginTop: 16,
                   background: '#fff',
-                  padding: 16,
+                  padding: 20,
                   borderRadius: 8,
                   border: '1px solid #f0f0f0',
                   boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
-                <Typography.Text strong>投递通道</Typography.Text>
-                <Select
-                  mode="multiple"
-                  style={{ width: '100%', marginTop: 8 }}
-                  value={channelIds}
-                  onChange={setChannelIds}
-                  options={channels.map((c) => ({ value: c.id, label: c.name }))}
-                  placeholder="选择通道"
-                />
-                <ChannelRecipientInfo channelIds={channelIds} />
-                <div style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <Typography.Text strong style={{ fontSize: 15 }}>投递目标</Typography.Text>
+                  <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+                    {pushTargets.length > 0
+                      ? `${pushTargets.length} 个可用目标（通道能力 + 通讯录组合）`
+                      : '暂无可用目标，请先在通道管理页绑定收件人'}
+                  </span>
+                </div>
+
+                {pushTargets.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {pushTargets.map((pt) => {
+                      const selected = pushTargetIds.includes(pt.id)
+                      const ch = channels.find((c) => c.id === pt.channel_id)
+                      const kindLabel =
+                        pt.kind === 'oto' ? '单发' :
+                        pt.kind === 'group' ? '群发' : 'Webhook'
+                      return (
+                        <div
+                          key={pt.id}
+                          role="checkbox"
+                          aria-checked={selected}
+                          tabIndex={0}
+                          onClick={() => {
+                            setPushTargetIds((prev) =>
+                              prev.includes(pt.id)
+                                ? prev.filter((id) => id !== pt.id)
+                                : [...prev, pt.id],
+                            )
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              setPushTargetIds((prev) =>
+                                prev.includes(pt.id)
+                                  ? prev.filter((id) => id !== pt.id)
+                                  : [...prev, pt.id],
+                              )
+                            }
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 10,
+                            padding: '10px 14px',
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            background: selected ? '#e6f4ff' : '#fafafa',
+                            border: selected ? '1px solid #91caff' : '1px solid #f0f0f0',
+                            fontSize: 13,
+                            transition: 'all 0.15s',
+                            outline: 'none',
+                          }}
+                        >
+                          <div style={{
+                            width: 18, height: 18, borderRadius: 3, marginTop: 1,
+                            background: selected ? '#1677ff' : '#fff',
+                            border: selected ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#fff', fontSize: 11, flexShrink: 0,
+                          }}>
+                            {selected ? '✓' : ''}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <Tag color={pt.kind === 'oto' ? 'blue' : pt.kind === 'group' ? 'green' : 'purple'} style={{ margin: 0, fontSize: 10 }}>
+                                {kindLabel}
+                              </Tag>
+                              <span style={{ fontWeight: 500 }}>{ch?.name || pt.channel_id.slice(0, 8)}</span>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {pt.identities.map((ident) => (
+                                <Tag
+                                  key={ident.id}
+                                  icon={ident.kind === 'person' ? <UserOutlined /> : ident.kind === 'group' ? <TeamOutlined /> : <LinkOutlined />}
+                                  color={ident.kind === 'person' ? 'blue' : ident.kind === 'group' ? 'green' : 'default'}
+                                  style={{ margin: 0, fontSize: 11 }}
+                                >
+                                  {ident.name}
+                                  <span style={{ color: '#999', marginLeft: 3, fontSize: 10 }}>
+                                    ({ident.external_id.slice(0, 12)})
+                                  </span>
+                                </Tag>
+                              ))}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#8c8c8c', flexShrink: 0 }}>
+                            {pt.identities.length}人
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <Empty
+                    description="暂无推送目标 — 请先在通道管理页为通道绑定收件人"
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    style={{ margin: '16px 0' }}
+                  />
+                )}
+
+                {/* —— 兜底：直接选通道（兼容 webhook / 未绑身份通道） —— */}
+                <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    或直接选择通道（适用于 webhook 等无需通讯录的场景）
+                  </Typography.Text>
+                  <Select
+                    mode="multiple"
+                    style={{ width: '100%', marginTop: 6 }}
+                    value={channelIds}
+                    onChange={setChannelIds}
+                    options={channels.map((c) => ({ value: c.id, label: `${c.name} (${c.type})` }))}
+                    placeholder="直接选择通道"
+                  />
+                </div>
+
+                <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
                   <Switch checked={enabled} onChange={setEnabled} /> 任务启用
                 </div>
               </div>

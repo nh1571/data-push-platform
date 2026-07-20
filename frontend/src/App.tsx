@@ -26,6 +26,8 @@ import { JobRunListPage } from './pages/job-runs/List'
 import { LoginPage } from './pages/Login'
 import { PushJobFormPage } from './pages/push-jobs/Form'
 import { PushJobListPage } from './pages/push-jobs/List'
+import { PushTargetFormPage } from './pages/push-targets/Form'
+import { PushTargetListPage } from './pages/push-targets/List'
 import { SettingsPage } from './pages/Settings'
 
 /** 全局字体栈（中英文系统字体） */
@@ -91,6 +93,9 @@ export default function App() {
               <Route path="/address-book/group/new" element={<RecipientGroupFormPage />} />
               <Route path="/address-book/group/:id" element={<RecipientGroupFormPage />} />
               <Route path="/address-book/:id" element={<IdentityFormPage />} />
+              <Route path="/push-targets" element={<PushTargetListPage />} />
+              <Route path="/push-targets/new" element={<PushTargetFormPage />} />
+              <Route path="/push-targets/:id" element={<PushTargetFormPage />} />
               <Route path="/push-jobs" element={<PushJobListPage />} />
               {/* 新建任务统一走列表弹窗 → 编辑器，避免旧 Form 入口 */}
               <Route path="/push-jobs/new" element={<Navigate to="/push-jobs" replace />} />

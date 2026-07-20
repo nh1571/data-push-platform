@@ -163,6 +163,7 @@ export interface PushJob {
   /** 旧 DesignSpec 或 Studio ArtboardDoc 等 */
   render_spec: Record<string, unknown> | unknown[]
   channel_ids: string[]
+  push_target_ids: string[]
   schedule_cron: string | null
   schedule_enabled: boolean
   created_at: string
@@ -380,6 +381,7 @@ export interface TestPushRequest {
   params?: Record<string, unknown> | null
   design?: DesignSpec | Record<string, unknown>
   channel_ids: string[]
+  push_target_ids?: string[]
   max_rows?: number
   push_job_id?: string | null
 }
@@ -527,6 +529,38 @@ export interface ArtboardDoc {
   }
 }
 
+/** PushTarget 内嵌身份摘要 */
+export interface PushTargetIdentity {
+  id: string
+  name: string
+  kind: string
+  external_id: string
+}
+
+/** 推送目标 = 通道能力 + 目的身份的组合实体 */
+export interface PushTarget {
+  id: string
+  name: string
+  channel_id: string
+  kind: string
+  channel_type: string
+  identities: PushTargetIdentity[]
+  created_at: string
+  updated_at: string
+}
+
+/** 创建 PushTarget 请求 */
+export interface PushTargetCreate {
+  channel_id: string
+  identity_ids: string[]
+}
+
+/** 更新 PushTarget 请求 */
+export interface PushTargetUpdate {
+  channel_id?: string | null
+  identity_ids?: string[] | null
+}
+
 /** Studio 元数据：主题包、表样式、图表类型、组件清单 */
 export interface StudioMeta {
   theme_packs: { id: string; label: string; color: string }[]
@@ -589,6 +623,7 @@ export interface StudioSaveJobRequest {
   query_sql: string
   artboard: ArtboardDoc
   channel_ids: string[]
+  push_target_ids?: string[]
   skip_if_empty?: boolean
   enabled?: boolean
   schedule_cron?: string | null
@@ -601,6 +636,7 @@ export interface StudioTestPushRequest {
   data_source_id: string
   sql: string
   channel_ids: string[]
+  push_target_ids?: string[]
   push_job_id?: string | null
   max_rows?: number
 }

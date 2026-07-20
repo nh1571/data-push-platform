@@ -42,8 +42,8 @@ DEFAULT_DRAFT_RENDER_SPEC: dict[str, Any] = {
 }
 
 
-def _channel_ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
-    """渠道 ID 列表转字符串。"""
+def _ids_as_str(ids: list[UUID] | list[str]) -> list[str]:
+    """ID 列表转字符串。"""
     return [str(i) for i in ids]
 
 
@@ -54,6 +54,7 @@ def _to_out(
 ) -> PushJobOut:
     """将 PushJob 数据库行转为 PushJobOut（可选附带最近一次运行）。"""
     raw_ids = row.channel_ids or []
+    raw_pt_ids = row.push_target_ids or []
     return PushJobOut(
         id=row.id,
         name=row.name,
@@ -62,7 +63,8 @@ def _to_out(
         data_source_id=row.data_source_id,
         query_sql=row.query_sql,
         render_spec=row.render_spec,
-        channel_ids=_channel_ids_as_str(raw_ids),
+        channel_ids=_ids_as_str(raw_ids),
+        push_target_ids=_ids_as_str(raw_pt_ids),
         schedule_cron=row.schedule_cron,
         schedule_enabled=row.schedule_enabled,
         created_at=row.created_at,
@@ -164,7 +166,8 @@ def create_push_job(body: PushJobCreate, db: Session = Depends(get_db)) -> PushJ
         data_source_id=body.data_source_id,
         query_sql=body.query_sql,
         render_spec=body.render_spec,
-        channel_ids=_channel_ids_as_str(body.channel_ids),
+        channel_ids=_ids_as_str(body.channel_ids),
+        push_target_ids=_ids_as_str(body.push_target_ids),
         schedule_cron=body.schedule_cron,
         schedule_enabled=body.schedule_enabled,
     )
@@ -195,7 +198,9 @@ def update_push_job(
         row.data_source_id = data["data_source_id"]
     if "channel_ids" in data and data["channel_ids"] is not None:
         _ensure_channels(db, data["channel_ids"])
-        row.channel_ids = _channel_ids_as_str(data["channel_ids"])
+        row.channel_ids = _ids_as_str(data["channel_ids"])
+    if "push_target_ids" in data and data["push_target_ids"] is not None:
+        row.push_target_ids = _ids_as_str(data["push_target_ids"])
 
     for field in (
         "name",

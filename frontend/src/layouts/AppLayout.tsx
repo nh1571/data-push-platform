@@ -5,6 +5,7 @@
  * 顶栏提供退出登录（清 token 并跳转 /login）。
  */
 import {
+  AimOutlined,
   ApiOutlined,
   CloudServerOutlined,
   DashboardOutlined,
@@ -24,28 +25,50 @@ import { useAuth } from '../auth/AuthContext'
 
 const { Header, Sider, Content } = Layout
 
-/** 侧栏菜单定义：key 即路由 path */
+/** 侧栏菜单定义：key 即路由 path；支持 children 子菜单 */
 const MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: '工作台' },
   { key: '/editor', icon: <FormOutlined />, label: '内容工作台' },
   { key: '/push-jobs', icon: <SendOutlined />, label: '任务管理' },
   { key: '/data-sources', icon: <CloudServerOutlined />, label: '数据源' },
-  { key: '/channels', icon: <ApiOutlined />, label: '通道' },
-  { key: '/address-book', icon: <TeamOutlined />, label: '通讯录' },
+  {
+    key: '/delivery',
+    icon: <SendOutlined />,
+    label: '投递配置',
+    children: [
+      { key: '/channels', icon: <ApiOutlined />, label: '通道' },
+      { key: '/address-book', icon: <TeamOutlined />, label: '通讯录' },
+      { key: '/push-targets', icon: <AimOutlined />, label: '推送目标' },
+    ],
+  },
   { key: '/job-runs', icon: <HistoryOutlined />, label: '执行记录' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统' },
 ]
 
+/** 展平所有菜单 key（含子菜单），用于高亮匹配 */
+function allKeys(items: typeof MENU_ITEMS): string[] {
+  const keys: string[] = []
+  for (const item of items) {
+    keys.push(item.key)
+    if ('children' in item && item.children) {
+      keys.push(...item.children.map((c) => c.key))
+    }
+  }
+  return keys
+}
+
 /**
  * 根据 pathname 选择应高亮的菜单 key。
  * 子路径（如 /data-sources/new）匹配最长公共前缀（排除首页 `/`）。
+ * 同时检查子菜单项。
  */
 function selectedKey(pathname: string): string {
   if (pathname === '/') return '/'
-  const match = MENU_ITEMS.find(
-    (item) => item.key !== '/' && pathname.startsWith(item.key),
-  )
-  return match?.key ?? '/'
+  const keys = allKeys(MENU_ITEMS)
+  // 按长度降序，优先匹配更具体的路径（如 /push-targets/new 匹配 /push-targets）
+  const sorted = [...keys].filter((k) => k !== '/').sort((a, b) => b.length - a.length)
+  const match = sorted.find((k) => pathname.startsWith(k))
+  return match ?? '/'
 }
 
 /** 带侧栏的主布局组件，内容通过 Outlet 渲染子路由 */
@@ -60,6 +83,14 @@ export function AppLayout() {
 
   const selected = useMemo(() => selectedKey(location.pathname), [location.pathname])
   const isEditor = location.pathname.startsWith('/editor')
+  // 投递配置子菜单默认展开
+  const openKeys = useMemo(() => {
+    const keys: string[] = []
+    if (['/channels', '/address-book', '/push-targets'].some((p) => location.pathname.startsWith(p))) {
+      keys.push('/delivery')
+    }
+    return keys
+  }, [location.pathname])
 
   return (
     <Layout style={{ minHeight: '100vh', background: colorBgLayout }}>
@@ -101,6 +132,7 @@ export function AppLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[selected]}
+          defaultOpenKeys={openKeys}
           items={MENU_ITEMS}
           onClick={({ key }) => navigate(key)}
           style={{ borderInlineEnd: 'none' }}

@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import PushJob
@@ -105,18 +106,35 @@ def image_preview(
     )
 
 
+def _expand_push_targets(db: Session, target_ids: list[UUID]) -> list[str]:
+    """将 push_target_ids 展开为对应的 channel_id 字符串列表。"""
+    if not target_ids:
+        return []
+    from app.db.models.push_target import PushTarget
+    pts = db.scalars(
+        select(PushTarget).where(PushTarget.id.in_(target_ids))
+    ).all()
+    return [str(pt.channel_id) for pt in pts]
+
+
 @router.post("/test-push", response_model=TestPushResponse)
 def test_push(
     body: TestPushRequest,
     db: Session = Depends(get_db),
 ) -> TestPushResponse:
     """design 模式试推到指定渠道。"""
+    # 合并 push_target_ids → channel_ids
+    all_channel_ids = list(body.channel_ids)
+    for cid_str in _expand_push_targets(db, body.push_target_ids):
+        cid = UUID(cid_str)
+        if cid not in all_channel_ids:
+            all_channel_ids.append(cid)
     return editor_service.test_push(
         db,
         data_source_id=body.data_source_id,
         sql=body.sql,
         design=body.design,
-        channel_ids=body.channel_ids,
+        channel_ids=all_channel_ids,
         params=body.params,
         max_rows=body.max_rows,
         push_job_id=body.push_job_id,
@@ -255,6 +273,7 @@ def studio_save_job(
         sql=body.query_sql,
         artboard=body.artboard,
         channel_ids=body.channel_ids,
+        push_target_ids=body.push_target_ids,
         skip_if_empty=body.skip_if_empty,
         enabled=body.enabled,
         schedule_cron=body.schedule_cron,
@@ -269,12 +288,18 @@ def studio_test_push(
     db: Session = Depends(get_db),
 ) -> dict:
     """Studio 画板试推。"""
+    # 合并 push_target_ids → channel_ids
+    all_channel_ids = list(body.channel_ids)
+    for cid_str in _expand_push_targets(db, body.push_target_ids):
+        cid = UUID(cid_str)
+        if cid not in all_channel_ids:
+            all_channel_ids.append(cid)
     return studio_service.studio_test_push(
         db,
         artboard=body.artboard,
         data_source_id=body.data_source_id,
         sql=body.sql,
-        channel_ids=body.channel_ids,
+        channel_ids=all_channel_ids,
         params=body.params,
         max_rows=body.max_rows,
         push_job_id=body.push_job_id,

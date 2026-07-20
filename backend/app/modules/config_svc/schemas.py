@@ -98,6 +98,7 @@ class PushJobCreate(BaseModel):
     query_sql: str = Field(..., min_length=1)
     render_spec: dict[str, Any] | list[Any]
     channel_ids: list[UUID] = Field(default_factory=list)
+    push_target_ids: list[UUID] = Field(default_factory=list)
     schedule_cron: str | None = Field(default=None, max_length=128)
     schedule_enabled: bool = False
 
@@ -119,6 +120,7 @@ class PushJobUpdate(BaseModel):
     query_sql: str | None = Field(default=None, min_length=1)
     render_spec: dict[str, Any] | list[Any] | None = None
     channel_ids: list[UUID] | None = None
+    push_target_ids: list[UUID] | None = None
     schedule_cron: str | None = None
     schedule_enabled: bool | None = None
 
@@ -135,6 +137,7 @@ class PushJobOut(BaseModel):
     query_sql: str
     render_spec: dict[str, Any] | list[Any]
     channel_ids: list[str]
+    push_target_ids: list[str]
     schedule_cron: str | None
     schedule_enabled: bool
     created_at: datetime
