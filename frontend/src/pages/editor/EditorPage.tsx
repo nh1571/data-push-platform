@@ -797,9 +797,9 @@ export function EditorPage() {
     }))
   }, [])
 
-  // 取数后有组件时自动服务端编译
+  // 仅第 5 步自动服务端编译；组装推送用本地实时预览（避免 Playwright 过慢）
   useEffect(() => {
-    if (!dataSourceId || allCartCount === 0) return
+    if (step !== 'preview') return
     if (!dataSourceId) {
       setFinalError('请先完成数据源选择与取数')
       return
@@ -822,7 +822,7 @@ export function EditorPage() {
       })
       .finally(() => setFinalLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allCartCount, dataSourceId])
+  }, [step, allCartCount, dataSourceId])
 
   const activeParamDefs = useMemo((): SqlParamDef[] => {
     const ds = datasets.find((d) => d.id === activeDatasetId)
@@ -1577,16 +1577,24 @@ export function EditorPage() {
             此处配置的是<strong>模板</strong>（SQL、参数、组件绑定、画布版式、图外文案）。调度/试推时会重新解析参数、取数并渲染，不是固定一张截图。
           </Typography.Text>
         </div>
+        <div style={{ marginTop: 12, maxWidth: 900 }}>
+          <Steps
+            size="small"
+            current={stepIndex}
+            onChange={(i) => setStep(STEPS[i]!.key)}
+            items={STEPS.map((s) => ({ title: s.title, description: s.desc }))}
+          />
+        </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#eef0f3', padding: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#eef0f3' }}>
         {/* ============================================================
             步骤 1 · 数据（data）
             - 多数据集 SQL / 参数模板
             - 样例取数 → 填充 fieldsByDataset / rowsByDataset
             - 主数据集与任务级 dataSourceId、sql 同步
             ============================================================ */}
-        {/* data step */}
+        {step === 'data' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
             <div style={{ maxWidth: 1100, margin: '0 auto' }}>
               <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -1966,6 +1974,7 @@ export function EditorPage() {
               </div>
             </div>
           </div>
+        )}
 
         {/* ============================================================
             步骤 2 · 做组件（make）
@@ -1973,7 +1982,7 @@ export function EditorPage() {
             - 中：本地即时预览（LiveChart / KPI / 表 / 文案，无服务端）
             - 右/底：组件清单 cart，确认后写入 artboard.tree
             ============================================================ */}
-        {/* make step */}
+        {step === 'make' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             {/* 配置 */}
             <div
@@ -2282,12 +2291,13 @@ export function EditorPage() {
               )}
             </div>
           </div>
+        )}
 
         {/* ============================================================
             步骤 3 · 组装画布（compose）
             - 左侧组件库挑选上板；画布内可删除
             ============================================================ */}
-        {/* compose step */}
+        {step === 'compose' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div
               style={{
@@ -2993,13 +3003,14 @@ export function EditorPage() {
               )}
             </div>
           </div>
+        )}
 
         {/* ============================================================
             步骤 4 · 组装推送（message）
             - segments：文案 / 多画布交错，顺序即钉钉 parts
             - 右侧钉钉手机实时预览（本地 Live，无 Playwright）
             ============================================================ */}
-        {/* message step */}
+        {step === 'message' && (
           <div style={{ height: '100%', display: 'flex', minHeight: 0 }}>
             <div style={{ flex: '1 1 52%', overflow: 'auto', padding: 16, minWidth: 360 }}>
               <Space style={{ marginBottom: 12 }} wrap>
@@ -3229,6 +3240,7 @@ export function EditorPage() {
               ) : null}
             </div>
           </div>
+        )}
 
         {/* ============================================================
             步骤 5 · 预览推送（preview）
@@ -3236,7 +3248,7 @@ export function EditorPage() {
             - 试推 studioTestPush、保存 studioSaveJob
             - 样例预演；正式推送仍按当时数据动态渲染
             ============================================================ */}
-        {/* preview step */}
+        {step === 'preview' && (
           <div style={{ height: '100%', overflow: 'auto', padding: 16 }}>
             <div style={{ maxWidth: 900, margin: '0 auto' }}>
               <Space style={{ marginBottom: 12 }} wrap>
@@ -3551,6 +3563,7 @@ export function EditorPage() {
               </div>
             </div>
           </div>
+        )}
       </div>
     </div>
   )
