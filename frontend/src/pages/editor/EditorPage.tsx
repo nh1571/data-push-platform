@@ -81,6 +81,7 @@ import {
   updateCanvasInDoc,
 } from './artboardModel'
 import { CanvasLivePreview } from './CanvasLivePreview'
+import { ChannelRecipientInfo } from './ChannelRecipientInfo'
 import {
   ComposeCanvas,
   ensureComposeLayouts,
@@ -3557,6 +3558,7 @@ export function EditorPage() {
                   options={channels.map((c) => ({ value: c.id, label: c.name }))}
                   placeholder="选择通道"
                 />
+                <ChannelRecipientInfo channelIds={channelIds} />
                 <div style={{ marginTop: 12 }}>
                   <Switch checked={enabled} onChange={setEnabled} /> 任务启用
                 </div>
