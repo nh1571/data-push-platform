@@ -81,13 +81,14 @@ export interface ChannelCreate {
 // 通讯录（各通道上的用户/群标识）
 // ---------------------------------------------------------------------------
 
-/** 通讯录身份实体；kind 为 person 或 group，channel_type 如 dingtalk */
+/** 通讯录身份实体；kind 为 person / group / webhook */
 export interface Identity {
   id: string
   name: string
-  kind: 'person' | 'group'
+  kind: 'person' | 'group' | 'webhook'
   channel_type: string
   external_id: string
+  external_extra?: string | null
   external_name?: string | null
   created_at: string
   updated_at: string
@@ -96,18 +97,20 @@ export interface Identity {
 /** 创建身份请求体 */
 export interface IdentityCreate {
   name: string
-  kind: 'person' | 'group'
+  kind: 'person' | 'group' | 'webhook'
   channel_type: string
   external_id: string
+  external_extra?: string | null
   external_name?: string | null
 }
 
 /** 更新身份请求体（全可选） */
 export interface IdentityUpdate {
   name?: string
-  kind?: 'person' | 'group'
+  kind?: 'person' | 'group' | 'webhook'
   channel_type?: string
   external_id?: string
+  external_extra?: string | null
   external_name?: string | null
 }
 

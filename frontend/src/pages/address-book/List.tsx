@@ -16,7 +16,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { TableEmpty } from '../../components/TableEmpty'
 import { formatDateTime } from '../../utils/status'
 
-const KIND_LABELS: Record<string, string> = { person: '个人', group: '群聊' }
+const KIND_LABELS: Record<string, string> = { person: '个人', group: '群聊', webhook: 'Webhook' }
 
 /** 个人与群聊列表 */
 function IdentityTab() {
@@ -91,7 +91,7 @@ function IdentityTab() {
     <div>
       <Space style={{ marginBottom: 16 }}>
         <Select allowClear placeholder="类型筛选" style={{ width: 100 }} value={filterKind} onChange={setFilterKind}
-          options={[{ value: 'person', label: '个人' }, { value: 'group', label: '群聊' }]} />
+          options={[{ value: 'person', label: '个人' }, { value: 'group', label: '群聊' }, { value: 'webhook', label: 'Webhook' }]} />
         <Select allowClear placeholder="通道筛选" style={{ width: 100 }} value={filterChannel} onChange={setFilterChannel}
           options={[{ value: 'dingtalk', label: '钉钉' }]} />
       </Space>

@@ -16,9 +16,10 @@ from app.db.base import Base
 class Identity(Base):
     """通讯录身份——通道上的一个人或一个群。
 
-    - ``kind``: ``person`` | ``group``
+    - ``kind``: ``person`` | ``group`` | ``webhook``
     - ``channel_type``: 通道命名空间（``dingtalk``、``wecom`` 等）
-    - ``external_id``: 该通道上的唯一标识（钉钉 userId、群 open_conversation_id 等）
+    - ``external_id``: 该通道上的唯一标识（钉钉 userId、群 open_conversation_id、webhook URL 等）
+    - ``external_extra``: 补充凭证（仅 webhook 的 access_token，其他类型为 null）
     """
 
     __tablename__ = "identities"
@@ -32,7 +33,8 @@ class Identity(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     channel_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(2048), nullable=False)
+    external_extra: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
