@@ -56,10 +56,6 @@ export function EditorPageV2() {
   const { jobId } = useParams<{ jobId?: string }>()
   const s = useEditorState(jobId)
 
-  if (s.loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Spin tip="加载中…" /></div>
-  }
-
   const previewRows = useMemo(
     () => s.previewRows.map((row, i) => {
       const r: Record<string, unknown> = { __key: i }
@@ -68,6 +64,10 @@ export function EditorPageV2() {
     }),
     [s.previewRows, s.previewColumns],
   )
+
+  if (s.loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Spin tip="加载中…" /></div>
+  }
 
   return (
     <div style={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', margin: -12 }}>
