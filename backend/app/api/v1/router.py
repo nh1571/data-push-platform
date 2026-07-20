@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import api_tokens, auth, channels, data_sources, editor, identities, job_runs, push_jobs
+from app.api.v1 import api_tokens, auth, channels, data_sources, editor, identities, job_runs, push_jobs, recipient_groups
 from app.deps import get_current_principal
 
 api_router = APIRouter(prefix="/api/v1")
@@ -61,5 +61,11 @@ api_router.include_router(
     identities.router,
     prefix="/identities",
     tags=["identities"],
+    dependencies=_protected,
+)
+api_router.include_router(
+    recipient_groups.router,
+    prefix="/recipient-groups",
+    tags=["recipient-groups"],
     dependencies=_protected,
 )

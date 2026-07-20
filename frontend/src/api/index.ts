@@ -30,6 +30,9 @@ import type {
   PushJobCreate,
   PushJobDraftCreate,
   PushJobUpdate,
+  RecipientGroup,
+  RecipientGroupCreate,
+  RecipientGroupUpdate,
   QueryPreviewRequest,
   QueryPreviewResponse,
   SaveJobRequest,
@@ -168,6 +171,44 @@ export async function updateIdentity(id: string, body: IdentityUpdate): Promise<
 /** 删除身份 */
 export async function deleteIdentity(id: string): Promise<void> {
   await api.delete(`/v1/identities/${id}`)
+}
+
+// ---------------------------------------------------------------------------
+// 收件人组
+// ---------------------------------------------------------------------------
+
+/** 列出全部收件人组 */
+export async function listRecipientGroups(params?: {
+  channel_type?: string
+}): Promise<RecipientGroup[]> {
+  const { data } = await api.get<RecipientGroup[]>('/v1/recipient-groups', { params })
+  return data
+}
+
+/** 按 id 获取收件人组 */
+export async function getRecipientGroup(id: string): Promise<RecipientGroup> {
+  const { data } = await api.get<RecipientGroup>(`/v1/recipient-groups/${id}`)
+  return data
+}
+
+/** 新建收件人组 */
+export async function createRecipientGroup(body: RecipientGroupCreate): Promise<RecipientGroup> {
+  const { data } = await api.post<RecipientGroup>('/v1/recipient-groups', body)
+  return data
+}
+
+/** 更新收件人组 */
+export async function updateRecipientGroup(
+  id: string,
+  body: RecipientGroupUpdate,
+): Promise<RecipientGroup> {
+  const { data } = await api.put<RecipientGroup>(`/v1/recipient-groups/${id}`, body)
+  return data
+}
+
+/** 删除收件人组 */
+export async function deleteRecipientGroup(id: string): Promise<void> {
+  await api.delete(`/v1/recipient-groups/${id}`)
 }
 
 // ---------------------------------------------------------------------------

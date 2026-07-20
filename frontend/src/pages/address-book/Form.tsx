@@ -102,8 +102,8 @@ export function IdentityFormPage() {
             >
               <Select
                 options={[
-                  { value: 'person', label: '用户 (person)' },
-                  { value: 'group', label: '群 (group)' },
+                  { value: 'person', label: '个人' },
+                  { value: 'group', label: '群聊' },
                 ]}
               />
             </Form.Item>
@@ -120,7 +120,7 @@ export function IdentityFormPage() {
               name="external_id"
               label="外部 ID"
               rules={[{ required: true, message: '请输入外部 ID' }]}
-              extra="钉钉用户 ID（userId）或群 open_conversation_id"
+              extra="个人填钉钉 userId；群聊填 open_conversation_id（如 cidXXX）"
             >
               <Input placeholder="如 user123、cidxxx..." maxLength={255} />
             </Form.Item>

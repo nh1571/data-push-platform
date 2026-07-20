@@ -73,3 +73,53 @@ class ChannelRecipient(Base):
 
     def __repr__(self) -> str:
         return f"<ChannelRecipient ch={self.channel_id} → {self.identity_id}>"
+
+
+class RecipientGroup(Base):
+    """收件人组——将多个个人身份打包为一个快捷组。
+
+    选通道时一键选取整个组，保存时展开为独立的 channel_recipients 行。
+    组是通道绑定的（不能跨 dingtalk/wecom 混合成员）。
+    """
+
+    __tablename__ = "recipient_groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    channel_type: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<RecipientGroup {self.id} {self.name}>"
+
+
+class RecipientGroupMember(Base):
+    """收件人组成员——组与个人身份的关联。"""
+
+    __tablename__ = "recipient_group_members"
+    __table_args__ = (
+        UniqueConstraint("group_id", "identity_id", name="uq_group_member"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("recipient_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    identity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("identities.id", ondelete="CASCADE"), nullable=False
+    )
+
+    identity: Mapped[Identity] = relationship("Identity", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<RecipientGroupMember g={self.group_id} → {self.identity_id}>"

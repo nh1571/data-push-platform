@@ -111,6 +111,30 @@ export interface IdentityUpdate {
   external_name?: string | null
 }
 
+/** 收件人组实体 */
+export interface RecipientGroup {
+  id: string
+  name: string
+  channel_type: string
+  member_ids: string[]
+  member_count: number
+  created_at: string
+  updated_at: string
+}
+
+/** 创建收件人组请求体 */
+export interface RecipientGroupCreate {
+  name: string
+  channel_type: string
+  member_ids: string[]
+}
+
+/** 更新收件人组请求体 */
+export interface RecipientGroupUpdate {
+  name?: string
+  member_ids?: string[]
+}
+
 /** 更新通道请求体（全可选） */
 export interface ChannelUpdate {
   name?: string
