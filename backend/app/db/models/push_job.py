@@ -50,6 +50,7 @@ class PushJob(Base):
     query_sql: Mapped[str] = mapped_column(Text, nullable=False)
     render_spec: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     channel_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    push_target_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(128), nullable=True)
     schedule_enabled: Mapped[bool] = mapped_column(
         Boolean,

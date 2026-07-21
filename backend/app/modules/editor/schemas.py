@@ -89,7 +89,8 @@ class TestPushRequest(BaseModel):
     sql: str = Field(..., min_length=1)
     params: dict[str, Any] | None = None
     design: DesignSpec | dict[str, Any] = Field(default_factory=dict)
-    channel_ids: list[UUID] = Field(..., min_length=1)
+    channel_ids: list[UUID] = Field(default_factory=list)
+    push_target_ids: list[UUID] = Field(default_factory=list)
     max_rows: int = Field(default=200, ge=1, le=10_000)
     # 若设置：创建 JobRun + Delivery 审计（trigger_type=editor_test）
     push_job_id: UUID | None = None
@@ -121,6 +122,7 @@ class SaveJobRequest(BaseModel):
     query_sql: str = Field(..., min_length=1)
     design: DesignSpec | dict[str, Any] = Field(default_factory=dict)
     channel_ids: list[UUID] = Field(default_factory=list)
+    push_target_ids: list[UUID] = Field(default_factory=list)
     skip_if_empty: bool = False
     schedule_cron: str | None = Field(default=None, max_length=128)
     schedule_enabled: bool = False
@@ -172,6 +174,7 @@ class StudioSaveJobRequest(BaseModel):
     query_sql: str = Field(..., min_length=1)
     artboard: dict[str, Any] = Field(default_factory=dict)
     channel_ids: list[UUID] = Field(default_factory=list)
+    push_target_ids: list[UUID] = Field(default_factory=list)
     skip_if_empty: bool = False
     schedule_cron: str | None = Field(default=None, max_length=128)
     schedule_enabled: bool = False
@@ -183,7 +186,8 @@ class StudioTestPushRequest(BaseModel):
     artboard: dict[str, Any] = Field(default_factory=dict)
     data_source_id: UUID
     sql: str = Field(..., min_length=1)
-    channel_ids: list[UUID] = Field(..., min_length=1)
+    channel_ids: list[UUID] = Field(default_factory=list)
+    push_target_ids: list[UUID] = Field(default_factory=list)
     params: dict[str, Any] | None = None
     max_rows: int = Field(default=200, ge=1, le=10_000)
     push_job_id: UUID | None = None

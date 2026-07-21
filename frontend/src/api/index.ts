@@ -138,6 +138,40 @@ export async function testChannel(id: string): Promise<TestConnectionResult> {
 }
 
 // ---------------------------------------------------------------------------
+// 推送目标（PushTarget = 通道能力 + 目的身份的组合实体）
+// ---------------------------------------------------------------------------
+
+/** 列出全部推送目标（含内嵌身份详情） */
+export async function listPushTargets(): Promise<import('./types').PushTarget[]> {
+  const { data } = await api.get<import('./types').PushTarget[]>('/v1/push-targets')
+  return data
+}
+
+export async function getPushTarget(id: string): Promise<import('./types').PushTarget> {
+  const { data } = await api.get<import('./types').PushTarget>(`/v1/push-targets/${id}`)
+  return data
+}
+
+export async function createPushTarget(
+  body: import('./types').PushTargetCreate,
+): Promise<import('./types').PushTarget> {
+  const { data } = await api.post<import('./types').PushTarget>('/v1/push-targets', body)
+  return data
+}
+
+export async function updatePushTarget(
+  id: string,
+  body: import('./types').PushTargetUpdate,
+): Promise<import('./types').PushTarget> {
+  const { data } = await api.put<import('./types').PushTarget>(`/v1/push-targets/${id}`, body)
+  return data
+}
+
+export async function deletePushTarget(id: string): Promise<void> {
+  await api.delete(`/v1/push-targets/${id}`)
+}
+
+// ---------------------------------------------------------------------------
 // 通讯录（各通道上的用户/群标识）
 // ---------------------------------------------------------------------------
 

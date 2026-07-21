@@ -20,6 +20,7 @@ from app.db.models.job_run import JobRun
 from app.db.models.job_run_log import JobRunLog
 from app.db.models.operator import Operator
 from app.db.models.push_job import PushJob
+from app.db.models.push_target import PushTarget
 from app.db.models.studio_template import StudioTemplate
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "LogLevel",
     "Operator",
     "PushJob",
+    "PushTarget",
     "RecipientGroup",
     "RecipientGroupMember",
     "StudioTemplate",

@@ -25,6 +25,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.modules.address_book.resolver import resolve_recipient_ids
 from app.modules.editor import service as editor_service
 from app.modules.editor.schemas import ChannelSendResult, SaveJobRequest
 from app.modules.studio.compile import compile_artboard
@@ -291,6 +292,7 @@ def studio_test_push(
         try:
             ch_plugin = plugin_registry.get("channel", channel.type)
             ch_config = decrypt_dict(channel.config_enc)
+            ch_config = resolve_recipient_ids(db, channel.id, channel.type, ch_config)
             dr = ch_plugin.send(ch_config, message)
             if dr.success:
                 successes += 1
@@ -351,6 +353,7 @@ def save_job_with_artboard(
     sql: str,
     artboard: dict[str, Any],
     channel_ids: list[UUID],
+    push_target_ids: list[UUID] | None = None,
     skip_if_empty: bool = False,
     enabled: bool = True,
     schedule_cron: str | None = None,
@@ -378,6 +381,7 @@ def save_job_with_artboard(
         query_sql=sql,
         design=design_compat,
         channel_ids=channel_ids,
+        push_target_ids=push_target_ids or [],
         skip_if_empty=skip_if_empty,
         enabled=enabled,
         schedule_cron=schedule_cron,

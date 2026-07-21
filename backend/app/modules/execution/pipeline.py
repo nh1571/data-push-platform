@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.common.crypto import decrypt_dict
@@ -386,10 +387,21 @@ def _run_pipeline(db: Session, job_run_id: UUID) -> None:
         )
         db.commit()
 
-        # --- 逐渠道投递 ---
-        channel_ids = [_as_uuid(cid) for cid in (job.channel_ids or [])]
+        # --- 展开 push_target_ids → 合并 channel_ids ---
+        raw_channel_ids = list(job.channel_ids or [])
+        target_ids = [_as_uuid(tid) for tid in (job.push_target_ids or [])]
+        if target_ids:
+            from app.db.models.push_target import PushTarget
+            pts = db.scalars(
+                select(PushTarget).where(PushTarget.id.in_(target_ids))
+            ).all()
+            for pt in pts:
+                cid_str = str(pt.channel_id)
+                if cid_str not in raw_channel_ids:
+                    raw_channel_ids.append(cid_str)
+        channel_ids = [_as_uuid(cid) for cid in raw_channel_ids]
         if not channel_ids:
-            raise RuntimeError("push job has no channel_ids")
+            raise RuntimeError("push job has no channel_ids or push_target_ids")
 
         successes = 0
         failures = 0
