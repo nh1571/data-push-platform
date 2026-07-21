@@ -4,7 +4,7 @@
  * Tab 1: 个人与群聊 — 各通道上的用户/群身份
  * Tab 2: 收件人组 — 将多个用户打包为一个快捷组，供通道配置时一键选取
  */
-import { DeleteOutlined, EditOutlined, PlusOutlined, TeamOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, message, Popconfirm, Select, Space, Table, Tabs } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'

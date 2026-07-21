@@ -16,11 +16,6 @@ import { PageHeader } from '../../components/PageHeader'
 
 const CHANNEL_OPTIONS = [{ value: 'dingtalk', label: '钉钉' }]
 
-const EXTERNAL_ID_LABELS: Record<string, string> = {
-  person: '用户 ID',
-  group: '群会话 ID',
-  webhook: 'Webhook URL',
-}
 const EXTERNAL_ID_PLACEHOLDERS: Record<string, string> = {
   person: '钉钉 userId，如 zhangsan001',
   group: 'open_conversation_id，如 cidXXX',

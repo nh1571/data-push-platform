@@ -6,13 +6,18 @@
 - 注册数据源 / 渲染器 / 通道等内置插件到进程级 ``plugin_registry``
 
 生产环境依赖由环境变量与 ``.env`` 配置，不依赖本地演示引导逻辑。
+
+生产部署时自动托管前端静态文件（``../frontend/dist/``），
+实现单进程服务 API + SPA，无需额外 nginx。
 """
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.config import settings
@@ -93,3 +98,14 @@ def health(detail: bool = Query(False, description="Include dependency profile")
 
         body["deps"] = health_deps()
     return body
+
+
+# ---------------------------------------------------------------------------
+# 生产部署：uvicorn 单进程同时服务 API + 前端 SPA
+# 将 ../frontend/dist/ 挂载到 /，html=True 使前端路由 (pushState) 回退到 index.html。
+# 仅在非本地开发模式（APP_ENV != local）且构建产物存在时启用，
+# 避免与 `npm run dev` 的 Vite 开发服务器冲突。
+# ---------------------------------------------------------------------------
+_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if not settings.is_local_profile and _DIST.is_dir():
+    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="frontend")

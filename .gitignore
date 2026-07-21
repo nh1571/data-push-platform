@@ -6,14 +6,16 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# frontend dist is committed for server deployment
+# dist/
 downloads/
 eggs/
 .eggs/
 lib/
 lib64/
 parts/
-sdist/
+s# frontend dist is committed for server deployment
+# dist/
 var/
 wheels/
 *.egg-info/
@@ -30,7 +32,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-dist/
+# frontend dist is committed for server deployment
+# dist/
 .next/
 .nuxt/
 .cache/

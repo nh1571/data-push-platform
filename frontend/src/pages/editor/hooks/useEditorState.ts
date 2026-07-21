@@ -24,6 +24,8 @@ import type {
   DataSource,
   SqlParamDef,
   StudioCompileResponse,
+  StudioComposeSegment,
+  StudioNode,
 } from '../../../api/types'
 import {
   canvasChildren,
@@ -32,22 +34,16 @@ import {
   newCanvas,
   normalizeArtboardDoc,
   setCanvasTree,
-  updateCanvasInDoc,
 } from '../artboardModel'
 import {
-  appendChild,
   defaultAlertArtboard,
   defaultDailyArtboard,
   emptyArtboard,
   extractArtboardFromJob,
-  firstRowMap,
-  newComponent,
   nid,
   removeNode,
-  substituteRow,
   syncMainDataset,
   upsertDataset,
-  type StudioNode,
 } from '../studioUtils'
 
 type StepKey = 'data' | 'make' | 'compose' | 'message' | 'preview'
@@ -414,7 +410,7 @@ export function useEditorState(jobId?: string) {
       const canvas = { ...updated[idx] }
       const children = canvas.tree?.children || []
       const autoY = children.reduce((max, ch) => Math.max(max, (ch.props?.compose_y as number) || 0), 0) + 20
-      const cloned = cloneNodeForCanvas(src, { id: nid(), compose_y: autoY })
+      const cloned = cloneNodeForCanvas(src, { nextY: autoY })
       canvas.tree = { ...canvas.tree, children: [...children, cloned] }
       updated[idx] = canvas
       return { ...n, canvases: updated }
@@ -471,7 +467,7 @@ export function useEditorState(jobId?: string) {
   }
 
   // ---- Segments ----
-  const setSegments = (segments: ArtboardDoc['compose']['segments']) => {
+  const setSegments = (segments: StudioComposeSegment[]) => {
     setArtboard((prev) => {
       const n = normalizeArtboardDoc(prev)
       return { ...n, compose: { ...n.compose, text_format: 'html', segments } }
@@ -482,7 +478,7 @@ export function useEditorState(jobId?: string) {
     setArtboard((prev) => {
       const n = normalizeArtboardDoc(prev)
       const segs = [...(n.compose?.segments || [])]
-      if (segs[idx]) segs[idx] = { ...segs[idx], html }
+      if (segs[idx]) segs[idx] = { ...segs[idx], html } as StudioComposeSegment
       return { ...n, compose: { ...n.compose, text_format: 'html', segments: segs } }
     })
   }
@@ -501,7 +497,7 @@ export function useEditorState(jobId?: string) {
     setArtboard((prev) => {
       const n = normalizeArtboardDoc(prev)
       const segs = [...(n.compose?.segments || [])]
-      segs.splice(at, 0, { kind: 'text' as const, html: '' })
+      segs.splice(at, 0, { id: nid(), type: 'text' as const, html: '' })
       return { ...n, compose: { ...n.compose, text_format: 'html', segments: segs } }
     })
   }
@@ -510,7 +506,7 @@ export function useEditorState(jobId?: string) {
     setArtboard((prev) => {
       const n = normalizeArtboardDoc(prev)
       const segs = (n.compose?.segments || []).filter((_, i) => i !== idx)
-      if (segs.length === 0 || !segs.some((s) => s.kind !== 'text')) {
+      if (segs.length === 0 || !segs.some((s) => s.type !== 'text')) {
         // keep at least one non-text segment
         return n
       }
@@ -544,10 +540,10 @@ export function useEditorState(jobId?: string) {
         name,
         data_source_id: dataSourceId!,
         artboard: doc,
-        sql,
+        query_sql: sql,
         channel_ids: channelIds,
       })
-      setCurrentJobId(res.job_id)
+      setCurrentJobId(res.id)
       message.success('保存成功')
     } catch (err) { message.error(getErrorMessage(err)) }
     finally { setSaving(false) }
