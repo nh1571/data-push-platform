@@ -1,8 +1,8 @@
 # 数据推送中台 / data-push-platform
 
-面向数据中心与业务运营的**数据推送中台**：配置数据源 → 写 SQL / 渲染模板 → 选择钉钉等渠道 → 手动 / 定时 / HTTP（数仓调度）触发推送，并完整记录运行与投递结果。
+面向数据中心与业务运营的**数据推送中台**：配置数据源 → 写 SQL / 渲染模板 → 从通讯录选择推送目标（通道能力+目的实体的组合）→ 手动 / 定时 / HTTP（数仓调度）触发推送，并完整记录运行与投递结果。
 
-Data push middleware for configuring sources, SQL/templates, delivery channels (e.g. DingTalk), and triggers (manual / cron / HTTP for DS orchestrators), with full job-run observability.
+Data push middleware: data sources → SQL/templates → PushTargets (channel capability + address book destinations) → triggers (manual / cron / HTTP), with full job-run observability.
 
 **GitHub（Public）:** https://github.com/nh1571/data-push-platform  
 欢迎 Star / Fork / PR · [贡献指南](CONTRIBUTING.md) · [GitHub 代管说明](docs/GITHUB_OPS.md)
@@ -30,9 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scri
 
 | 能力 | 说明 |
 |------|------|
-| 数据源 | MySQL / Doris（MySQL 协议），配置加密存储 |
-| 渲染 | 文本 Markdown、表格图片、卡片、文件导出（xlsx/csv） |
-| 渠道 | 钉钉机器人 Webhook（text / markdown / actionCard） |
+| 数据源 | MySQL / Doris / SQL Server / SQLite，配置加密存储 |
+| 内容工作台 | 五步向导编排推送模板：取数 → 做组件 → 组画布 → 排文案 → 预览推送 |
+| 通讯录 | 统一管理各通道上的个人、群、Webhook 身份，支持收件人组 |
+| 推送目标 | **通道能力 + 通讯录目的地 = PushTarget**，独立管理，推送任务直接选用 |
+| 渠道 | 钉钉工作通知 / 单发 OTO 机器人 / 群发机器人 / Webhook 机器人 |
 | 触发 | 控制台手动、Cron 调度、机器 API Token HTTP 触发（对接 DS） |
 | 执行 | 默认同进程同步执行；可选 Celery + Redis 异步 Worker |
 | 运维 | JobRun 状态、分步日志、按渠道 Delivery、支持 Rerun |
@@ -64,7 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scri
                                          query → render → send ◄──────┘
 ```
 
-- **配置层**：DataSource / Channel / PushJob / ApiToken，密钥字段 Fernet 加密（`TOKEN_FERNET_KEY`）。
+- **配置层**：DataSource / Channel / Identity / RecipientGroup / PushTarget / PushJob / ApiToken，密钥字段 Fernet 加密（`TOKEN_FERNET_KEY`）。
+- **投递模型**：Channel（推送能力，如钉钉工作通知）+ Identity（目的实体，如张三的 userid）→ PushTarget（可用推送目标）。推送任务绑定 PushTarget，发送时自动解析身份 ID。
 - **执行管线**：创建 JobRun → 快照任务定义 → 数据源执行 SQL（`{{biz_date}}` 等占位）→ Renderer → 各 Channel 投递 → 写 Delivery / Log。
 - **`EXECUTION_SYNC=true`（默认）**：API / Scheduler 进程内直接跑管线，适合本地与小流量。
 - **`EXECUTION_SYNC=false`**：投递 Celery 任务，需启动 `worker` 服务。
@@ -86,6 +89,11 @@ curl -fsSL https://raw.githubusercontent.com/nh1571/data-push-platform/main/scri
 | API | http://localhost:8000/docs |
 | 账号 | `admin` / `admin123` |
 | 依赖详情 | http://localhost:8000/health?detail=true |
+
+**管理台侧边栏导航：**
+- 工作台 / 内容工作台 / 任务管理 / 数据源
+- **投递配置**（子菜单：通道 → 通讯录 → 推送目标）
+- 执行记录 / 系统
 
 首次启动自动：SQLite 元库、Fernet 密钥文件、演示业务库 `data/demo_biz.db`、演示数据源。
 
@@ -345,13 +353,17 @@ Webhook 配置字段：`webhook_url` **或** `access_token`（组装官方 robot
 | GET | `/health` | 健康检查 |
 | POST | `/api/v1/auth/login` | 管理员登录 |
 | CRUD | `/api/v1/data-sources` | 数据源 |
-| CRUD | `/api/v1/channels` | 渠道 |
+| CRUD | `/api/v1/channels` | 渠道（推送能力） |
+| CRUD | `/api/v1/identities` | 通讯录身份（目的实体） |
+| CRUD | `/api/v1/recipient-groups` | 收件人组 |
+| CRUD | `/api/v1/push-targets` | 推送目标（能力+目的地组合） |
 | CRUD | `/api/v1/push-jobs` | 推送任务 |
 | POST | `/api/v1/push-jobs/{id}/run` | 触发运行 |
 | GET | `/api/v1/job-runs` | 运行列表 |
 | GET | `/api/v1/job-runs/{id}` | 运行详情（含 logs/deliveries） |
 | POST | `/api/v1/job-runs/{id}/rerun` | 重跑 |
 | CRUD | `/api/v1/api-tokens` | 机器 Token |
+| GET/POST | `/api/v1/editor/studio/*` | 内容工作台（编译/试推/保存） |
 
 交互文档：API 启动后打开 [http://localhost:8000/docs](http://localhost:8000/docs)。
 
@@ -361,20 +373,27 @@ Webhook 配置字段：`webhook_url` **或** `access_token`（组装官方 robot
 
 ```
 data-push-platform/
-├── docker-compose.yml      # mysql / redis / api / scheduler [/ worker]
+├── docker-compose.yml
 ├── .env.example
 ├── backend/
 │   ├── Dockerfile
-│   ├── docker-entrypoint.sh
-│   ├── alembic/            # 迁移
+│   ├── alembic/            # 数据库迁移
 │   ├── app/
-│   │   ├── api/v1/         # HTTP API
-│   │   ├── modules/        # identity / execution / scheduler / config
-│   │   ├── plugins/        # datasource / renderer / channel
+│   │   ├── api/v1/         # HTTP API（channels / identities / push-targets / push-jobs ...）
+│   │   ├── modules/        # editor / studio / execution / address_book / push_target ...
+│   │   ├── plugins/        # datasource / channel（dingtalk webhook / oto / group / work_notice）
 │   │   ├── worker/         # Celery
 │   │   └── main.py
 │   └── tests/
-└── frontend/               # React + Ant Design 管理台
+├── frontend/               # React + Ant Design 管理台
+│   └── src/pages/
+│       ├── editor/         # 内容工作台（五步向导编排推送模板）
+│       ├── channels/       # 通道管理
+│       ├── address-book/   # 通讯录（身份 + 收件人组）
+│       ├── push-targets/   # 推送目标管理
+│       ├── push-jobs/      # 推送任务
+│       └── ...
+└── docs/                   # 产品笔记 / 开发文档
 ```
 
 ---
